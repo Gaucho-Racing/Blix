@@ -1,9 +1,13 @@
+import base64
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from litellm import acompletion
+from openai import AsyncOpenAI, OpenAIError
 
-from blix_agent_runtime.errors import ModelGatewayError
+from blix_agent_runtime.errors import ConfigurationError, ModelGatewayError
+
+BIFROST_BASE_URL = "https://bifrost.gauchoracing.com/v1"
+MODEL_NAME = "openai/gpt-4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,19 +34,32 @@ class ModelGateway(Protocol):
     ) -> ModelTurn: ...
 
 
-class LiteLLMGateway:
+class BifrostGateway:
     def __init__(
         self,
         *,
-        model: str,
-        api_base: str | None = None,
+        username: str,
+        password: str,
         timeout_seconds: float = 120,
-        retries: int = 2,
     ) -> None:
-        self.model = model
-        self.api_base = api_base
-        self.timeout_seconds = timeout_seconds
-        self.retries = retries
+        if not username:
+            raise ConfigurationError("Bifrost username cannot be empty")
+        if ":" in username:
+            raise ConfigurationError("Bifrost username cannot contain a colon")
+        if not password:
+            raise ConfigurationError("Bifrost password cannot be empty")
+
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+        self._client = AsyncOpenAI(
+            base_url=BIFROST_BASE_URL,
+            api_key="unused",
+            default_headers={"Authorization": f"Basic {credentials}"},
+            timeout=timeout_seconds,
+            max_retries=0,
+        )
+
+    async def close(self) -> None:
+        await self._client.close()
 
     async def complete(
         self,
@@ -51,25 +68,21 @@ class LiteLLMGateway:
         tools: list[dict[str, Any]],
     ) -> ModelTurn:
         parameters: dict[str, Any] = {
-            "model": self.model,
+            "model": MODEL_NAME,
             "messages": messages,
-            "timeout": self.timeout_seconds,
-            "num_retries": self.retries,
         }
         if tools:
             parameters["tools"] = tools
             parameters["tool_choice"] = "auto"
-        if self.api_base:
-            parameters["api_base"] = self.api_base
 
         try:
-            response = await acompletion(**parameters)
+            response = await self._client.chat.completions.create(**parameters)
             if not response.choices:
                 raise ModelGatewayError("Model returned no choices")
             response_message = response.choices[0].message
         except ModelGatewayError:
             raise
-        except Exception as error:
+        except OpenAIError as error:
             raise ModelGatewayError(f"Model request failed: {error}") from error
 
         message = response_message.model_dump(exclude_none=True)

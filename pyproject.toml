@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Provider-neutral agent runtime for Blix"
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    "litellm>=1.83.3,<2.0.0",
+    "openai>=2.54.0,<3.0.0",
     "pydantic>=2.0.0,<3.0.0",
 ]
 
@@ -24,4 +24,3 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP"]
-
