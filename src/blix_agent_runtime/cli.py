@@ -24,14 +24,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def run_cli(args: argparse.Namespace) -> None:
-    username = os.getenv("BLIX_BIFROST_USERNAME")
-    password = os.getenv("BLIX_BIFROST_PASSWORD")
-    if not username or not password:
-        raise ConfigurationError("Set BLIX_BIFROST_USERNAME and BLIX_BIFROST_PASSWORD")
+    username = os.getenv("BIFROST_USERNAME")
+    password = os.getenv("BIFROST_PASSWORD")
+    virtual_key = os.getenv("BIFROST_VIRTUAL_KEY")
+    if not username or not password or not virtual_key:
+        raise ConfigurationError("Set BIFROST_USERNAME, BIFROST_PASSWORD, and BIFROST_VIRTUAL_KEY")
 
     gateway = BifrostGateway(
         username=username,
         password=password,
+        virtual_key=virtual_key,
         timeout_seconds=args.timeout_seconds,
     )
     runtime = AgentRuntime(

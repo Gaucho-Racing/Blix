@@ -40,6 +40,7 @@ class BifrostGateway:
         *,
         username: str,
         password: str,
+        virtual_key: str,
         timeout_seconds: float = 120,
     ) -> None:
         if not username:
@@ -48,12 +49,17 @@ class BifrostGateway:
             raise ConfigurationError("Bifrost username cannot contain a colon")
         if not password:
             raise ConfigurationError("Bifrost password cannot be empty")
+        if not virtual_key:
+            raise ConfigurationError("Bifrost virtual key cannot be empty")
 
         credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
         self._client = AsyncOpenAI(
             base_url=BIFROST_BASE_URL,
             api_key="unused",
-            default_headers={"Authorization": f"Basic {credentials}"},
+            default_headers={
+                "Authorization": f"Basic {credentials}",
+                "x-bf-vk": virtual_key,
+            },
             timeout=timeout_seconds,
             max_retries=0,
         )
