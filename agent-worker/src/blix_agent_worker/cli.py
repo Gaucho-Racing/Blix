@@ -29,12 +29,14 @@ MAX_CONVERSATION_MESSAGES = 40
 
 THEME = Theme(
     {
-        "blix": "bold bright_cyan",
-        "command": "bold cyan",
+        "accent": "#8412fc",
+        "blix": "bold #e105a3",
+        "command": "bold #8412fc",
         "error": "bold bright_red",
-        "muted": "bright_black",
+        "foreground": "#f3f1f6",
+        "muted": "#9893a3",
         "success": "bold bright_green",
-        "user": "bold bright_green",
+        "user": "bold #f3f1f6",
         "warning": "bold yellow",
     }
 )
@@ -42,19 +44,21 @@ CONSOLE = Console(theme=THEME, highlight=False)
 ERROR_CONSOLE = Console(theme=THEME, highlight=False, stderr=True)
 
 
-def print_banner(agent_id: str) -> None:
+def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
     details = Table.grid(padding=(0, 2))
     details.add_column(style="muted", no_wrap=True)
-    details.add_column()
+    details.add_column(style="foreground")
     details.add_row("AGENT", agent_id)
     details.add_row("MODEL", MODEL)
+    details.add_row("RUN ID", run_id)
+    details.add_row("CONVERSATION ID", conversation_id)
     details.add_row("COMMANDS", "[command]/help[/]  [command]/tools[/]  [command]/reset[/]  [command]/quit[/]")
     CONSOLE.print(
         Panel(
             details,
             title="[blix] BLIX [/blix]",
             subtitle="[muted]agent runtime[/muted]",
-            border_style="bright_cyan",
+            border_style="accent",
             padding=(1, 2),
         )
     )
@@ -68,7 +72,7 @@ def print_help() -> None:
     commands.add_row("/tools", "List tools available to this agent")
     commands.add_row("/reset", "Start a fresh conversation")
     commands.add_row("/quit", "End the session")
-    CONSOLE.print(Panel(commands, title="[blix]Commands[/blix]", title_align="left", border_style="cyan"))
+    CONSOLE.print(Panel(commands, title="[blix]Commands[/blix]", title_align="left", border_style="accent"))
 
 
 def print_tools(registry: ToolRegistry, tool_ids: tuple[str, ...]) -> None:
@@ -77,7 +81,7 @@ def print_tools(registry: ToolRegistry, tool_ids: tuple[str, ...]) -> None:
     tools.add_column("DESCRIPTION")
     for definition in registry.definitions(tool_ids):
         tools.add_row(definition.id, definition.description)
-    CONSOLE.print(Panel(tools, title="[blix]Available tools[/blix]", title_align="left", border_style="cyan"))
+    CONSOLE.print(Panel(tools, title="[blix]Available tools[/blix]", title_align="left", border_style="accent"))
 
 
 def print_error(message: str) -> None:
@@ -98,6 +102,7 @@ async def run_cli() -> None:
 
     registry = ToolRegistry([CurrentTimeV1Tool()])
     tool_runner = ToolRunner(registry)
+    run_id = new_ulid()
     conversation_id = new_ulid()
     messages: list[ConversationMessage] = []
 
@@ -109,7 +114,7 @@ async def run_cli() -> None:
         model=MODEL,
     ) as model:
         agent = GeneralConversationV1Agent(model=model, tool_runner=tool_runner)
-        print_banner(agent.definition.id)
+        print_banner(agent.definition.id, run_id, conversation_id)
 
         while True:
             try:
@@ -127,9 +132,11 @@ async def run_cli() -> None:
                 print_help()
                 continue
             if user_input == "/reset":
+                run_id = new_ulid()
                 conversation_id = new_ulid()
                 messages.clear()
                 CONSOLE.print("[success]Conversation reset.[/success]")
+                print_banner(agent.definition.id, run_id, conversation_id)
                 continue
             if user_input == "/tools":
                 print_tools(registry, agent.definition.tool_ids)
@@ -152,7 +159,7 @@ async def run_cli() -> None:
                 messages=tuple(messages[-MAX_CONVERSATION_MESSAGES:]),
             )
             task = AgentTask(
-                run_id=new_ulid(),
+                run_id=run_id,
                 invocation_id=new_ulid(),
                 agent_id=agent.definition.id,
                 objective="Respond to the latest user message.",
@@ -193,7 +200,7 @@ async def run_cli() -> None:
                     Markdown(output.message),
                     title="[blix]blix[/blix]",
                     title_align="left",
-                    border_style="bright_cyan",
+                    border_style="accent",
                     padding=(0, 1),
                 )
             )
