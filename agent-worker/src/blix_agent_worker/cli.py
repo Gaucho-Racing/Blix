@@ -29,11 +29,10 @@ MAX_CONVERSATION_MESSAGES = 40
 
 THEME = Theme(
     {
-        "accent": "#8412fc",
+        "accent": "#e105a3",
         "blix": "bold #e105a3",
-        "command": "bold #8412fc",
+        "command": "bold #e105a3",
         "error": "bold bright_red",
-        "foreground": "#f3f1f6",
         "muted": "#9893a3",
         "success": "bold bright_green",
         "user": "bold #f3f1f6",
@@ -47,12 +46,12 @@ ERROR_CONSOLE = Console(theme=THEME, highlight=False, stderr=True)
 def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
     details = Table.grid(padding=(0, 2))
     details.add_column(style="muted", no_wrap=True)
-    details.add_column(style="foreground")
+    details.add_column(style="muted")
     details.add_row("AGENT", agent_id)
     details.add_row("MODEL", MODEL)
-    details.add_row("RUN ID", run_id)
-    details.add_row("CONVERSATION ID", conversation_id)
-    details.add_row("COMMANDS", "[command]/help[/]  [command]/tools[/]  [command]/reset[/]  [command]/quit[/]")
+    details.add_row("RUN ID", f"run_{run_id}")
+    details.add_row("CONVERSATION ID", f"conversation_{conversation_id}")
+    details.add_row("COMMANDS", "/help  /tools  /reset  /quit")
     CONSOLE.print(
         Panel(
             details,
