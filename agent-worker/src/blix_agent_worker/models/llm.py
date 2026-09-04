@@ -38,6 +38,18 @@ class ModelCallRequest(ContractModel):
     arguments: JsonObject
 
 
+class ModelOutputFormat(ContractModel):
+    id: VersionedIdentifier
+    json_schema: JsonObject
+
+    @field_validator("json_schema")
+    @classmethod
+    def schema_must_describe_an_object(cls, json_schema: JsonObject) -> JsonObject:
+        if json_schema.get("type") != "object":
+            raise ValueError("output schema must describe a JSON object")
+        return json_schema
+
+
 class ModelMessage(ContractModel):
     role: ModelMessageRole
     content: NonEmptyText | None = None
@@ -88,6 +100,7 @@ class ModelContinuation(ContractModel):
 class ModelRequest(ContractModel):
     messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
     callables: tuple[ModelCallableDefinition, ...] = ()
+    output_format: ModelOutputFormat | None = None
     continuation: ModelContinuation | None = None
 
     @field_validator("callables")

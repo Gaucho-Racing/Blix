@@ -164,6 +164,15 @@ class BifrostResponsesModel:
                 for definition in request.callables
             ]
             payload["tool_choice"] = "auto"
+        if request.output_format is not None:
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": request.output_format.id,
+                    "strict": True,
+                    "schema": request.output_format.json_schema,
+                }
+            }
         return payload
 
     def _input_items(self, request: ModelRequest) -> list[JsonObject]:

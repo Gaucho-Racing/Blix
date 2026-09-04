@@ -1,7 +1,9 @@
 import json
+import re
 from collections.abc import Callable
+from typing import Annotated, Self
 
-from pydantic import ValidationError
+from pydantic import Field, HttpUrl, ValidationError, model_validator
 
 from blix_agent_worker.agents.callables import CallableCatalog, CallableNotFoundError
 from blix_agent_worker.agents.deep_research.prompt import (
@@ -31,6 +33,7 @@ from blix_agent_worker.models.llm import (
     ModelContinuation,
     ModelMessage,
     ModelMessageRole,
+    ModelOutputFormat,
     ModelRequest,
 )
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
@@ -41,8 +44,34 @@ class DeepResearchV1Input(ContractModel):
     question: NonEmptyText
 
 
+class DeepResearchSource(ContractModel):
+    index: Annotated[int, Field(ge=1)]
+    title: NonEmptyText
+    url: HttpUrl
+
+
 class DeepResearchV1Output(ContractModel):
     report: NonEmptyText
+    sources: tuple[DeepResearchSource, ...]
+
+    @model_validator(mode="after")
+    def validate_source_index(self) -> Self:
+        source_indices = [source.index for source in self.sources]
+        if source_indices != list(range(1, len(self.sources) + 1)):
+            raise ValueError("source indices must be sequential and start at 1")
+
+        source_urls = [str(source.url) for source in self.sources]
+        if len(source_urls) != len(set(source_urls)):
+            raise ValueError("source URLs must be unique")
+
+        citations = {int(value) for value in re.findall(r"\[(\d+)]", self.report)}
+        unknown_citations = citations.difference(source_indices)
+        if unknown_citations:
+            raise ValueError("report contains citations that are missing from sources")
+        unused_sources = set(source_indices).difference(citations)
+        if unused_sources:
+            raise ValueError("every indexed source must be cited in the report")
+        return self
 
 
 class DeepResearchV1Agent:
@@ -139,6 +168,10 @@ class DeepResearchV1Agent:
                     ModelRequest(
                         messages=tuple(messages),
                         callables=catalog.definitions,
+                        output_format=ModelOutputFormat(
+                            id=self.definition.id,
+                            json_schema=self.definition.output_schema,
+                        ),
                         continuation=continuation,
                     )
                 )
@@ -164,7 +197,16 @@ class DeepResearchV1Agent:
                         "The model returned neither text nor a callable request.",
                         usage=usage,
                     )
-                output = DeepResearchV1Output(report=response.message.content)
+                try:
+                    output = DeepResearchV1Output.model_validate_json(response.message.content)
+                except ValidationError as error:
+                    return self._failure(
+                        task,
+                        "invalid_agent_output",
+                        "The model returned an invalid deep research result.",
+                        details=validation_error_details(error),
+                        usage=usage,
+                    )
                 return AgentResult(
                     run_id=task.run_id,
                     invocation_id=task.invocation_id,
