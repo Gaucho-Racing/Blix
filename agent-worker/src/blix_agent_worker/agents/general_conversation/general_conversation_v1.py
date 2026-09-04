@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import Annotated, Self
 
 from pydantic import Field, JsonValue, ValidationError, model_validator
@@ -58,9 +59,16 @@ class GeneralConversationV1Agent:
         tool_ids=("current_time_v1",),
     )
 
-    def __init__(self, *, model: ChatModel, tool_runner: ToolRunner) -> None:
+    def __init__(
+        self,
+        *,
+        model: ChatModel,
+        tool_runner: ToolRunner,
+        on_tool_result: Callable[[ToolCall, ToolResult], None] | None = None,
+    ) -> None:
         self._model = model
         self._tool_runner = tool_runner
+        self._on_tool_result = on_tool_result
 
     async def run(self, task: AgentTask) -> AgentResult:
         if task.agent_id != self.definition.id:
@@ -194,6 +202,9 @@ class GeneralConversationV1Agent:
                     )
                 else:
                     tool_result = await self._tool_runner.execute(call)
+
+                if self._on_tool_result is not None:
+                    self._on_tool_result(call, tool_result)
 
                 messages.append(
                     ModelMessage(

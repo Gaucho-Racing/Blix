@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from datetime import UTC, datetime
 
@@ -17,9 +18,10 @@ from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Output,
 )
 from blix_agent_worker.llm import BifrostChatModel
-from blix_agent_worker.models.agent import AgentResultStatus, AgentTask
+from blix_agent_worker.models.agent import AgentResultStatus, AgentTask, AgentUsage
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
+from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
 
@@ -49,8 +51,8 @@ def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
     details.add_column(style="muted")
     details.add_row("AGENT", agent_id)
     details.add_row("MODEL", MODEL)
-    details.add_row("RUN ID", f"run_{run_id}")
-    details.add_row("CONVERSATION ID", f"conversation_{conversation_id}")
+    details.add_row("RUN", f"run_{run_id}")
+    details.add_row("CONVERSATION", f"conversation_{conversation_id}")
     details.add_row("COMMANDS", "/help  /tools  /reset  /quit")
     CONSOLE.print(
         Panel(
@@ -58,7 +60,7 @@ def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
             title="[blix] BLIX [/blix]",
             subtitle="[muted]agent runtime[/muted]",
             border_style="accent",
-            padding=(1, 2),
+            padding=(0, 2),
         )
     )
 
@@ -89,6 +91,36 @@ def print_error(message: str) -> None:
     )
 
 
+def print_tool_result(call: ToolCall, result: ToolResult) -> None:
+    arguments = json.dumps(call.arguments, ensure_ascii=False, separators=(", ", ": "))
+    event = Text("   ↳  tool  ", style="muted")
+    event.append(call.tool_id, style="bold muted")
+    if arguments != "{}":
+        event.append(f"  {arguments}", style="muted")
+    event.append(f"  ·  {result.status.value}", style="muted")
+    CONSOLE.print(event)
+
+
+def print_response(message: str, usage: AgentUsage) -> None:
+    line_count = message.count("\n") + 1
+    token_count = usage.input_tokens + usage.output_tokens
+    line_label = "line" if line_count == 1 else "lines"
+    model_call_label = "model call" if usage.model_calls == 1 else "model calls"
+    tool_call_label = "tool call" if usage.tool_calls == 1 else "tool calls"
+    summary = (
+        f"{line_count} {line_label}  ·  {usage.model_calls} {model_call_label}  ·  "
+        f"{usage.tool_calls} {tool_call_label}  ·  {token_count:,} tokens"
+    )
+
+    header = Table.grid(expand=True)
+    header.add_column()
+    header.add_column(style="muted", justify="right")
+    header.add_row("[blix]●  blix[/blix]", summary)
+    CONSOLE.print()
+    CONSOLE.print(header)
+    CONSOLE.print(Panel(Markdown(message), border_style="muted", padding=(0, 1)))
+
+
 async def run_cli() -> None:
     credentials = {
         "BIFROST_USERNAME": os.environ.get("BIFROST_USERNAME", "").strip(),
@@ -112,12 +144,16 @@ async def run_cli() -> None:
         virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
         model=MODEL,
     ) as model:
-        agent = GeneralConversationV1Agent(model=model, tool_runner=tool_runner)
+        agent = GeneralConversationV1Agent(
+            model=model,
+            tool_runner=tool_runner,
+            on_tool_result=print_tool_result,
+        )
         print_banner(agent.definition.id, run_id, conversation_id)
 
         while True:
             try:
-                user_input = CONSOLE.input("[user]you[/user] [muted]›[/muted] ").strip()
+                user_input = CONSOLE.input("[user]●  you[/user] [muted]›[/muted] ").strip()
             except EOFError:
                 CONSOLE.print()
                 return
@@ -194,15 +230,7 @@ async def run_cli() -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-            CONSOLE.print(
-                Panel(
-                    Markdown(output.message),
-                    title="[blix]blix[/blix]",
-                    title_align="left",
-                    border_style="accent",
-                    padding=(0, 1),
-                )
-            )
+            print_response(output.message, result.usage)
 
 
 def start_session() -> None:
