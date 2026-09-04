@@ -13,8 +13,7 @@ class TavilyClientError(Exception):
 
 
 class TavilyClient:
-    def __init__(self, *, api_key: str, timeout_seconds: float = 30) -> None:
-        self._api_key = api_key.strip()
+    def __init__(self, *, timeout_seconds: float = 30) -> None:
         self._client = httpx.AsyncClient(
             base_url="https://api.tavily.com/",
             headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -30,23 +29,20 @@ class TavilyClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def search(self, payload: JsonObject) -> JsonObject:
-        return await self._post("search", payload)
+    async def search(self, payload: JsonObject, *, api_key: str) -> JsonObject:
+        return await self._post("search", payload, api_key=api_key)
 
-    async def extract(self, payload: JsonObject) -> JsonObject:
-        return await self._post("extract", payload)
+    async def extract(self, payload: JsonObject, *, api_key: str) -> JsonObject:
+        return await self._post("extract", payload, api_key=api_key)
 
-    async def _post(self, path: str, payload: JsonObject) -> JsonObject:
-        if not self._api_key:
-            raise TavilyClientError(
-                "web_research_not_configured",
-                "Web research requires TAVILY_API_KEY.",
-            )
+    async def _post(self, path: str, payload: JsonObject, *, api_key: str) -> JsonObject:
+        if not api_key.strip():
+            raise ValueError("api_key cannot be empty")
 
         try:
             response = await self._client.post(
                 path,
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
             )
         except httpx.TimeoutException as error:
@@ -59,6 +55,11 @@ class TavilyClient:
             ) from error
 
         if response.is_error:
+            if response.status_code == 401:
+                raise TavilyClientError(
+                    "web_provider_authentication_failed",
+                    "The web provider rejected its configured credentials.",
+                )
             retryable = response.status_code == 429 or response.status_code >= 500
             raise TavilyClientError(
                 "web_provider_request_failed",

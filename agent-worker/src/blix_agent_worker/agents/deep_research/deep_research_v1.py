@@ -219,7 +219,7 @@ class DeepResearchV1Agent:
                 if (
                     tool_result.status is ToolResultStatus.FAILED
                     and tool_result.error is not None
-                    and tool_result.error.code == "web_research_not_configured"
+                    and tool_result.error.code == "tool_not_configured"
                 ):
                     return self._failure(
                         task,

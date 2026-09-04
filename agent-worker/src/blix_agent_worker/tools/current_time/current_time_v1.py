@@ -41,20 +41,6 @@ class CurrentTimeV1Tool:
     )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        if call.tool_id != self.definition.id:
-            return ToolResult(
-                call_id=call.call_id,
-                status=ToolResultStatus.FAILED,
-                error=ContractError(
-                    code="tool_mismatch",
-                    message="The tool call does not match this tool definition.",
-                    details={
-                        "expected_tool_id": self.definition.id,
-                        "actual_tool_id": call.tool_id,
-                    },
-                ),
-            )
-
         try:
             tool_input = CurrentTimeV1Input.model_validate(call.arguments)
         except ValidationError as error:

@@ -242,7 +242,7 @@ async def run_cli() -> None:
             virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
             model=MODEL,
         ) as model,
-        TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", "")) as tavily_client,
+        TavilyClient() as tavily_client,
     ):
         registry = ToolRegistry(
             [

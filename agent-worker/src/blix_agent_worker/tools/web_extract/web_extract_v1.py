@@ -1,3 +1,4 @@
+import os
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
@@ -69,9 +70,6 @@ class WebExtractV1Tool:
         self._client = client
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        if call.tool_id != self.definition.id:
-            return self._failure(call, "tool_mismatch", "The tool call does not match this tool definition.")
-
         try:
             tool_input = WebExtractV1Input.model_validate(call.arguments)
         except ValidationError as error:
@@ -80,6 +78,15 @@ class WebExtractV1Tool:
                 "invalid_arguments",
                 "The web extraction arguments are invalid.",
                 details=validation_error_details(error),
+            )
+
+        api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+        if not api_key:
+            return self._failure(
+                call,
+                "tool_not_configured",
+                f"Tool {self.definition.id!r} requires TAVILY_API_KEY.",
+                details={"environment_variables": ["TAVILY_API_KEY"]},
             )
 
         try:
@@ -92,7 +99,8 @@ class WebExtractV1Tool:
                     "include_images": False,
                     "format": "markdown",
                     "timeout": 30,
-                }
+                },
+                api_key=api_key,
             )
             response = _TavilyExtractResponse.model_validate(body)
             extracted_results: list[WebExtractResult] = []
@@ -112,6 +120,13 @@ class WebExtractV1Tool:
                 failures=tuple(extraction_failures),
             )
         except TavilyClientError as error:
+            if error.code == "web_provider_authentication_failed":
+                return self._failure(
+                    call,
+                    "tool_not_configured",
+                    f"Tool {self.definition.id!r} has invalid Tavily credentials.",
+                    details={"environment_variables": ["TAVILY_API_KEY"]},
+                )
             return self._failure(call, error.code, str(error), retryable=error.retryable)
         except ValidationError:
             return self._failure(
