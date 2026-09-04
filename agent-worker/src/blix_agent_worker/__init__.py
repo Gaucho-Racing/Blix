@@ -1,4 +1,5 @@
-from blix_agent_worker.agents import (
+from blix_agent_worker.agents import Agent
+from blix_agent_worker.models import (
     AgentBudget,
     AgentDefinition,
     AgentKind,
@@ -6,13 +7,7 @@ from blix_agent_worker.agents import (
     AgentResultStatus,
     AgentTask,
     AgentUsage,
-)
-from blix_agent_worker.common import ContractError
-from blix_agent_worker.tools import (
-    CurrentTimeInput,
-    CurrentTimeOutput,
-    CurrentTimeTool,
-    Tool,
+    ContractError,
     ToolCall,
     ToolDefinition,
     ToolExecutionMode,
@@ -20,8 +15,16 @@ from blix_agent_worker.tools import (
     ToolResult,
     ToolResultStatus,
 )
+from blix_agent_worker.tools import (
+    DuplicateToolError,
+    Tool,
+    ToolNotFoundError,
+    ToolRegistry,
+    ToolRegistryError,
+)
 
 __all__ = [
+    "Agent",
     "AgentBudget",
     "AgentDefinition",
     "AgentKind",
@@ -30,14 +33,15 @@ __all__ = [
     "AgentTask",
     "AgentUsage",
     "ContractError",
-    "CurrentTimeInput",
-    "CurrentTimeOutput",
-    "CurrentTimeTool",
+    "DuplicateToolError",
     "Tool",
     "ToolCall",
     "ToolDefinition",
     "ToolExecutionMode",
     "ToolImpact",
+    "ToolNotFoundError",
+    "ToolRegistry",
+    "ToolRegistryError",
     "ToolResult",
     "ToolResultStatus",
 ]

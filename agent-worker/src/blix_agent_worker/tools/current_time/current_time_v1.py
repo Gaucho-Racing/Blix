@@ -3,8 +3,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import ValidationError
 
-from blix_agent_worker.common import ContractError, ContractModel, NonEmptyText
-from blix_agent_worker.tools.main import (
+from blix_agent_worker.models.common import ContractError, ContractModel, NonEmptyText
+from blix_agent_worker.models.tool import (
     ToolCall,
     ToolDefinition,
     ToolExecutionMode,
@@ -14,22 +14,23 @@ from blix_agent_worker.tools.main import (
 )
 
 
-class CurrentTimeInput(ContractModel):
+class CurrentTimeV1Input(ContractModel):
     timezone: NonEmptyText = "UTC"
 
 
-class CurrentTimeOutput(ContractModel):
+class CurrentTimeV1Output(ContractModel):
     timezone: NonEmptyText
     local_time: datetime
     utc_offset_seconds: int
 
 
-class CurrentTimeTool:
+class CurrentTimeV1Tool:
     definition = ToolDefinition(
         name="current_time",
+        version=1,
         description="Return the current date and time in an IANA timezone.",
-        input_schema=CurrentTimeInput.model_json_schema(mode="validation"),
-        output_schema=CurrentTimeOutput.model_json_schema(mode="serialization"),
+        input_schema=CurrentTimeV1Input.model_json_schema(mode="validation"),
+        output_schema=CurrentTimeV1Output.model_json_schema(mode="serialization"),
         impact=ToolImpact.READ_ONLY,
         execution_mode=ToolExecutionMode.INLINE,
         timeout_seconds=5,
@@ -53,7 +54,7 @@ class CurrentTimeTool:
             )
 
         try:
-            tool_input = CurrentTimeInput.model_validate(call.arguments)
+            tool_input = CurrentTimeV1Input.model_validate(call.arguments)
         except ValidationError as error:
             validation_errors = [
                 {
@@ -88,7 +89,7 @@ class CurrentTimeTool:
 
         local_time = datetime.now(timezone)
         utc_offset = local_time.utcoffset()
-        output = CurrentTimeOutput(
+        output = CurrentTimeV1Output(
             timezone=tool_input.timezone,
             local_time=local_time,
             utc_offset_seconds=int(utc_offset.total_seconds()) if utc_offset is not None else 0,
