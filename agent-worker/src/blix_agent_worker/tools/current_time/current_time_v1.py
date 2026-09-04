@@ -44,7 +44,9 @@ class CurrentTimeV1Tool:
             tool_input = CurrentTimeV1Input.model_validate(call.arguments)
         except ValidationError as error:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="invalid_arguments",
@@ -57,7 +59,9 @@ class CurrentTimeV1Tool:
             timezone = ZoneInfo(tool_input.timezone)
         except ZoneInfoNotFoundError:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="timezone_not_found",
@@ -74,7 +78,9 @@ class CurrentTimeV1Tool:
             utc_offset_seconds=int(utc_offset.total_seconds()) if utc_offset is not None else 0,
         )
         return ToolResult(
+            run_id=call.run_id,
             call_id=call.call_id,
+            parent_execution_id=call.parent_execution_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )

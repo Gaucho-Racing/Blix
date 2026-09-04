@@ -39,15 +39,15 @@ class AgentRunner:
         request: ModelCallRequest,
         allowed_agent_ids: Collection[str],
     ) -> AgentResult:
-        invocation_id = new_ulid()
+        execution_id = new_ulid()
         if request.callable_id not in allowed_agent_ids:
             return self._emit(
                 self._failure(
                     parent_task,
-                    invocation_id,
+                    execution_id,
                     request.callable_id,
                     "agent_not_allowed",
-                    f"Agent {request.callable_id!r} is not allowed for this invocation.",
+                    f"Agent {request.callable_id!r} is not allowed for this execution.",
                 )
             )
         try:
@@ -56,7 +56,7 @@ class AgentRunner:
             return self._emit(
                 self._failure(
                     parent_task,
-                    invocation_id,
+                    execution_id,
                     request.callable_id,
                     "invalid_delegation_input",
                     "The delegated agent input is invalid.",
@@ -70,7 +70,7 @@ class AgentRunner:
             return self._emit(
                 self._failure(
                     parent_task,
-                    invocation_id,
+                    execution_id,
                     request.callable_id,
                     "agent_not_found",
                     f"Agent {request.callable_id!r} is not registered.",
@@ -79,8 +79,8 @@ class AgentRunner:
 
         task = AgentTask(
             run_id=parent_task.run_id,
-            invocation_id=invocation_id,
-            parent_invocation_id=parent_task.invocation_id,
+            execution_id=execution_id,
+            parent_execution_id=parent_task.execution_id,
             agent_id=agent.definition.id,
             objective=delegation.objective,
             input=delegation.input,
@@ -100,7 +100,7 @@ class AgentRunner:
             return self._emit(
                 self._failure(
                     parent_task,
-                    invocation_id,
+                    execution_id,
                     agent.definition.id,
                     "agent_execution_failed",
                     f"Agent {agent.definition.id!r} failed unexpectedly.",
@@ -109,16 +109,17 @@ class AgentRunner:
 
         if (
             result.run_id != task.run_id
-            or result.invocation_id != task.invocation_id
+            or result.execution_id != task.execution_id
+            or result.parent_execution_id != task.parent_execution_id
             or result.agent_id != task.agent_id
         ):
             return self._emit(
                 self._failure(
                     parent_task,
-                    invocation_id,
+                    execution_id,
                     agent.definition.id,
                     "invalid_agent_result",
-                    f"Agent {agent.definition.id!r} returned mismatched invocation metadata.",
+                    f"Agent {agent.definition.id!r} returned mismatched execution metadata.",
                 )
             )
         return self._emit(result)
@@ -131,7 +132,7 @@ class AgentRunner:
     @staticmethod
     def _failure(
         parent_task: AgentTask,
-        invocation_id: str,
+        execution_id: str,
         agent_id: str,
         code: str,
         message: str,
@@ -140,7 +141,8 @@ class AgentRunner:
     ) -> AgentResult:
         return AgentResult(
             run_id=parent_task.run_id,
-            invocation_id=invocation_id,
+            execution_id=execution_id,
+            parent_execution_id=parent_task.execution_id,
             agent_id=agent_id,
             status=AgentResultStatus.FAILED,
             error=ContractError(

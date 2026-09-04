@@ -12,7 +12,9 @@ class ToolRunner:
             tool = self.registry.resolve(call)
         except ToolNotFoundError:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="tool_not_found",
@@ -22,7 +24,9 @@ class ToolRunner:
 
         if tool.definition.requires_approval and not approved:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="approval_required",
@@ -34,7 +38,9 @@ class ToolRunner:
             result = await tool.execute(call)
         except Exception:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="tool_execution_failed",
@@ -42,18 +48,26 @@ class ToolRunner:
                 ),
             )
 
-        if result.call_id != call.call_id:
+        if (
+            result.run_id != call.run_id
+            or result.call_id != call.call_id
+            or result.parent_execution_id != call.parent_execution_id
+        ):
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="invalid_tool_result",
-                    message=f"Tool {call.tool_id!r} returned a mismatched call ID.",
+                    message=f"Tool {call.tool_id!r} returned mismatched execution metadata.",
                 ),
             )
         if result.status is ToolResultStatus.QUEUED and tool.definition.execution_mode is not ToolExecutionMode.JOB:
             return ToolResult(
+                run_id=call.run_id,
                 call_id=call.call_id,
+                parent_execution_id=call.parent_execution_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="invalid_tool_result",

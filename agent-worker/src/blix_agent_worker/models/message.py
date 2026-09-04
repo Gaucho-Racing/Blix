@@ -13,8 +13,9 @@ class ConversationMessageRole(StrEnum):
 
 
 class ConversationMessage(ContractModel):
-    id: ULID
-    conversation_id: ULID
+    message_id: ULID
+    run_id: ULID
+    parent_execution_id: ULID
     role: ConversationMessageRole
     content: NonEmptyText
     created_at: datetime

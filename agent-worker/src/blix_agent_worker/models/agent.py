@@ -54,8 +54,8 @@ class AgentDefinition(ContractModel):
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
     run_id: ULID
-    invocation_id: ULID
-    parent_invocation_id: ULID | None = None
+    execution_id: ULID
+    parent_execution_id: ULID | None = None
     agent_id: VersionedIdentifier
     objective: NonEmptyText
     input: JsonObject = Field(default_factory=dict)
@@ -72,6 +72,12 @@ class AgentTask(ContractModel):
         if values is not None and len(values) != len(set(values)):
             raise ValueError("values must be unique")
         return values
+
+    @model_validator(mode="after")
+    def execution_cannot_parent_itself(self) -> Self:
+        if self.parent_execution_id == self.execution_id:
+            raise ValueError("an agent execution cannot be its own parent")
+        return self
 
 
 class AgentResultStatus(StrEnum):
@@ -91,7 +97,8 @@ class AgentUsage(ContractModel):
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
     run_id: ULID
-    invocation_id: ULID
+    execution_id: ULID
+    parent_execution_id: ULID | None = None
     agent_id: VersionedIdentifier
     status: AgentResultStatus
     output: JsonValue = None

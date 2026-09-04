@@ -44,7 +44,9 @@ class ToolDefinition(ContractModel):
 
 class ToolCall(ContractModel):
     schema_version: Literal[1] = 1
+    run_id: ULID
     call_id: ULID
+    parent_execution_id: ULID
     tool_id: VersionedIdentifier
     arguments: JsonObject
 
@@ -57,7 +59,9 @@ class ToolResultStatus(StrEnum):
 
 class ToolResult(ContractModel):
     schema_version: Literal[1] = 1
+    run_id: ULID
     call_id: ULID
+    parent_execution_id: ULID
     status: ToolResultStatus
     output: JsonValue = None
     error: ContractError | None = None

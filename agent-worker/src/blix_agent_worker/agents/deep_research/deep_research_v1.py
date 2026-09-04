@@ -209,7 +209,8 @@ class DeepResearchV1Agent:
                     )
                 return AgentResult(
                     run_id=task.run_id,
-                    invocation_id=task.invocation_id,
+                    execution_id=task.execution_id,
+                    parent_execution_id=task.parent_execution_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
                     output=output.model_dump(mode="json"),
@@ -237,17 +238,21 @@ class DeepResearchV1Agent:
 
                 tool_calls += 1
                 call = ToolCall(
+                    run_id=task.run_id,
                     call_id=new_ulid(),
+                    parent_execution_id=task.execution_id,
                     tool_id=model_call_request.callable_id,
                     arguments=model_call_request.arguments,
                 )
                 if model_call_request.callable_id not in allowed_tool_ids:
                     tool_result = ToolResult(
+                        run_id=call.run_id,
                         call_id=call.call_id,
+                        parent_execution_id=call.parent_execution_id,
                         status=ToolResultStatus.FAILED,
                         error=ContractError(
                             code="tool_not_allowed",
-                            message=f"Tool {call.tool_id!r} is not allowed for this invocation.",
+                            message=f"Tool {call.tool_id!r} is not allowed for this execution.",
                         ),
                     )
                 else:
@@ -297,7 +302,8 @@ class DeepResearchV1Agent:
     ) -> AgentResult:
         return AgentResult(
             run_id=task.run_id,
-            invocation_id=task.invocation_id,
+            execution_id=task.execution_id,
+            parent_execution_id=task.parent_execution_id,
             agent_id=task.agent_id,
             status=AgentResultStatus.FAILED,
             usage=usage or AgentUsage(),

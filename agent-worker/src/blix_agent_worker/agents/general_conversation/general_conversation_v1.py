@@ -18,7 +18,6 @@ from blix_agent_worker.models.agent import (
     AgentUsage,
 )
 from blix_agent_worker.models.common import (
-    ULID,
     ContractError,
     ContractModel,
     JsonObject,
@@ -39,13 +38,10 @@ from blix_agent_worker.tools import ToolNotFoundError, ToolRunner
 
 
 class GeneralConversationV1Input(ContractModel):
-    conversation_id: ULID
     messages: Annotated[tuple[ConversationMessage, ...], Field(min_length=1)]
 
     @model_validator(mode="after")
     def validate_messages(self) -> Self:
-        if any(message.conversation_id != self.conversation_id for message in self.messages):
-            raise ValueError("all messages must belong to the input conversation")
         if self.messages[-1].role is not ConversationMessageRole.USER:
             raise ValueError("the latest conversation message must be from the user")
         return self
@@ -94,6 +90,10 @@ class GeneralConversationV1Agent:
                 "The conversation agent input is invalid.",
                 details=validation_error_details(error),
             )
+        if any(message.run_id != task.run_id for message in agent_input.messages):
+            return self._failure(task, "invalid_agent_input", "All messages must belong to the task run.")
+        if any(message.parent_execution_id != task.execution_id for message in agent_input.messages):
+            return self._failure(task, "invalid_agent_input", "All messages must belong to the agent execution.")
 
         configured_tool_ids = frozenset(self.definition.tool_ids)
         allowed_tool_ids = configured_tool_ids if task.allowed_tool_ids is None else frozenset(task.allowed_tool_ids)
@@ -210,7 +210,8 @@ class GeneralConversationV1Agent:
                 output = GeneralConversationV1Output(message=response.message.content)
                 return AgentResult(
                     run_id=task.run_id,
-                    invocation_id=task.invocation_id,
+                    execution_id=task.execution_id,
+                    parent_execution_id=task.parent_execution_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
                     output=output.model_dump(mode="json"),
@@ -254,17 +255,21 @@ class GeneralConversationV1Agent:
 
                 tool_calls += 1
                 call = ToolCall(
+                    run_id=task.run_id,
                     call_id=new_ulid(),
+                    parent_execution_id=task.execution_id,
                     tool_id=model_call_request.callable_id,
                     arguments=model_call_request.arguments,
                 )
                 if model_call_request.callable_id not in allowed_tool_ids:
                     tool_result = ToolResult(
+                        run_id=call.run_id,
                         call_id=call.call_id,
+                        parent_execution_id=call.parent_execution_id,
                         status=ToolResultStatus.FAILED,
                         error=ContractError(
                             code="tool_not_allowed",
-                            message=f"Tool {call.tool_id!r} is not allowed for this invocation.",
+                            message=f"Tool {call.tool_id!r} is not allowed for this execution.",
                         ),
                     )
                 else:
@@ -304,7 +309,8 @@ class GeneralConversationV1Agent:
     ) -> AgentResult:
         return AgentResult(
             run_id=task.run_id,
-            invocation_id=task.invocation_id,
+            execution_id=task.execution_id,
+            parent_execution_id=task.parent_execution_id,
             agent_id=task.agent_id,
             status=AgentResultStatus.FAILED,
             usage=usage or AgentUsage(),

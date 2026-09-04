@@ -50,14 +50,14 @@ CONSOLE = Console(theme=THEME, highlight=False)
 ERROR_CONSOLE = Console(theme=THEME, highlight=False, stderr=True)
 
 
-def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
+def print_banner(agent_id: str, run_id: str, execution_id: str) -> None:
     details = Table.grid(padding=(0, 2))
     details.add_column(style="muted", no_wrap=True)
     details.add_column(style="muted")
     details.add_row("AGENT", agent_id)
     details.add_row("MODEL", MODEL)
     details.add_row("RUN", f"run_{run_id}")
-    details.add_row("CONVERSATION", f"conversation_{conversation_id}")
+    details.add_row("EXECUTION", f"execution_{execution_id}")
     details.add_row("COMMANDS", "/help  /agents  /tools  /reset  /quit")
     CONSOLE.print(
         Panel(
@@ -77,7 +77,7 @@ def print_help() -> None:
     commands.add_row("/help", "Show available commands")
     commands.add_row("/agents", "List agents available for delegation")
     commands.add_row("/tools", "List tools available to this agent")
-    commands.add_row("/reset", "Start a fresh conversation")
+    commands.add_row("/reset", "Start a fresh run")
     commands.add_row("/quit", "End the session")
     CONSOLE.print(Panel(commands, title="[blix]Commands[/blix]", title_align="left", border_style="accent"))
 
@@ -149,7 +149,7 @@ class BlixTurnDisplay:
         event = Text("   ↳  agent  ", style="muted")
         event.append(task.agent_id, style="bold muted")
         event.append("  ·  running", style="muted")
-        self._agent_event_indexes[task.invocation_id] = len(self._activity_events)
+        self._agent_event_indexes[task.execution_id] = len(self._activity_events)
         self._activity_events.append(event)
         self._refresh()
 
@@ -165,7 +165,7 @@ class BlixTurnDisplay:
                 f"{result.usage.tool_calls} {tool_call_label}",
                 style="muted",
             )
-        index = self._agent_event_indexes.get(result.invocation_id)
+        index = self._agent_event_indexes.get(result.execution_id)
         if index is None:
             self._activity_events.append(event)
         else:
@@ -226,7 +226,7 @@ async def run_cli() -> None:
 
     turn_display = BlixTurnDisplay(CONSOLE)
     run_id = new_ulid()
-    conversation_id = new_ulid()
+    execution_id = new_ulid()
     messages: list[ConversationMessage] = []
 
     async with (
@@ -264,7 +264,7 @@ async def run_cli() -> None:
             agent_runner=agent_runner,
             on_tool_result=turn_display.record_tool_result,
         )
-        print_banner(agent.definition.id, run_id, conversation_id)
+        print_banner(agent.definition.id, run_id, execution_id)
 
         while True:
             try:
@@ -286,10 +286,10 @@ async def run_cli() -> None:
                 continue
             if user_input == "/reset":
                 run_id = new_ulid()
-                conversation_id = new_ulid()
+                execution_id = new_ulid()
                 messages.clear()
-                CONSOLE.print("[success]Conversation reset.[/success]")
-                print_banner(agent.definition.id, run_id, conversation_id)
+                CONSOLE.print("[success]Run reset.[/success]")
+                print_banner(agent.definition.id, run_id, execution_id)
                 continue
             if user_input == "/tools":
                 print_tools(registry, agent.definition.tool_ids)
@@ -300,20 +300,20 @@ async def run_cli() -> None:
 
             messages.append(
                 ConversationMessage(
-                    id=new_ulid(),
-                    conversation_id=conversation_id,
+                    message_id=new_ulid(),
+                    run_id=run_id,
+                    parent_execution_id=execution_id,
                     role=ConversationMessageRole.USER,
                     content=user_input,
                     created_at=datetime.now(UTC),
                 )
             )
             agent_input = GeneralConversationV1Input(
-                conversation_id=conversation_id,
                 messages=tuple(messages),
             )
             task = AgentTask(
                 run_id=run_id,
-                invocation_id=new_ulid(),
+                execution_id=execution_id,
                 agent_id=agent.definition.id,
                 objective="Respond to the latest user message.",
                 input=agent_input.model_dump(mode="json"),
@@ -340,8 +340,9 @@ async def run_cli() -> None:
 
             messages.append(
                 ConversationMessage(
-                    id=new_ulid(),
-                    conversation_id=conversation_id,
+                    message_id=new_ulid(),
+                    run_id=run_id,
+                    parent_execution_id=execution_id,
                     role=ConversationMessageRole.ASSISTANT,
                     content=output.message,
                     created_at=datetime.now(UTC),
