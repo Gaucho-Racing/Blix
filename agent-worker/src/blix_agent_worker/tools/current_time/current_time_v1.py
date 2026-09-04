@@ -26,8 +26,7 @@ class CurrentTimeV1Output(ContractModel):
 
 class CurrentTimeV1Tool:
     definition = ToolDefinition(
-        name="current_time",
-        version=1,
+        id="current_time_v1",
         description="Return the current date and time in an IANA timezone.",
         input_schema=CurrentTimeV1Input.model_json_schema(mode="validation"),
         output_schema=CurrentTimeV1Output.model_json_schema(mode="serialization"),
@@ -37,7 +36,7 @@ class CurrentTimeV1Tool:
     )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        if call.name != self.definition.name or call.version != self.definition.version:
+        if call.tool_id != self.definition.id:
             return ToolResult(
                 call_id=call.call_id,
                 status=ToolResultStatus.FAILED,
@@ -45,10 +44,8 @@ class CurrentTimeV1Tool:
                     code="tool_mismatch",
                     message="The tool call does not match this tool definition.",
                     details={
-                        "expected_name": self.definition.name,
-                        "expected_version": self.definition.version,
-                        "actual_name": call.name,
-                        "actual_version": call.version,
+                        "expected_tool_id": self.definition.id,
+                        "actual_tool_id": call.tool_id,
                     },
                 ),
             )

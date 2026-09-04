@@ -11,6 +11,7 @@ from blix_agent_worker.models.common import (
     JsonObject,
     NonEmptyText,
     PositiveSeconds,
+    VersionedIdentifier,
 )
 
 
@@ -20,25 +21,24 @@ class AgentKind(StrEnum):
 
 
 class AgentDefinition(ContractModel):
-    name: Identifier
-    version: Annotated[int, Field(ge=1)] = 1
+    id: VersionedIdentifier
     kind: AgentKind
     description: NonEmptyText
     instructions: NonEmptyText
     model_profile: Identifier | None = None
-    tool_names: tuple[Identifier, ...] = ()
-    subagent_names: tuple[Identifier, ...] = ()
+    tool_ids: tuple[VersionedIdentifier, ...] = ()
+    subagent_ids: tuple[VersionedIdentifier, ...] = ()
 
-    @field_validator("tool_names", "subagent_names")
+    @field_validator("tool_ids", "subagent_ids")
     @classmethod
-    def names_must_be_unique(cls, names: tuple[str, ...]) -> tuple[str, ...]:
-        if len(names) != len(set(names)):
-            raise ValueError("names must be unique")
-        return names
+    def ids_must_be_unique(cls, ids: tuple[str, ...]) -> tuple[str, ...]:
+        if len(ids) != len(set(ids)):
+            raise ValueError("ids must be unique")
+        return ids
 
     @model_validator(mode="after")
     def agent_cannot_delegate_to_itself(self) -> Self:
-        if self.name in self.subagent_names:
+        if self.id in self.subagent_ids:
             raise ValueError("an agent cannot delegate to itself")
         return self
 
@@ -55,17 +55,16 @@ class AgentTask(ContractModel):
     run_id: UUID
     invocation_id: UUID
     parent_invocation_id: UUID | None = None
-    agent_name: Identifier
-    agent_version: Annotated[int, Field(ge=1)] = 1
+    agent_id: VersionedIdentifier
     objective: NonEmptyText
     input: JsonObject = Field(default_factory=dict)
     context: JsonObject = Field(default_factory=dict)
     artifact_refs: tuple[NonEmptyText, ...] = ()
-    tool_allowlist: tuple[Identifier, ...] | None = None
+    allowed_tool_ids: tuple[VersionedIdentifier, ...] | None = None
     response_schema: JsonObject | None = None
     budget: AgentBudget = Field(default_factory=AgentBudget)
 
-    @field_validator("artifact_refs", "tool_allowlist")
+    @field_validator("artifact_refs", "allowed_tool_ids")
     @classmethod
     def values_must_be_unique(cls, values: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if values is not None and len(values) != len(set(values)):
@@ -91,8 +90,7 @@ class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
     run_id: UUID
     invocation_id: UUID
-    agent_name: Identifier
-    agent_version: Annotated[int, Field(ge=1)] = 1
+    agent_id: VersionedIdentifier
     status: AgentResultStatus
     output: JsonValue = None
     artifact_refs: tuple[NonEmptyText, ...] = ()

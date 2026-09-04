@@ -1,15 +1,15 @@
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
-from pydantic import Field, JsonValue, field_validator, model_validator
+from pydantic import JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
-    Identifier,
     JsonObject,
     NonEmptyText,
     PositiveSeconds,
+    VersionedIdentifier,
 )
 
 
@@ -25,8 +25,7 @@ class ToolExecutionMode(StrEnum):
 
 
 class ToolDefinition(ContractModel):
-    name: Identifier
-    version: Annotated[int, Field(ge=1)] = 1
+    id: VersionedIdentifier
     description: NonEmptyText
     input_schema: JsonObject
     output_schema: JsonObject | None = None
@@ -47,8 +46,7 @@ class ToolDefinition(ContractModel):
 class ToolCall(ContractModel):
     schema_version: Literal[1] = 1
     call_id: NonEmptyText
-    name: Identifier
-    version: Annotated[int, Field(ge=1)] = 1
+    tool_id: VersionedIdentifier
     arguments: JsonObject
 
 
