@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 
 import typer
 from pydantic import ValidationError
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -91,34 +93,75 @@ def print_error(message: str) -> None:
     )
 
 
-def print_tool_result(call: ToolCall, result: ToolResult) -> None:
-    arguments = json.dumps(call.arguments, ensure_ascii=False, separators=(", ", ": "))
-    event = Text("   ↳  tool  ", style="muted")
-    event.append(call.tool_id, style="bold muted")
-    if arguments != "{}":
-        event.append(f"  {arguments}", style="muted")
-    event.append(f"  ·  {result.status.value}", style="muted")
-    CONSOLE.print(event)
+class BlixTurnDisplay:
+    def __init__(self, console: Console) -> None:
+        self._console = console
+        self._tool_events: list[Text] = []
+        self._live: Live | None = None
 
+    def start(self) -> None:
+        self.stop()
+        self._tool_events.clear()
+        self._live = Live(
+            self._pending_renderable(),
+            console=self._console,
+            refresh_per_second=12,
+            transient=True,
+        )
+        self._live.start()
 
-def print_response(message: str, usage: AgentUsage) -> None:
-    line_count = message.count("\n") + 1
-    token_count = usage.input_tokens + usage.output_tokens
-    line_label = "line" if line_count == 1 else "lines"
-    model_call_label = "model call" if usage.model_calls == 1 else "model calls"
-    tool_call_label = "tool call" if usage.tool_calls == 1 else "tool calls"
-    summary = (
-        f"{line_count} {line_label}  ·  {usage.model_calls} {model_call_label}  ·  "
-        f"{usage.tool_calls} {tool_call_label}  ·  {token_count:,} tokens"
-    )
+    def stop(self) -> None:
+        if self._live is None:
+            return
+        live = self._live
+        self._live = None
+        live.stop()
 
-    header = Table.grid(expand=True)
-    header.add_column()
-    header.add_column(style="muted", justify="right")
-    header.add_row("[blix]●  blix[/blix]", summary)
-    CONSOLE.print()
-    CONSOLE.print(header)
-    CONSOLE.print(Panel(Markdown(message), border_style="muted", padding=(0, 1)))
+    def record_tool_result(self, call: ToolCall, result: ToolResult) -> None:
+        arguments = json.dumps(call.arguments, ensure_ascii=False, separators=(", ", ": "))
+        event = Text("   ↳  tool  ", style="muted")
+        event.append(call.tool_id, style="bold muted")
+        if arguments != "{}":
+            event.append(f"  {arguments}", style="muted")
+        event.append(f"  ·  {result.status.value}", style="muted")
+        self._tool_events.append(event)
+        if self._live is not None:
+            self._live.update(self._pending_renderable(), refresh=True)
+
+    def print_response(self, message: str, usage: AgentUsage) -> None:
+        self.stop()
+        self._console.print()
+        self._console.print(self._header(self._usage_summary(message, usage)))
+        for event in self._tool_events:
+            self._console.print(event)
+        self._console.print(Panel(Markdown(message), border_style="muted", padding=(0, 1)))
+
+    @staticmethod
+    def _header(summary: str | None = None) -> Table:
+        header = Table.grid(expand=True)
+        header.add_column()
+        header.add_column(style="muted", justify="right")
+        header.add_row("[blix]●  blix[/blix]", summary or "")
+        return header
+
+    def _pending_renderable(self) -> Group:
+        status = Table.grid(padding=(0, 1))
+        status.add_column(width=2)
+        status.add_column()
+        status.add_row("", Spinner("dots", Text("thinking…", style="muted"), style="accent"))
+        return Group(Text(""), self._header(), *self._tool_events, status)
+
+    @staticmethod
+    def _usage_summary(message: str, usage: AgentUsage) -> str:
+        line_count = message.count("\n") + 1
+        token_count = usage.input_tokens + usage.output_tokens
+        line_label = "line" if line_count == 1 else "lines"
+        model_call_label = "model call" if usage.model_calls == 1 else "model calls"
+        tool_call_label = "tool call" if usage.tool_calls == 1 else "tool calls"
+        return (
+            f"{line_count} {line_label}  ·  {usage.model_calls} {model_call_label}  ·  "
+            f"{usage.tool_calls} {tool_call_label}  ·  {token_count:,} tokens"
+        )
 
 
 async def run_cli() -> None:
@@ -133,6 +176,7 @@ async def run_cli() -> None:
 
     registry = ToolRegistry([CurrentTimeV1Tool()])
     tool_runner = ToolRunner(registry)
+    turn_display = BlixTurnDisplay(CONSOLE)
     run_id = new_ulid()
     conversation_id = new_ulid()
     messages: list[ConversationMessage] = []
@@ -147,7 +191,7 @@ async def run_cli() -> None:
         agent = GeneralConversationV1Agent(
             model=model,
             tool_runner=tool_runner,
-            on_tool_result=print_tool_result,
+            on_tool_result=turn_display.record_tool_result,
         )
         print_banner(agent.definition.id, run_id, conversation_id)
 
@@ -202,13 +246,16 @@ async def run_cli() -> None:
                 allowed_tool_ids=agent.definition.tool_ids,
             )
 
+            turn_display.start()
             try:
-                with CONSOLE.status("[blix]Blix is thinking…[/blix]", spinner="dots"):
-                    async with asyncio.timeout(task.budget.timeout_seconds):
-                        result = await agent.run(task)
+                async with asyncio.timeout(task.budget.timeout_seconds):
+                    result = await agent.run(task)
             except TimeoutError:
+                turn_display.stop()
                 print_error("The agent timed out.")
                 continue
+            finally:
+                turn_display.stop()
 
             if result.status is not AgentResultStatus.SUCCEEDED:
                 message = result.error.message if result.error is not None else "The agent failed."
@@ -230,7 +277,7 @@ async def run_cli() -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-            print_response(output.message, result.usage)
+            turn_display.print_response(output.message, result.usage)
 
 
 def start_session() -> None:
