@@ -3,7 +3,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import ValidationError
 
-from blix_agent_worker.models.common import ContractError, ContractModel, NonEmptyText
+from blix_agent_worker.models.common import (
+    ContractError,
+    ContractModel,
+    NonEmptyText,
+    validation_error_details,
+)
 from blix_agent_worker.models.tool import (
     ToolCall,
     ToolDefinition,
@@ -53,21 +58,13 @@ class CurrentTimeV1Tool:
         try:
             tool_input = CurrentTimeV1Input.model_validate(call.arguments)
         except ValidationError as error:
-            validation_errors = [
-                {
-                    "location": ".".join(str(part) for part in item["loc"]),
-                    "message": item["msg"],
-                    "type": item["type"],
-                }
-                for item in error.errors(include_url=False, include_context=False, include_input=False)
-            ]
             return ToolResult(
                 call_id=call.call_id,
                 status=ToolResultStatus.FAILED,
                 error=ContractError(
                     code="invalid_arguments",
                     message="The tool arguments are invalid.",
-                    details={"errors": validation_errors},
+                    details=validation_error_details(error),
                 ),
             )
 

@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "Agent execution worker for Blix"
 requires-python = ">=3.12,<4.0"
 dependencies = [
+    "gr-ulid>=1.1.2,<2.0.0",
+    "httpx>=0.28.1,<1.0.0",
     "pydantic>=2.13.5,<3.0.0",
 ]
+
+[project.scripts]
+blix-agent = "blix_agent_worker.cli:main"
 
 [build-system]
 requires = ["hatchling"]

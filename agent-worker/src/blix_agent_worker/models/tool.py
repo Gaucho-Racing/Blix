@@ -4,6 +4,7 @@ from typing import Literal, Self
 from pydantic import JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
+    ULID,
     ContractError,
     ContractModel,
     JsonObject,
@@ -45,7 +46,7 @@ class ToolDefinition(ContractModel):
 
 class ToolCall(ContractModel):
     schema_version: Literal[1] = 1
-    call_id: NonEmptyText
+    call_id: ULID
     tool_id: VersionedIdentifier
     arguments: JsonObject
 
@@ -58,11 +59,11 @@ class ToolResultStatus(StrEnum):
 
 class ToolResult(ContractModel):
     schema_version: Literal[1] = 1
-    call_id: NonEmptyText
+    call_id: ULID
     status: ToolResultStatus
     output: JsonValue = None
     error: ContractError | None = None
-    job_id: NonEmptyText | None = None
+    job_id: ULID | None = None
 
     @model_validator(mode="after")
     def validate_status_fields(self) -> Self:

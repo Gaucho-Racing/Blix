@@ -7,7 +7,16 @@ from blix_agent_worker.models.agent import (
     AgentTask,
     AgentUsage,
 )
-from blix_agent_worker.models.common import ContractError
+from blix_agent_worker.models.common import ULID, ContractError, new_ulid
+from blix_agent_worker.models.llm import (
+    ModelMessage,
+    ModelMessageRole,
+    ModelRequest,
+    ModelResponse,
+    ModelToolRequest,
+    ModelUsage,
+)
+from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import (
     ToolCall,
     ToolDefinition,
@@ -26,10 +35,20 @@ __all__ = [
     "AgentTask",
     "AgentUsage",
     "ContractError",
+    "ConversationMessage",
+    "ConversationMessageRole",
+    "ModelMessage",
+    "ModelMessageRole",
+    "ModelRequest",
+    "ModelResponse",
+    "ModelToolRequest",
+    "ModelUsage",
     "ToolCall",
     "ToolDefinition",
     "ToolExecutionMode",
     "ToolImpact",
     "ToolResult",
     "ToolResultStatus",
+    "ULID",
+    "new_ulid",
 ]

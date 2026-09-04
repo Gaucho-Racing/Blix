@@ -1,5 +1,6 @@
 from blix_agent_worker.agents import Agent
 from blix_agent_worker.models import (
+    ULID,
     AgentBudget,
     AgentDefinition,
     AgentKind,
@@ -8,12 +9,21 @@ from blix_agent_worker.models import (
     AgentTask,
     AgentUsage,
     ContractError,
+    ConversationMessage,
+    ConversationMessageRole,
+    ModelMessage,
+    ModelMessageRole,
+    ModelRequest,
+    ModelResponse,
+    ModelToolRequest,
+    ModelUsage,
     ToolCall,
     ToolDefinition,
     ToolExecutionMode,
     ToolImpact,
     ToolResult,
     ToolResultStatus,
+    new_ulid,
 )
 from blix_agent_worker.tools import (
     DuplicateToolError,
@@ -21,6 +31,7 @@ from blix_agent_worker.tools import (
     ToolNotFoundError,
     ToolRegistry,
     ToolRegistryError,
+    ToolRunner,
 )
 
 __all__ = [
@@ -33,7 +44,15 @@ __all__ = [
     "AgentTask",
     "AgentUsage",
     "ContractError",
+    "ConversationMessage",
+    "ConversationMessageRole",
     "DuplicateToolError",
+    "ModelMessage",
+    "ModelMessageRole",
+    "ModelRequest",
+    "ModelResponse",
+    "ModelToolRequest",
+    "ModelUsage",
     "Tool",
     "ToolCall",
     "ToolDefinition",
@@ -42,6 +61,9 @@ __all__ = [
     "ToolNotFoundError",
     "ToolRegistry",
     "ToolRegistryError",
+    "ToolRunner",
     "ToolResult",
     "ToolResultStatus",
+    "ULID",
+    "new_ulid",
 ]

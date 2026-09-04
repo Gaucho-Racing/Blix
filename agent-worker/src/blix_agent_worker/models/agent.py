@@ -1,10 +1,10 @@
 from enum import StrEnum
 from typing import Annotated, Literal, Self
-from uuid import UUID
 
 from pydantic import Field, JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
+    ULID,
     ContractError,
     ContractModel,
     Identifier,
@@ -52,9 +52,9 @@ class AgentBudget(ContractModel):
 
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: UUID
-    invocation_id: UUID
-    parent_invocation_id: UUID | None = None
+    run_id: ULID
+    invocation_id: ULID
+    parent_invocation_id: ULID | None = None
     agent_id: VersionedIdentifier
     objective: NonEmptyText
     input: JsonObject = Field(default_factory=dict)
@@ -88,8 +88,8 @@ class AgentUsage(ContractModel):
 
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: UUID
-    invocation_id: UUID
+    run_id: ULID
+    invocation_id: ULID
     agent_id: VersionedIdentifier
     status: AgentResultStatus
     output: JsonValue = None

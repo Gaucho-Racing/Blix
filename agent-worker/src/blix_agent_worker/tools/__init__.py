@@ -5,6 +5,7 @@ from blix_agent_worker.tools.registry import (
     ToolRegistry,
     ToolRegistryError,
 )
+from blix_agent_worker.tools.runner import ToolRunner
 
 __all__ = [
     "DuplicateToolError",
@@ -12,4 +13,5 @@ __all__ = [
     "ToolNotFoundError",
     "ToolRegistry",
     "ToolRegistryError",
+    "ToolRunner",
 ]
