@@ -2,6 +2,7 @@ import asyncio
 import os
 from datetime import UTC, datetime
 
+import typer
 from pydantic import ValidationError
 
 from blix_agent_worker.agents.general_conversation import (
@@ -21,6 +22,10 @@ MODEL = "openai/gpt-5.6-luna"
 MAX_CONVERSATION_MESSAGES = 40
 
 
+def print_error(message: str) -> None:
+    typer.secho(f"error> {message}", fg=typer.colors.RED, bold=True, err=True)
+
+
 async def run_cli() -> None:
     virtual_key = os.environ.get("BIFROST_VIRTUAL_KEY", "").strip()
     if not virtual_key:
@@ -37,14 +42,18 @@ async def run_cli() -> None:
         model=MODEL,
     ) as model:
         agent = GeneralConversationV1Agent(model=model, tool_runner=tool_runner)
-        print(f"Blix CLI ({agent.definition.id}, {MODEL})")
-        print("Commands: /help, /reset, /tools, /quit")
+        typer.secho("Blix", fg=typer.colors.CYAN, bold=True)
+        typer.echo(f"{agent.definition.id} · {MODEL}")
+        typer.secho("Commands: /help, /reset, /tools, /quit", fg=typer.colors.BRIGHT_BLACK)
 
         while True:
             try:
-                user_input = input("you> ").strip()
-            except EOFError:
-                print()
+                user_input = typer.prompt(
+                    typer.style("you", fg=typer.colors.GREEN, bold=True),
+                    prompt_suffix="> ",
+                ).strip()
+            except (EOFError, typer.Abort):
+                typer.echo()
                 return
 
             if not user_input:
@@ -52,19 +61,20 @@ async def run_cli() -> None:
             if user_input == "/quit":
                 return
             if user_input == "/help":
-                print("Enter a message, or use /reset, /tools, or /quit.")
+                typer.echo("Enter a message, or use /reset, /tools, or /quit.")
                 continue
             if user_input == "/reset":
                 conversation_id = new_ulid()
                 messages.clear()
-                print("Conversation reset.")
+                typer.secho("Conversation reset.", fg=typer.colors.YELLOW)
                 continue
             if user_input == "/tools":
                 for definition in registry.definitions(agent.definition.tool_ids):
-                    print(f"{definition.id}: {definition.description}")
+                    typer.secho(definition.id, fg=typer.colors.CYAN, bold=True, nl=False)
+                    typer.echo(f": {definition.description}")
                 continue
             if user_input.startswith("/"):
-                print(f"error> Unknown command: {user_input}")
+                print_error(f"Unknown command: {user_input}")
                 continue
 
             messages.append(
@@ -93,18 +103,18 @@ async def run_cli() -> None:
                 async with asyncio.timeout(task.budget.timeout_seconds):
                     result = await agent.run(task)
             except TimeoutError:
-                print("error> The agent timed out.")
+                print_error("The agent timed out.")
                 continue
 
             if result.status is not AgentResultStatus.SUCCEEDED:
                 message = result.error.message if result.error is not None else "The agent failed."
-                print(f"error> {message}")
+                print_error(message)
                 continue
 
             try:
                 output = GeneralConversationV1Output.model_validate(result.output)
             except ValidationError:
-                print("error> The agent returned an invalid conversation response.")
+                print_error("The agent returned an invalid conversation response.")
                 continue
 
             messages.append(
@@ -116,13 +126,19 @@ async def run_cli() -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-            print(f"blix> {output.message}")
+            typer.secho("blix", fg=typer.colors.CYAN, bold=True, nl=False)
+            typer.echo(f"> {output.message}")
 
 
-def main() -> None:
+def start_session() -> None:
     try:
         asyncio.run(run_cli())
     except KeyboardInterrupt:
-        print()
+        typer.echo()
     except RuntimeError as error:
-        raise SystemExit(f"error: {error}") from error
+        typer.secho(f"error: {error}", fg=typer.colors.RED, bold=True, err=True)
+        raise typer.Exit(code=1) from error
+
+
+def main() -> None:
+    typer.run(start_session)
