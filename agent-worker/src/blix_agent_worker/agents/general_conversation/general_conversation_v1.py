@@ -4,7 +4,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, JsonValue, ValidationError, model_validator
 
-from blix_agent_worker.llm import ChatModel, ModelClientError
+from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
     AgentDefinition,
     AgentKind,
@@ -22,7 +22,7 @@ from blix_agent_worker.models.common import (
     new_ulid,
     validation_error_details,
 )
-from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole, ModelRequest
+from blix_agent_worker.models.llm import ModelContinuation, ModelMessage, ModelMessageRole, ModelRequest
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolNotFoundError, ToolRunner
@@ -62,7 +62,7 @@ class GeneralConversationV1Agent:
     def __init__(
         self,
         *,
-        model: ChatModel,
+        model: LanguageModel,
         tool_runner: ToolRunner,
         on_tool_result: Callable[[ToolCall, ToolResult], None] | None = None,
     ) -> None:
@@ -124,11 +124,17 @@ class GeneralConversationV1Agent:
         tool_calls = 0
         input_tokens = 0
         output_tokens = 0
-
+        continuation: ModelContinuation | None = None
         for _ in range(task.budget.max_model_calls):
             model_calls += 1
             try:
-                response = await self._model.complete(ModelRequest(messages=tuple(messages), tools=tool_definitions))
+                response = await self._model.complete(
+                    ModelRequest(
+                        messages=tuple(messages),
+                        tools=tool_definitions,
+                        continuation=continuation,
+                    )
+                )
             except ModelClientError as error:
                 return self._failure(
                     task,
@@ -145,6 +151,7 @@ class GeneralConversationV1Agent:
 
             input_tokens += response.usage.input_tokens
             output_tokens += response.usage.output_tokens
+            continuation = response.continuation
             usage = AgentUsage(
                 model_calls=model_calls,
                 tool_calls=tool_calls,

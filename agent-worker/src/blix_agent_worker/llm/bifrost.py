@@ -1,11 +1,13 @@
 import json
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from blix_agent_worker.llm.main import ModelClientError
+from blix_agent_worker.models.common import JsonObject
 from blix_agent_worker.models.llm import (
+    ModelContinuation,
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
@@ -14,42 +16,41 @@ from blix_agent_worker.models.llm import (
     ModelUsage,
 )
 
+type ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
 
 class _BifrostModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class _BifrostFunctionCall(_BifrostModel):
-    name: str
-    arguments: str
+class _BifrostOutputContent(_BifrostModel):
+    type: str
+    text: str | None = None
+    refusal: str | None = None
 
 
-class _BifrostToolCall(_BifrostModel):
-    id: str
-    type: Literal["function"]
-    function: _BifrostFunctionCall
-
-
-class _BifrostMessage(_BifrostModel):
-    content: str | None = None
-    tool_calls: tuple[_BifrostToolCall, ...] | None = None
-
-
-class _BifrostChoice(_BifrostModel):
-    message: _BifrostMessage
+class _BifrostOutputItem(_BifrostModel):
+    type: str
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+    content: tuple[_BifrostOutputContent, ...] = ()
 
 
 class _BifrostUsage(_BifrostModel):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class _BifrostResponse(_BifrostModel):
-    choices: list[_BifrostChoice] = Field(min_length=1)
+    status: str
+    output: tuple[_BifrostOutputItem, ...]
     usage: _BifrostUsage | None = None
 
 
-class BifrostChatModel:
+class BifrostResponsesModel:
+    _CONTINUATION_ADAPTER_ID = "bifrost_responses_v1"
+
     def __init__(
         self,
         *,
@@ -58,6 +59,7 @@ class BifrostChatModel:
         password: str,
         virtual_key: str,
         model: str,
+        reasoning_effort: ReasoningEffort = "medium",
         timeout_seconds: float = 120,
     ) -> None:
         if not base_url.strip():
@@ -72,6 +74,7 @@ class BifrostChatModel:
             raise ValueError("model cannot be empty")
 
         self._model = model
+        self._reasoning_effort = reasoning_effort
         self._client = httpx.AsyncClient(
             base_url=f"{base_url.rstrip('/')}/",
             auth=httpx.BasicAuth(username=username, password=password),
@@ -93,27 +96,14 @@ class BifrostChatModel:
         await self._client.aclose()
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        payload: dict[str, object] = {
-            "model": self._model,
-            "messages": [self._message_payload(message) for message in request.messages],
-        }
-        if request.tools:
-            payload["reasoning"] = {"effort": "none"}
-            payload["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": definition.id,
-                        "description": definition.description,
-                        "parameters": definition.input_schema,
-                    },
-                }
-                for definition in request.tools
-            ]
-            payload["tool_choice"] = "auto"
+        try:
+            input_items = self._input_items(request)
+            payload = self._request_payload(request, input_items)
+        except ValueError as error:
+            raise ModelClientError("invalid_model_request", str(error)) from error
 
         try:
-            response = await self._client.post("v1/chat/completions", json=payload)
+            response = await self._client.post("v1/responses", json=payload)
         except httpx.TimeoutException as error:
             raise ModelClientError("model_timeout", "The model request timed out.", retryable=True) from error
         except httpx.RequestError as error:
@@ -125,8 +115,16 @@ class BifrostChatModel:
             raise ModelClientError("model_request_failed", message, retryable=retryable)
 
         try:
-            parsed = _BifrostResponse.model_validate(response.json())
-            message = self._model_message(parsed.choices[0].message)
+            body = response.json()
+            parsed = _BifrostResponse.model_validate(body)
+            if parsed.status != "completed":
+                raise ValueError(f"model response has terminal status {parsed.status!r}")
+            message = self._model_message(parsed.output)
+            output_items = self._output_items(body)
+            continuation = ModelContinuation(
+                adapter_id=self._CONTINUATION_ADAPTER_ID,
+                state={"input_items": [*input_items, *output_items]},
+            )
         except (ValueError, ValidationError) as error:
             raise ModelClientError(
                 "invalid_model_response",
@@ -137,54 +135,142 @@ class BifrostChatModel:
         return ModelResponse(
             message=message,
             usage=ModelUsage(
-                input_tokens=usage.prompt_tokens,
-                output_tokens=usage.completion_tokens,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
             ),
+            continuation=continuation,
         )
 
-    @staticmethod
-    def _message_payload(message: ModelMessage) -> dict[str, object]:
-        payload: dict[str, object] = {"role": message.role.value, "content": message.content}
-        if message.tool_requests:
-            payload["tool_calls"] = [
+    def _request_payload(self, request: ModelRequest, input_items: list[JsonObject]) -> JsonObject:
+        payload: JsonObject = {
+            "model": self._model,
+            "input": input_items,
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+            "reasoning": {"effort": self._reasoning_effort},
+        }
+        instructions = [
+            message.content
+            for message in request.messages
+            if message.role is ModelMessageRole.SYSTEM and message.content is not None
+        ]
+        if instructions:
+            payload["instructions"] = "\n\n".join(instructions)
+        if request.tools:
+            payload["tools"] = [
                 {
-                    "id": request.ref,
                     "type": "function",
-                    "function": {
-                        "name": request.tool_id,
-                        "arguments": json.dumps(request.arguments, separators=(",", ":")),
-                    },
+                    "name": definition.id,
+                    "description": definition.description,
+                    "parameters": definition.input_schema,
                 }
-                for request in message.tool_requests
+                for definition in request.tools
             ]
-        if message.tool_request_ref is not None:
-            payload["tool_call_id"] = message.tool_request_ref
+            payload["tool_choice"] = "auto"
         return payload
 
-    @staticmethod
-    def _model_message(message: _BifrostMessage) -> ModelMessage:
-        requests: list[ModelToolRequest] = []
-        for tool_call in message.tool_calls or ():
-            try:
-                arguments = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError as error:
-                raise ValueError("model returned malformed tool arguments") from error
-            if not isinstance(arguments, dict):
-                raise ValueError("model returned non-object tool arguments")
-            requests.append(
-                ModelToolRequest(
-                    ref=tool_call.id,
-                    tool_id=tool_call.function.name,
-                    arguments=arguments,
-                )
-            )
+    def _input_items(self, request: ModelRequest) -> list[JsonObject]:
+        if request.continuation is None:
+            return self._conversation_items(request.messages)
+        if request.continuation.adapter_id != self._CONTINUATION_ADAPTER_ID:
+            raise ValueError("the model continuation belongs to a different adapter")
 
-        content = message.content.strip() if message.content and message.content.strip() else None
+        continuation_items = request.continuation.state.get("input_items")
+        if not isinstance(continuation_items, list) or not continuation_items:
+            raise ValueError("the model continuation does not contain input items")
+        if not all(isinstance(item, dict) for item in continuation_items):
+            raise ValueError("the model continuation contains invalid input items")
+        return [*cast(list[JsonObject], continuation_items), *self._tool_output_items(request.messages)]
+
+    @staticmethod
+    def _conversation_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
+        items: list[JsonObject] = []
+        for message in messages:
+            if message.role is ModelMessageRole.SYSTEM:
+                continue
+            if message.role is ModelMessageRole.TOOL or message.tool_requests:
+                raise ValueError("tool exchanges require model continuation state")
+            if message.content is None:
+                raise ValueError("conversation messages must contain text")
+            items.append({"role": message.role.value, "content": message.content})
+        if not items:
+            raise ValueError("the model request does not contain conversation input")
+        return items
+
+    @staticmethod
+    def _tool_output_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
+        tool_request_index = next(
+            (
+                index
+                for index in range(len(messages) - 1, -1, -1)
+                if messages[index].role is ModelMessageRole.ASSISTANT and messages[index].tool_requests
+            ),
+            None,
+        )
+        if tool_request_index is None:
+            raise ValueError("model continuation is missing its tool request message")
+
+        tool_request_refs = {request.ref for request in messages[tool_request_index].tool_requests}
+        trailing_messages = messages[tool_request_index + 1 :]
+        if not trailing_messages or any(message.role is not ModelMessageRole.TOOL for message in trailing_messages):
+            raise ValueError("model continuation must be followed by tool output messages")
+        output_refs = {message.tool_request_ref for message in trailing_messages}
+        if output_refs != tool_request_refs or len(output_refs) != len(trailing_messages):
+            raise ValueError("tool outputs do not match the pending model tool requests")
+
+        return [
+            {
+                "type": "function_call_output",
+                "call_id": cast(str, message.tool_request_ref),
+                "output": cast(str, message.content),
+            }
+            for message in trailing_messages
+        ]
+
+    @staticmethod
+    def _model_message(output: tuple[_BifrostOutputItem, ...]) -> ModelMessage:
+        requests: list[ModelToolRequest] = []
+        text_parts: list[str] = []
+        for item in output:
+            if item.type == "function_call":
+                if not item.call_id or not item.name or not item.arguments:
+                    raise ValueError("model returned an incomplete function call")
+                try:
+                    arguments = json.loads(item.arguments)
+                except json.JSONDecodeError as error:
+                    raise ValueError("model returned malformed tool arguments") from error
+                if not isinstance(arguments, dict):
+                    raise ValueError("model returned non-object tool arguments")
+                requests.append(
+                    ModelToolRequest(
+                        ref=item.call_id,
+                        tool_id=item.name,
+                        arguments=arguments,
+                    )
+                )
+                continue
+            if item.type != "message":
+                continue
+            for content in item.content:
+                value = content.text if content.type == "output_text" else content.refusal
+                if value and value.strip():
+                    text_parts.append(value.strip())
+
+        content = "\n\n".join(text_parts) or None
         return ModelMessage(
             role=ModelMessageRole.ASSISTANT,
             content=content,
             tool_requests=tuple(requests),
         )
+
+    @staticmethod
+    def _output_items(body: object) -> list[JsonObject]:
+        if not isinstance(body, dict):
+            raise ValueError("model response is not an object")
+        output = body.get("output")
+        if not isinstance(output, list) or not output or not all(isinstance(item, dict) for item in output):
+            raise ValueError("model response does not contain output items")
+        return cast(list[JsonObject], output)
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:

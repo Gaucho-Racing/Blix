@@ -10,5 +10,5 @@ class ModelClientError(Exception):
         super().__init__(message)
 
 
-class ChatModel(Protocol):
+class LanguageModel(Protocol):
     async def complete(self, request: ModelRequest) -> ModelResponse: ...

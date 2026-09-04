@@ -1,4 +1,4 @@
-from blix_agent_worker.llm.bifrost import BifrostChatModel
-from blix_agent_worker.llm.main import ChatModel, ModelClientError
+from blix_agent_worker.llm.bifrost import BifrostResponsesModel
+from blix_agent_worker.llm.main import LanguageModel, ModelClientError
 
-__all__ = ["BifrostChatModel", "ChatModel", "ModelClientError"]
+__all__ = ["BifrostResponsesModel", "LanguageModel", "ModelClientError"]

@@ -19,7 +19,7 @@ from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Input,
     GeneralConversationV1Output,
 )
-from blix_agent_worker.llm import BifrostChatModel
+from blix_agent_worker.llm import BifrostResponsesModel
 from blix_agent_worker.models.agent import AgentResultStatus, AgentTask, AgentUsage
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
@@ -181,7 +181,7 @@ async def run_cli() -> None:
     conversation_id = new_ulid()
     messages: list[ConversationMessage] = []
 
-    async with BifrostChatModel(
+    async with BifrostResponsesModel(
         base_url=BIFROST_BASE_URL,
         username=credentials["BIFROST_USERNAME"],
         password=credentials["BIFROST_PASSWORD"],

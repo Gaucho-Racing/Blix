@@ -3,7 +3,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from blix_agent_worker.models.common import ContractModel, JsonObject, NonEmptyText, VersionedIdentifier
+from blix_agent_worker.models.common import ContractModel, Identifier, JsonObject, NonEmptyText, VersionedIdentifier
 from blix_agent_worker.models.tool import ToolDefinition
 
 
@@ -62,14 +62,21 @@ class ModelUsage(ContractModel):
     output_tokens: Annotated[int, Field(ge=0)] = 0
 
 
+class ModelContinuation(ContractModel):
+    adapter_id: Identifier
+    state: JsonObject
+
+
 class ModelRequest(ContractModel):
     messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
     tools: tuple[ToolDefinition, ...] = ()
+    continuation: ModelContinuation | None = None
 
 
 class ModelResponse(ContractModel):
     message: ModelMessage
     usage: ModelUsage = Field(default_factory=ModelUsage)
+    continuation: ModelContinuation | None = None
 
     @model_validator(mode="after")
     def message_must_be_from_assistant(self) -> Self:
