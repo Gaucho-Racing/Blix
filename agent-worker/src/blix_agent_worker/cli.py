@@ -148,7 +148,7 @@ class BlixTurnDisplay:
         status = Table.grid(padding=(0, 1))
         status.add_column(width=2)
         status.add_column()
-        status.add_row("", Spinner("dots", Text("thinking…", style="muted"), style="accent"))
+        status.add_row("", Spinner("dots", Text("thinking…", style="muted"), style="muted"))
         return Group(Text(""), self._header(), *self._tool_events, status)
 
     @staticmethod
