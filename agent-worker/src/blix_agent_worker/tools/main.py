@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Protocol, Self
 
 from pydantic import Field, JsonValue, field_validator, model_validator
 
@@ -55,7 +55,7 @@ class ToolCall(ContractModel):
 class ToolResultStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
-    ACCEPTED = "accepted"
+    QUEUED = "queued"
 
 
 class ToolResult(ContractModel):
@@ -72,8 +72,14 @@ class ToolResult(ContractModel):
             raise ValueError("a succeeded tool result cannot contain error or job_id")
         if self.status is ToolResultStatus.FAILED and self.error is None:
             raise ValueError("a failed tool result must contain error")
-        if self.status is ToolResultStatus.ACCEPTED and not self.job_id:
-            raise ValueError("an accepted tool result must contain job_id")
-        if self.status is ToolResultStatus.ACCEPTED and self.error is not None:
-            raise ValueError("an accepted tool result cannot contain error")
+        if self.status is ToolResultStatus.QUEUED and not self.job_id:
+            raise ValueError("a queued tool result must contain job_id")
+        if self.status is ToolResultStatus.QUEUED and self.error is not None:
+            raise ValueError("a queued tool result cannot contain error")
         return self
+
+
+class Tool(Protocol):
+    definition: ToolDefinition
+
+    async def execute(self, call: ToolCall) -> ToolResult: ...

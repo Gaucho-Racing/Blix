@@ -9,6 +9,10 @@ from blix_agent_worker.agents import (
 )
 from blix_agent_worker.common import ContractError
 from blix_agent_worker.tools import (
+    CurrentTimeInput,
+    CurrentTimeOutput,
+    CurrentTimeTool,
+    Tool,
     ToolCall,
     ToolDefinition,
     ToolExecutionMode,
@@ -26,6 +30,10 @@ __all__ = [
     "AgentTask",
     "AgentUsage",
     "ContractError",
+    "CurrentTimeInput",
+    "CurrentTimeOutput",
+    "CurrentTimeTool",
+    "Tool",
     "ToolCall",
     "ToolDefinition",
     "ToolExecutionMode",
