@@ -62,7 +62,6 @@ class WebExtractV1Tool:
         description="Extract query-relevant text from public web pages returned by web search.",
         input_schema=WebExtractV1Input.model_json_schema(mode="validation"),
         output_schema=WebExtractV1Output.model_json_schema(mode="serialization"),
-        timeout_seconds=45,
         idempotent=True,
     )
 
@@ -98,7 +97,6 @@ class WebExtractV1Tool:
                     "extract_depth": "basic",
                     "include_images": False,
                     "format": "markdown",
-                    "timeout": 30,
                 },
                 api_key=api_key,
             )

@@ -21,7 +21,6 @@ VersionedIdentifier = Annotated[
     Field(min_length=4, max_length=64, pattern=r"^[a-z][a-z0-9_]*_v[1-9][0-9]*$"),
 ]
 NonEmptyText = Annotated[str, Field(min_length=1)]
-PositiveSeconds = Annotated[int, Field(gt=0)]
 ULID = Annotated[
     str,
     Field(min_length=26, max_length=26, pattern=r"^[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$"),

@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Callable, Collection
 
 from pydantic import ValidationError
@@ -51,17 +50,6 @@ class AgentRunner:
                     f"Agent {request.callable_id!r} is not allowed for this invocation.",
                 )
             )
-        if parent_task.delegation_depth >= parent_task.budget.max_delegation_depth:
-            return self._emit(
-                self._failure(
-                    parent_task,
-                    invocation_id,
-                    request.callable_id,
-                    "delegation_depth_exhausted",
-                    "The agent exhausted its delegation-depth budget.",
-                )
-            )
-
         try:
             delegation = AgentDelegationInput.model_validate(request.arguments)
         except ValidationError as error:
@@ -102,26 +90,12 @@ class AgentRunner:
             allowed_subagent_ids=agent.definition.subagent_ids,
             delegation_depth=parent_task.delegation_depth + 1,
             response_schema=agent.definition.output_schema,
-            budget=parent_task.budget,
         )
         if self._on_start is not None:
             self._on_start(task)
 
         try:
-            async with asyncio.timeout(task.budget.timeout_seconds):
-                result = await agent.run(task)
-        except TimeoutError:
-            return self._emit(
-                self._failure(
-                    parent_task,
-                    invocation_id,
-                    agent.definition.id,
-                    "agent_timeout",
-                    f"Agent {agent.definition.id!r} timed out.",
-                    status=AgentResultStatus.TIMED_OUT,
-                    retryable=True,
-                )
-            )
+            result = await agent.run(task)
         except Exception:
             return self._emit(
                 self._failure(
@@ -162,19 +136,16 @@ class AgentRunner:
         code: str,
         message: str,
         *,
-        status: AgentResultStatus = AgentResultStatus.FAILED,
-        retryable: bool = False,
         details: JsonObject | None = None,
     ) -> AgentResult:
         return AgentResult(
             run_id=parent_task.run_id,
             invocation_id=invocation_id,
             agent_id=agent_id,
-            status=status,
+            status=AgentResultStatus.FAILED,
             error=ContractError(
                 code=code,
                 message=message,
-                retryable=retryable,
                 details=details or {},
             ),
         )

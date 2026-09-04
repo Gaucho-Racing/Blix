@@ -9,7 +9,6 @@ from blix_agent_worker.models.common import (
     ContractModel,
     JsonObject,
     NonEmptyText,
-    PositiveSeconds,
     VersionedIdentifier,
 )
 
@@ -32,7 +31,6 @@ class ToolDefinition(ContractModel):
     output_schema: JsonObject | None = None
     impact: ToolImpact = ToolImpact.READ_ONLY
     execution_mode: ToolExecutionMode = ToolExecutionMode.INLINE
-    timeout_seconds: PositiveSeconds = 30
     idempotent: bool = False
     requires_approval: bool = False
 

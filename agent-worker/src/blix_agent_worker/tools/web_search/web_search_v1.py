@@ -57,7 +57,6 @@ class WebSearchV1Tool:
         description="Search the public web and return ranked source snippets with URLs.",
         input_schema=WebSearchV1Input.model_json_schema(mode="validation"),
         output_schema=WebSearchV1Output.model_json_schema(mode="serialization"),
-        timeout_seconds=30,
         idempotent=True,
     )
 

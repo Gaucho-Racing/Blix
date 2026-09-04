@@ -132,7 +132,7 @@ class DeepResearchV1Agent:
         output_tokens = 0
         continuation: ModelContinuation | None = None
 
-        for _ in range(task.budget.max_model_calls):
+        while True:
             model_calls += 1
             try:
                 response = await self._model.complete(
@@ -176,13 +176,6 @@ class DeepResearchV1Agent:
 
             messages.append(response.message)
             for model_call_request in response.message.call_requests:
-                if tool_calls >= task.budget.max_tool_calls:
-                    return self._failure(
-                        task,
-                        "tool_budget_exhausted",
-                        "The agent exhausted its tool-call budget.",
-                        usage=usage,
-                    )
                 try:
                     callable_kind = catalog.resolve_kind(model_call_request.callable_id)
                 except CallableNotFoundError:
@@ -240,13 +233,6 @@ class DeepResearchV1Agent:
                         call_request_ref=model_call_request.ref,
                     )
                 )
-
-        return self._failure(
-            task,
-            "model_budget_exhausted",
-            "The agent exhausted its model-call budget before producing a report.",
-            usage=self._usage(model_calls, tool_calls, input_tokens, output_tokens),
-        )
 
     @staticmethod
     def _usage(model_calls: int, tool_calls: int, input_tokens: int, output_tokens: int) -> AgentUsage:

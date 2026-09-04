@@ -1,5 +1,4 @@
 from blix_agent_worker.models.agent import (
-    AgentBudget,
     AgentDefinition,
     AgentKind,
     AgentResult,
@@ -30,7 +29,6 @@ from blix_agent_worker.models.tool import (
 )
 
 __all__ = [
-    "AgentBudget",
     "AgentDefinition",
     "AgentKind",
     "AgentResult",

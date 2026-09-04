@@ -13,11 +13,11 @@ class TavilyClientError(Exception):
 
 
 class TavilyClient:
-    def __init__(self, *, timeout_seconds: float = 30) -> None:
+    def __init__(self) -> None:
         self._client = httpx.AsyncClient(
             base_url="https://api.tavily.com/",
             headers={"Accept": "application/json", "Content-Type": "application/json"},
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=None,
         )
 
     async def __aenter__(self) -> Self:
@@ -45,8 +45,6 @@ class TavilyClient:
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
             )
-        except httpx.TimeoutException as error:
-            raise TavilyClientError("web_provider_timeout", "The web provider timed out.", retryable=True) from error
         except httpx.RequestError as error:
             raise TavilyClientError(
                 "web_provider_unavailable",

@@ -1,5 +1,3 @@
-import asyncio
-
 from blix_agent_worker.models.common import ContractError
 from blix_agent_worker.models.tool import ToolCall, ToolExecutionMode, ToolResult, ToolResultStatus
 from blix_agent_worker.tools.registry import ToolNotFoundError, ToolRegistry
@@ -33,18 +31,7 @@ class ToolRunner:
             )
 
         try:
-            async with asyncio.timeout(tool.definition.timeout_seconds):
-                result = await tool.execute(call)
-        except TimeoutError:
-            return ToolResult(
-                call_id=call.call_id,
-                status=ToolResultStatus.FAILED,
-                error=ContractError(
-                    code="tool_timeout",
-                    message=f"Tool {call.tool_id!r} timed out.",
-                    retryable=True,
-                ),
-            )
+            result = await tool.execute(call)
         except Exception:
             return ToolResult(
                 call_id=call.call_id,

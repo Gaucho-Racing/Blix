@@ -10,7 +10,6 @@ from blix_agent_worker.models.common import (
     Identifier,
     JsonObject,
     NonEmptyText,
-    PositiveSeconds,
     VersionedIdentifier,
 )
 
@@ -52,14 +51,6 @@ class AgentDefinition(ContractModel):
         return self
 
 
-class AgentBudget(ContractModel):
-    max_model_calls: Annotated[int, Field(ge=1)] = 8
-    max_tool_calls: Annotated[int, Field(ge=0)] = 32
-    max_delegation_calls: Annotated[int, Field(ge=0)] = 8
-    max_delegation_depth: Annotated[int, Field(ge=0)] = 1
-    timeout_seconds: PositiveSeconds = 120
-
-
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
     run_id: ULID
@@ -74,7 +65,6 @@ class AgentTask(ContractModel):
     allowed_subagent_ids: tuple[VersionedIdentifier, ...] | None = None
     delegation_depth: Annotated[int, Field(ge=0)] = 0
     response_schema: JsonObject | None = None
-    budget: AgentBudget = Field(default_factory=AgentBudget)
 
     @field_validator("artifact_refs", "allowed_tool_ids", "allowed_subagent_ids")
     @classmethod
@@ -88,7 +78,6 @@ class AgentResultStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
 
 
 class AgentUsage(ContractModel):

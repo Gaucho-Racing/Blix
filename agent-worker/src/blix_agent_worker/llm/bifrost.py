@@ -60,7 +60,6 @@ class BifrostResponsesModel:
         virtual_key: str,
         model: str,
         reasoning_effort: ReasoningEffort = "medium",
-        timeout_seconds: float = 120,
     ) -> None:
         if not base_url.strip():
             raise ValueError("base_url cannot be empty")
@@ -83,7 +82,7 @@ class BifrostResponsesModel:
                 "Content-Type": "application/json",
                 "x-bf-vk": virtual_key,
             },
-            timeout=httpx.Timeout(timeout_seconds),
+            timeout=None,
         )
 
     async def __aenter__(self) -> Self:
@@ -104,8 +103,6 @@ class BifrostResponsesModel:
 
         try:
             response = await self._client.post("v1/responses", json=payload)
-        except httpx.TimeoutException as error:
-            raise ModelClientError("model_timeout", "The model request timed out.", retryable=True) from error
         except httpx.RequestError as error:
             raise ModelClientError("model_unavailable", "The model gateway is unavailable.", retryable=True) from error
 

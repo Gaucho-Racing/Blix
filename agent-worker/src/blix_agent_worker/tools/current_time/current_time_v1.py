@@ -37,7 +37,6 @@ class CurrentTimeV1Tool:
         output_schema=CurrentTimeV1Output.model_json_schema(mode="serialization"),
         impact=ToolImpact.READ_ONLY,
         execution_mode=ToolExecutionMode.INLINE,
-        timeout_seconds=5,
     )
 
     async def execute(self, call: ToolCall) -> ToolResult:

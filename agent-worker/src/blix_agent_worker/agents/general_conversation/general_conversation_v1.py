@@ -163,7 +163,7 @@ class GeneralConversationV1Agent:
         input_tokens = 0
         output_tokens = 0
         continuation: ModelContinuation | None = None
-        for _ in range(task.budget.max_model_calls):
+        while True:
             model_calls += 1
             try:
                 response = await self._model.complete(
@@ -230,13 +230,6 @@ class GeneralConversationV1Agent:
                     )
 
                 if callable_kind is ModelCallableKind.AGENT:
-                    if delegation_calls >= task.budget.max_delegation_calls:
-                        return self._failure(
-                            task,
-                            "delegation_budget_exhausted",
-                            "The agent exhausted its delegation-call budget.",
-                            usage=usage,
-                        )
                     delegation_calls += 1
                     agent_result = await self._agent_runner.execute(
                         parent_task=task,
@@ -258,20 +251,6 @@ class GeneralConversationV1Agent:
                         output_tokens=output_tokens,
                     )
                     continue
-
-                if tool_calls >= task.budget.max_tool_calls:
-                    return self._failure(
-                        task,
-                        "tool_budget_exhausted",
-                        "The agent exhausted its tool-call budget.",
-                        usage=AgentUsage(
-                            model_calls=model_calls,
-                            tool_calls=tool_calls,
-                            delegation_calls=delegation_calls,
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                        ),
-                    )
 
                 tool_calls += 1
                 call = ToolCall(
@@ -301,19 +280,6 @@ class GeneralConversationV1Agent:
                         call_request_ref=model_call_request.ref,
                     )
                 )
-
-        return self._failure(
-            task,
-            "model_budget_exhausted",
-            "The agent exhausted its model-call budget before producing a response.",
-            usage=AgentUsage(
-                model_calls=model_calls,
-                tool_calls=tool_calls,
-                delegation_calls=delegation_calls,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            ),
-        )
 
     @staticmethod
     def _agent_result_payload(result: AgentResult) -> JsonObject:

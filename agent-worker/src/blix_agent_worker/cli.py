@@ -34,7 +34,6 @@ from blix_agent_worker.tools.web_search import WebSearchV1Tool
 
 BIFROST_BASE_URL = "https://bifrost.gauchoracing.com"
 MODEL = "openai/gpt-5.6-luna"
-MAX_CONVERSATION_MESSAGES = 40
 
 THEME = Theme(
     {
@@ -314,7 +313,7 @@ async def run_cli() -> None:
             )
             agent_input = GeneralConversationV1Input(
                 conversation_id=conversation_id,
-                messages=tuple(messages[-MAX_CONVERSATION_MESSAGES:]),
+                messages=tuple(messages),
             )
             task = AgentTask(
                 run_id=run_id,
@@ -328,12 +327,7 @@ async def run_cli() -> None:
 
             turn_display.start()
             try:
-                async with asyncio.timeout(task.budget.timeout_seconds):
-                    result = await agent.run(task)
-            except TimeoutError:
-                turn_display.stop()
-                print_error("The agent timed out.")
-                continue
+                result = await agent.run(task)
             finally:
                 turn_display.stop()
 

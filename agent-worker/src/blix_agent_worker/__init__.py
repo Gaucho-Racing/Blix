@@ -8,7 +8,6 @@ from blix_agent_worker.agents import (
 )
 from blix_agent_worker.models import (
     ULID,
-    AgentBudget,
     AgentDefinition,
     AgentKind,
     AgentResult,
@@ -46,7 +45,6 @@ from blix_agent_worker.tools import (
 
 __all__ = [
     "Agent",
-    "AgentBudget",
     "AgentDefinition",
     "AgentKind",
     "AgentNotFoundError",
