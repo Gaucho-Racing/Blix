@@ -54,12 +54,18 @@ class BifrostChatModel:
         self,
         *,
         base_url: str,
+        username: str,
+        password: str,
         virtual_key: str,
         model: str,
         timeout_seconds: float = 120,
     ) -> None:
         if not base_url.strip():
             raise ValueError("base_url cannot be empty")
+        if not username.strip():
+            raise ValueError("username cannot be empty")
+        if not password:
+            raise ValueError("password cannot be empty")
         if not virtual_key.strip():
             raise ValueError("virtual_key cannot be empty")
         if not model.strip():
@@ -68,6 +74,7 @@ class BifrostChatModel:
         self._model = model
         self._client = httpx.AsyncClient(
             base_url=f"{base_url.rstrip('/')}/",
+            auth=httpx.BasicAuth(username=username, password=password),
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
@@ -91,6 +98,7 @@ class BifrostChatModel:
             "messages": [self._message_payload(message) for message in request.messages],
         }
         if request.tools:
+            payload["reasoning"] = {"effort": "none"}
             payload["tools"] = [
                 {
                     "type": "function",

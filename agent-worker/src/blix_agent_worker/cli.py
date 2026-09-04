@@ -4,6 +4,12 @@ from datetime import UTC, datetime
 
 import typer
 from pydantic import ValidationError
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
 
 from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Agent,
@@ -21,15 +27,74 @@ BIFROST_BASE_URL = "https://bifrost.gauchoracing.com"
 MODEL = "openai/gpt-5.6-luna"
 MAX_CONVERSATION_MESSAGES = 40
 
+THEME = Theme(
+    {
+        "blix": "bold bright_cyan",
+        "command": "bold cyan",
+        "error": "bold bright_red",
+        "muted": "bright_black",
+        "success": "bold bright_green",
+        "user": "bold bright_green",
+        "warning": "bold yellow",
+    }
+)
+CONSOLE = Console(theme=THEME, highlight=False)
+ERROR_CONSOLE = Console(theme=THEME, highlight=False, stderr=True)
+
+
+def print_banner(agent_id: str) -> None:
+    details = Table.grid(padding=(0, 2))
+    details.add_column(style="muted", no_wrap=True)
+    details.add_column()
+    details.add_row("AGENT", agent_id)
+    details.add_row("MODEL", MODEL)
+    details.add_row("COMMANDS", "[command]/help[/]  [command]/tools[/]  [command]/reset[/]  [command]/quit[/]")
+    CONSOLE.print(
+        Panel(
+            details,
+            title="[blix] BLIX [/blix]",
+            subtitle="[muted]agent runtime[/muted]",
+            border_style="bright_cyan",
+            padding=(1, 2),
+        )
+    )
+
+
+def print_help() -> None:
+    commands = Table.grid(padding=(0, 2))
+    commands.add_column(style="command", no_wrap=True)
+    commands.add_column()
+    commands.add_row("/help", "Show available commands")
+    commands.add_row("/tools", "List tools available to this agent")
+    commands.add_row("/reset", "Start a fresh conversation")
+    commands.add_row("/quit", "End the session")
+    CONSOLE.print(Panel(commands, title="[blix]Commands[/blix]", title_align="left", border_style="cyan"))
+
+
+def print_tools(registry: ToolRegistry, tool_ids: tuple[str, ...]) -> None:
+    tools = Table(box=None, expand=True, show_header=True, header_style="muted", padding=(0, 2))
+    tools.add_column("TOOL", style="command", no_wrap=True)
+    tools.add_column("DESCRIPTION")
+    for definition in registry.definitions(tool_ids):
+        tools.add_row(definition.id, definition.description)
+    CONSOLE.print(Panel(tools, title="[blix]Available tools[/blix]", title_align="left", border_style="cyan"))
+
 
 def print_error(message: str) -> None:
-    typer.secho(f"error> {message}", fg=typer.colors.RED, bold=True, err=True)
+    ERROR_CONSOLE.print(
+        Panel(Text(message, style="error"), title="[error]Error[/error]", title_align="left", border_style="red")
+    )
 
 
 async def run_cli() -> None:
-    virtual_key = os.environ.get("BIFROST_VIRTUAL_KEY", "").strip()
-    if not virtual_key:
-        raise RuntimeError("BIFROST_VIRTUAL_KEY is required")
+    credentials = {
+        "BIFROST_USERNAME": os.environ.get("BIFROST_USERNAME", "").strip(),
+        "BIFROST_PASSWORD": os.environ.get("BIFROST_PASSWORD", ""),
+        "BIFROST_VIRTUAL_KEY": os.environ.get("BIFROST_VIRTUAL_KEY", "").strip(),
+    }
+    missing_credentials = [name for name, value in credentials.items() if not value]
+    if missing_credentials:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing_credentials)}")
 
     registry = ToolRegistry([CurrentTimeV1Tool()])
     tool_runner = ToolRunner(registry)
@@ -38,40 +103,36 @@ async def run_cli() -> None:
 
     async with BifrostChatModel(
         base_url=BIFROST_BASE_URL,
-        virtual_key=virtual_key,
+        username=credentials["BIFROST_USERNAME"],
+        password=credentials["BIFROST_PASSWORD"],
+        virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
         model=MODEL,
     ) as model:
         agent = GeneralConversationV1Agent(model=model, tool_runner=tool_runner)
-        typer.secho("Blix", fg=typer.colors.CYAN, bold=True)
-        typer.echo(f"{agent.definition.id} · {MODEL}")
-        typer.secho("Commands: /help, /reset, /tools, /quit", fg=typer.colors.BRIGHT_BLACK)
+        print_banner(agent.definition.id)
 
         while True:
             try:
-                user_input = typer.prompt(
-                    typer.style("you", fg=typer.colors.GREEN, bold=True),
-                    prompt_suffix="> ",
-                ).strip()
-            except (EOFError, typer.Abort):
-                typer.echo()
+                user_input = CONSOLE.input("[user]you[/user] [muted]›[/muted] ").strip()
+            except EOFError:
+                CONSOLE.print()
                 return
 
             if not user_input:
                 continue
             if user_input == "/quit":
+                CONSOLE.print("[muted]Session ended.[/muted]")
                 return
             if user_input == "/help":
-                typer.echo("Enter a message, or use /reset, /tools, or /quit.")
+                print_help()
                 continue
             if user_input == "/reset":
                 conversation_id = new_ulid()
                 messages.clear()
-                typer.secho("Conversation reset.", fg=typer.colors.YELLOW)
+                CONSOLE.print("[success]Conversation reset.[/success]")
                 continue
             if user_input == "/tools":
-                for definition in registry.definitions(agent.definition.tool_ids):
-                    typer.secho(definition.id, fg=typer.colors.CYAN, bold=True, nl=False)
-                    typer.echo(f": {definition.description}")
+                print_tools(registry, agent.definition.tool_ids)
                 continue
             if user_input.startswith("/"):
                 print_error(f"Unknown command: {user_input}")
@@ -100,8 +161,9 @@ async def run_cli() -> None:
             )
 
             try:
-                async with asyncio.timeout(task.budget.timeout_seconds):
-                    result = await agent.run(task)
+                with CONSOLE.status("[blix]Blix is thinking…[/blix]", spinner="dots"):
+                    async with asyncio.timeout(task.budget.timeout_seconds):
+                        result = await agent.run(task)
             except TimeoutError:
                 print_error("The agent timed out.")
                 continue
@@ -126,17 +188,24 @@ async def run_cli() -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-            typer.secho("blix", fg=typer.colors.CYAN, bold=True, nl=False)
-            typer.echo(f"> {output.message}")
+            CONSOLE.print(
+                Panel(
+                    Markdown(output.message),
+                    title="[blix]blix[/blix]",
+                    title_align="left",
+                    border_style="bright_cyan",
+                    padding=(0, 1),
+                )
+            )
 
 
 def start_session() -> None:
     try:
         asyncio.run(run_cli())
     except KeyboardInterrupt:
-        typer.echo()
+        CONSOLE.print("\n[muted]Session ended.[/muted]")
     except RuntimeError as error:
-        typer.secho(f"error: {error}", fg=typer.colors.RED, bold=True, err=True)
+        print_error(str(error))
         raise typer.Exit(code=1) from error
 
 
