@@ -4,6 +4,11 @@ from collections.abc import Callable
 from pydantic import ValidationError
 
 from blix_agent_worker.agents.callables import CallableCatalog, CallableNotFoundError
+from blix_agent_worker.agents.deep_research.prompt import (
+    DEEP_RESEARCH_V1_CONTEXT_SECTION,
+    DEEP_RESEARCH_V1_SYSTEM_PROMPT,
+    DEEP_RESEARCH_V1_USER_PROMPT,
+)
 from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
     AgentDefinition,
@@ -48,13 +53,7 @@ class DeepResearchV1Agent:
             "Research a question using public web sources, inspect the strongest sources, and return a rigorous "
             "report with inline source URLs."
         ),
-        instructions=(
-            "You are Blix's deep research specialist. Research the assigned question using the available web tools. "
-            "Search iteratively with focused queries, inspect the strongest relevant pages, and prioritize primary "
-            "sources. Distinguish sourced facts from inference, note meaningful conflicts or uncertainty, and cite the "
-            "supporting source URL next to each substantive claim. Never invent a source or claim to have inspected a "
-            "page you did not extract. If the tools fail or evidence is insufficient, state that limitation clearly."
-        ),
+        instructions=DEEP_RESEARCH_V1_SYSTEM_PROMPT,
         input_schema=DeepResearchV1Input.model_json_schema(mode="validation"),
         output_schema=DeepResearchV1Output.model_json_schema(mode="serialization"),
         model_profile="deep_research",
@@ -115,9 +114,14 @@ class DeepResearchV1Agent:
             )
 
         catalog = CallableCatalog(tools=tool_definitions)
-        prompt = f"Objective: {task.objective}\n\nResearch question: {agent_input.question}"
+        prompt = DEEP_RESEARCH_V1_USER_PROMPT.format(
+            objective=task.objective,
+            question=agent_input.question,
+        )
         if task.context:
-            prompt += f"\n\nAdditional context:\n{json.dumps(task.context, ensure_ascii=False)}"
+            prompt += DEEP_RESEARCH_V1_CONTEXT_SECTION.format(
+                context=json.dumps(task.context, ensure_ascii=False)
+            )
         messages = [
             ModelMessage(role=ModelMessageRole.SYSTEM, content=self.definition.instructions),
             ModelMessage(role=ModelMessageRole.USER, content=prompt),
