@@ -4,56 +4,74 @@ from typing import Annotated, Self
 from pydantic import Field, field_validator, model_validator
 
 from blix_agent_worker.models.common import ContractModel, Identifier, JsonObject, NonEmptyText, VersionedIdentifier
-from blix_agent_worker.models.tool import ToolDefinition
 
 
 class ModelMessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+    CALL_OUTPUT = "call_output"
+
+
+class ModelCallableKind(StrEnum):
     TOOL = "tool"
+    AGENT = "agent"
 
 
-class ModelToolRequest(ContractModel):
+class ModelCallableDefinition(ContractModel):
+    id: VersionedIdentifier
+    kind: ModelCallableKind
+    description: NonEmptyText
+    input_schema: JsonObject
+
+    @field_validator("input_schema")
+    @classmethod
+    def input_schema_must_describe_an_object(cls, schema: JsonObject) -> JsonObject:
+        if schema.get("type") != "object":
+            raise ValueError("input_schema must describe a JSON object")
+        return schema
+
+
+class ModelCallRequest(ContractModel):
     ref: NonEmptyText
-    tool_id: VersionedIdentifier
+    callable_id: VersionedIdentifier
     arguments: JsonObject
 
 
 class ModelMessage(ContractModel):
     role: ModelMessageRole
     content: NonEmptyText | None = None
-    tool_requests: tuple[ModelToolRequest, ...] = ()
-    tool_request_ref: NonEmptyText | None = None
+    call_requests: tuple[ModelCallRequest, ...] = ()
+    call_request_ref: NonEmptyText | None = None
 
-    @field_validator("tool_requests")
+    @field_validator("call_requests")
     @classmethod
-    def tool_request_refs_must_be_unique(cls, requests: tuple[ModelToolRequest, ...]) -> tuple[ModelToolRequest, ...]:
+    def call_request_refs_must_be_unique(cls, requests: tuple[ModelCallRequest, ...]) -> tuple[ModelCallRequest, ...]:
         refs = tuple(request.ref for request in requests)
         if len(refs) != len(set(refs)):
-            raise ValueError("tool request refs must be unique")
+            raise ValueError("call request refs must be unique")
         return requests
 
     @model_validator(mode="after")
     def validate_role_fields(self) -> Self:
         if self.role is ModelMessageRole.ASSISTANT:
-            if self.content is None and not self.tool_requests:
-                raise ValueError("an assistant message must contain content or tool requests")
-            if self.tool_request_ref is not None:
-                raise ValueError("an assistant message cannot contain tool_request_ref")
+            if self.content is None and not self.call_requests:
+                raise ValueError("an assistant message must contain content or call requests")
+            if self.call_request_ref is not None:
+                raise ValueError("an assistant message cannot contain call_request_ref")
             return self
 
-        if self.role is ModelMessageRole.TOOL:
-            if self.content is None or self.tool_request_ref is None:
-                raise ValueError("a tool message must contain content and tool_request_ref")
-            if self.tool_requests:
-                raise ValueError("a tool message cannot contain tool requests")
+        if self.role is ModelMessageRole.CALL_OUTPUT:
+            if self.content is None or self.call_request_ref is None:
+                raise ValueError("a call output message must contain content and call_request_ref")
+            if self.call_requests:
+                raise ValueError("a call output message cannot contain call requests")
             return self
 
         if self.content is None:
             raise ValueError("a system or user message must contain content")
-        if self.tool_requests or self.tool_request_ref is not None:
-            raise ValueError("a system or user message cannot contain tool request fields")
+        if self.call_requests or self.call_request_ref is not None:
+            raise ValueError("a system or user message cannot contain call request fields")
         return self
 
 
@@ -69,8 +87,19 @@ class ModelContinuation(ContractModel):
 
 class ModelRequest(ContractModel):
     messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
-    tools: tuple[ToolDefinition, ...] = ()
+    callables: tuple[ModelCallableDefinition, ...] = ()
     continuation: ModelContinuation | None = None
+
+    @field_validator("callables")
+    @classmethod
+    def callable_ids_must_be_unique(
+        cls,
+        definitions: tuple[ModelCallableDefinition, ...],
+    ) -> tuple[ModelCallableDefinition, ...]:
+        ids = tuple(definition.id for definition in definitions)
+        if len(ids) != len(set(ids)):
+            raise ValueError("callable IDs must be unique")
+        return definitions
 
 
 class ModelResponse(ContractModel):

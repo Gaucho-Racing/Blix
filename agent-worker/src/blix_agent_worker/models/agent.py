@@ -25,9 +25,18 @@ class AgentDefinition(ContractModel):
     kind: AgentKind
     description: NonEmptyText
     instructions: NonEmptyText
+    input_schema: JsonObject
+    output_schema: JsonObject
     model_profile: Identifier | None = None
     tool_ids: tuple[VersionedIdentifier, ...] = ()
     subagent_ids: tuple[VersionedIdentifier, ...] = ()
+
+    @field_validator("input_schema", "output_schema")
+    @classmethod
+    def schemas_must_describe_objects(cls, schema: JsonObject) -> JsonObject:
+        if schema.get("type") != "object":
+            raise ValueError("agent schemas must describe JSON objects")
+        return schema
 
     @field_validator("tool_ids", "subagent_ids")
     @classmethod
@@ -46,6 +55,7 @@ class AgentDefinition(ContractModel):
 class AgentBudget(ContractModel):
     max_model_calls: Annotated[int, Field(ge=1)] = 8
     max_tool_calls: Annotated[int, Field(ge=0)] = 32
+    max_delegation_calls: Annotated[int, Field(ge=0)] = 8
     max_delegation_depth: Annotated[int, Field(ge=0)] = 1
     timeout_seconds: PositiveSeconds = 120
 
@@ -61,10 +71,12 @@ class AgentTask(ContractModel):
     context: JsonObject = Field(default_factory=dict)
     artifact_refs: tuple[NonEmptyText, ...] = ()
     allowed_tool_ids: tuple[VersionedIdentifier, ...] | None = None
+    allowed_subagent_ids: tuple[VersionedIdentifier, ...] | None = None
+    delegation_depth: Annotated[int, Field(ge=0)] = 0
     response_schema: JsonObject | None = None
     budget: AgentBudget = Field(default_factory=AgentBudget)
 
-    @field_validator("artifact_refs", "allowed_tool_ids")
+    @field_validator("artifact_refs", "allowed_tool_ids", "allowed_subagent_ids")
     @classmethod
     def values_must_be_unique(cls, values: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if values is not None and len(values) != len(set(values)):
@@ -82,6 +94,7 @@ class AgentResultStatus(StrEnum):
 class AgentUsage(ContractModel):
     model_calls: Annotated[int, Field(ge=0)] = 0
     tool_calls: Annotated[int, Field(ge=0)] = 0
+    delegation_calls: Annotated[int, Field(ge=0)] = 0
     input_tokens: Annotated[int, Field(ge=0)] = 0
     output_tokens: Annotated[int, Field(ge=0)] = 0
 

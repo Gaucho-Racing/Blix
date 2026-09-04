@@ -9,12 +9,14 @@ from blix_agent_worker.models.agent import (
 )
 from blix_agent_worker.models.common import ULID, ContractError, new_ulid
 from blix_agent_worker.models.llm import (
+    ModelCallableDefinition,
+    ModelCallableKind,
+    ModelCallRequest,
     ModelContinuation,
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
     ModelResponse,
-    ModelToolRequest,
     ModelUsage,
 )
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
@@ -38,12 +40,14 @@ __all__ = [
     "ContractError",
     "ConversationMessage",
     "ConversationMessageRole",
+    "ModelCallableDefinition",
+    "ModelCallableKind",
+    "ModelCallRequest",
     "ModelContinuation",
     "ModelMessage",
     "ModelMessageRole",
     "ModelRequest",
     "ModelResponse",
-    "ModelToolRequest",
     "ModelUsage",
     "ToolCall",
     "ToolDefinition",

@@ -7,12 +7,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from blix_agent_worker.llm.main import ModelClientError
 from blix_agent_worker.models.common import JsonObject
 from blix_agent_worker.models.llm import (
+    ModelCallRequest,
     ModelContinuation,
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
     ModelResponse,
-    ModelToolRequest,
     ModelUsage,
 )
 
@@ -156,7 +156,7 @@ class BifrostResponsesModel:
         ]
         if instructions:
             payload["instructions"] = "\n\n".join(instructions)
-        if request.tools:
+        if request.callables:
             payload["tools"] = [
                 {
                     "type": "function",
@@ -164,7 +164,7 @@ class BifrostResponsesModel:
                     "description": definition.description,
                     "parameters": definition.input_schema,
                 }
-                for definition in request.tools
+                for definition in request.callables
             ]
             payload["tool_choice"] = "auto"
         return payload
@@ -180,7 +180,7 @@ class BifrostResponsesModel:
             raise ValueError("the model continuation does not contain input items")
         if not all(isinstance(item, dict) for item in continuation_items):
             raise ValueError("the model continuation contains invalid input items")
-        return [*cast(list[JsonObject], continuation_items), *self._tool_output_items(request.messages)]
+        return [*cast(list[JsonObject], continuation_items), *self._call_output_items(request.messages)]
 
     @staticmethod
     def _conversation_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
@@ -188,8 +188,8 @@ class BifrostResponsesModel:
         for message in messages:
             if message.role is ModelMessageRole.SYSTEM:
                 continue
-            if message.role is ModelMessageRole.TOOL or message.tool_requests:
-                raise ValueError("tool exchanges require model continuation state")
+            if message.role is ModelMessageRole.CALL_OUTPUT or message.call_requests:
+                raise ValueError("callable exchanges require model continuation state")
             if message.content is None:
                 raise ValueError("conversation messages must contain text")
             items.append({"role": message.role.value, "content": message.content})
@@ -198,30 +198,32 @@ class BifrostResponsesModel:
         return items
 
     @staticmethod
-    def _tool_output_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
-        tool_request_index = next(
+    def _call_output_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
+        call_request_index = next(
             (
                 index
                 for index in range(len(messages) - 1, -1, -1)
-                if messages[index].role is ModelMessageRole.ASSISTANT and messages[index].tool_requests
+                if messages[index].role is ModelMessageRole.ASSISTANT and messages[index].call_requests
             ),
             None,
         )
-        if tool_request_index is None:
-            raise ValueError("model continuation is missing its tool request message")
+        if call_request_index is None:
+            raise ValueError("model continuation is missing its callable request message")
 
-        tool_request_refs = {request.ref for request in messages[tool_request_index].tool_requests}
-        trailing_messages = messages[tool_request_index + 1 :]
-        if not trailing_messages or any(message.role is not ModelMessageRole.TOOL for message in trailing_messages):
-            raise ValueError("model continuation must be followed by tool output messages")
-        output_refs = {message.tool_request_ref for message in trailing_messages}
-        if output_refs != tool_request_refs or len(output_refs) != len(trailing_messages):
-            raise ValueError("tool outputs do not match the pending model tool requests")
+        call_request_refs = {request.ref for request in messages[call_request_index].call_requests}
+        trailing_messages = messages[call_request_index + 1 :]
+        if not trailing_messages or any(
+            message.role is not ModelMessageRole.CALL_OUTPUT for message in trailing_messages
+        ):
+            raise ValueError("model continuation must be followed by callable output messages")
+        output_refs = {message.call_request_ref for message in trailing_messages}
+        if output_refs != call_request_refs or len(output_refs) != len(trailing_messages):
+            raise ValueError("callable outputs do not match the pending model requests")
 
         return [
             {
                 "type": "function_call_output",
-                "call_id": cast(str, message.tool_request_ref),
+                "call_id": cast(str, message.call_request_ref),
                 "output": cast(str, message.content),
             }
             for message in trailing_messages
@@ -229,7 +231,7 @@ class BifrostResponsesModel:
 
     @staticmethod
     def _model_message(output: tuple[_BifrostOutputItem, ...]) -> ModelMessage:
-        requests: list[ModelToolRequest] = []
+        requests: list[ModelCallRequest] = []
         text_parts: list[str] = []
         for item in output:
             if item.type == "function_call":
@@ -238,13 +240,13 @@ class BifrostResponsesModel:
                 try:
                     arguments = json.loads(item.arguments)
                 except json.JSONDecodeError as error:
-                    raise ValueError("model returned malformed tool arguments") from error
+                    raise ValueError("model returned malformed callable arguments") from error
                 if not isinstance(arguments, dict):
-                    raise ValueError("model returned non-object tool arguments")
+                    raise ValueError("model returned non-object callable arguments")
                 requests.append(
-                    ModelToolRequest(
+                    ModelCallRequest(
                         ref=item.call_id,
-                        tool_id=item.name,
+                        callable_id=item.name,
                         arguments=arguments,
                     )
                 )
@@ -260,7 +262,7 @@ class BifrostResponsesModel:
         return ModelMessage(
             role=ModelMessageRole.ASSISTANT,
             content=content,
-            tool_requests=tuple(requests),
+            call_requests=tuple(requests),
         )
 
     @staticmethod

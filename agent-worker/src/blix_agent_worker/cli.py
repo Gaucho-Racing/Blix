@@ -14,18 +14,23 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+from blix_agent_worker.agents import AgentRegistry, AgentRunner
+from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
 from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Agent,
     GeneralConversationV1Input,
     GeneralConversationV1Output,
 )
+from blix_agent_worker.clients import TavilyClient
 from blix_agent_worker.llm import BifrostResponsesModel
-from blix_agent_worker.models.agent import AgentResultStatus, AgentTask, AgentUsage
+from blix_agent_worker.models.agent import AgentResult, AgentResultStatus, AgentTask, AgentUsage
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
+from blix_agent_worker.tools.web_extract import WebExtractV1Tool
+from blix_agent_worker.tools.web_search import WebSearchV1Tool
 
 BIFROST_BASE_URL = "https://bifrost.gauchoracing.com"
 MODEL = "openai/gpt-5.6-luna"
@@ -55,7 +60,7 @@ def print_banner(agent_id: str, run_id: str, conversation_id: str) -> None:
     details.add_row("MODEL", MODEL)
     details.add_row("RUN", f"run_{run_id}")
     details.add_row("CONVERSATION", f"conversation_{conversation_id}")
-    details.add_row("COMMANDS", "/help  /tools  /reset  /quit")
+    details.add_row("COMMANDS", "/help  /agents  /tools  /reset  /quit")
     CONSOLE.print(
         Panel(
             details,
@@ -72,6 +77,7 @@ def print_help() -> None:
     commands.add_column(style="command", no_wrap=True)
     commands.add_column()
     commands.add_row("/help", "Show available commands")
+    commands.add_row("/agents", "List agents available for delegation")
     commands.add_row("/tools", "List tools available to this agent")
     commands.add_row("/reset", "Start a fresh conversation")
     commands.add_row("/quit", "End the session")
@@ -87,6 +93,15 @@ def print_tools(registry: ToolRegistry, tool_ids: tuple[str, ...]) -> None:
     CONSOLE.print(Panel(tools, title="[blix]Available tools[/blix]", title_align="left", border_style="accent"))
 
 
+def print_agents(registry: AgentRegistry, agent_ids: tuple[str, ...]) -> None:
+    agents = Table(box=None, expand=True, show_header=True, header_style="muted", padding=(0, 2))
+    agents.add_column("AGENT", style="command", no_wrap=True)
+    agents.add_column("DESCRIPTION")
+    for definition in registry.definitions(agent_ids):
+        agents.add_row(definition.id, definition.description)
+    CONSOLE.print(Panel(agents, title="[blix]Available agents[/blix]", title_align="left", border_style="accent"))
+
+
 def print_error(message: str) -> None:
     ERROR_CONSOLE.print(
         Panel(Text(message, style="error"), title="[error]Error[/error]", title_align="left", border_style="red")
@@ -96,12 +111,14 @@ def print_error(message: str) -> None:
 class BlixTurnDisplay:
     def __init__(self, console: Console) -> None:
         self._console = console
-        self._tool_events: list[Text] = []
+        self._activity_events: list[Text] = []
+        self._agent_event_indexes: dict[str, int] = {}
         self._live: Live | None = None
 
     def start(self) -> None:
         self.stop()
-        self._tool_events.clear()
+        self._activity_events.clear()
+        self._agent_event_indexes.clear()
         self._live = Live(
             self._pending_renderable(),
             console=self._console,
@@ -118,13 +135,49 @@ class BlixTurnDisplay:
         live.stop()
 
     def record_tool_result(self, call: ToolCall, result: ToolResult) -> None:
+        self._record_tool_result(call, result, prefix="   ↳  tool  ")
+
+    def record_subagent_tool_result(self, call: ToolCall, result: ToolResult) -> None:
+        self._record_tool_result(call, result, prefix="      ↳  tool  ")
+
+    def _record_tool_result(self, call: ToolCall, result: ToolResult, *, prefix: str) -> None:
         arguments = json.dumps(call.arguments, ensure_ascii=False, separators=(", ", ": "))
-        event = Text("   ↳  tool  ", style="muted")
+        event = Text(prefix, style="muted")
         event.append(call.tool_id, style="bold muted")
         if arguments != "{}":
             event.append(f"  {arguments}", style="muted")
         event.append(f"  ·  {result.status.value}", style="muted")
-        self._tool_events.append(event)
+        self._activity_events.append(event)
+        self._refresh()
+
+    def record_agent_start(self, task: AgentTask) -> None:
+        event = Text("   ↳  agent  ", style="muted")
+        event.append(task.agent_id, style="bold muted")
+        event.append("  ·  running", style="muted")
+        self._agent_event_indexes[task.invocation_id] = len(self._activity_events)
+        self._activity_events.append(event)
+        self._refresh()
+
+    def record_agent_result(self, result: AgentResult) -> None:
+        event = Text("   ↳  agent  ", style="muted")
+        event.append(result.agent_id, style="bold muted")
+        event.append(f"  ·  {result.status.value}", style="muted")
+        if result.usage.model_calls or result.usage.tool_calls:
+            model_call_label = "model call" if result.usage.model_calls == 1 else "model calls"
+            tool_call_label = "tool call" if result.usage.tool_calls == 1 else "tool calls"
+            event.append(
+                f"  ·  {result.usage.model_calls} {model_call_label}  ·  "
+                f"{result.usage.tool_calls} {tool_call_label}",
+                style="muted",
+            )
+        index = self._agent_event_indexes.get(result.invocation_id)
+        if index is None:
+            self._activity_events.append(event)
+        else:
+            self._activity_events[index] = event
+        self._refresh()
+
+    def _refresh(self) -> None:
         if self._live is not None:
             self._live.update(self._pending_renderable(), refresh=True)
 
@@ -132,14 +185,14 @@ class BlixTurnDisplay:
         self.stop()
         self._console.print()
         self._console.print(self._header(self._usage_summary(message, usage)))
-        for event in self._tool_events:
+        for event in self._activity_events:
             self._console.print(event)
         self._console.print(Panel(Markdown(message), border_style="muted", padding=(0, 1)))
 
     @staticmethod
     def _header(summary: str | None = None) -> Table:
-        header = Table.grid(expand=True)
-        header.add_column()
+        header = Table.grid(expand=True, padding=(0, 1))
+        header.add_column(no_wrap=True)
         header.add_column(style="muted", justify="right")
         header.add_row("[blix]●  blix[/blix]", summary or "")
         return header
@@ -149,7 +202,7 @@ class BlixTurnDisplay:
         status.add_column(width=2)
         status.add_column()
         status.add_row("", Spinner("dots", Text("thinking…", style="muted"), style="muted"))
-        return Group(Text(""), self._header(), *self._tool_events, status)
+        return Group(Text(""), self._header(), *self._activity_events, status)
 
     @staticmethod
     def _usage_summary(message: str, usage: AgentUsage) -> str:
@@ -157,10 +210,12 @@ class BlixTurnDisplay:
         token_count = usage.input_tokens + usage.output_tokens
         line_label = "line" if line_count == 1 else "lines"
         model_call_label = "model call" if usage.model_calls == 1 else "model calls"
-        tool_call_label = "tool call" if usage.tool_calls == 1 else "tool calls"
+        tool_label = "tool" if usage.tool_calls == 1 else "tools"
+        agent_label = "agent" if usage.delegation_calls == 1 else "agents"
         return (
             f"{line_count} {line_label}  ·  {usage.model_calls} {model_call_label}  ·  "
-            f"{usage.tool_calls} {tool_call_label}  ·  {token_count:,} tokens"
+            f"{usage.tool_calls} {tool_label}  ·  {usage.delegation_calls} {agent_label}  ·  "
+            f"{token_count:,} tokens"
         )
 
 
@@ -174,23 +229,44 @@ async def run_cli() -> None:
     if missing_credentials:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing_credentials)}")
 
-    registry = ToolRegistry([CurrentTimeV1Tool()])
-    tool_runner = ToolRunner(registry)
     turn_display = BlixTurnDisplay(CONSOLE)
     run_id = new_ulid()
     conversation_id = new_ulid()
     messages: list[ConversationMessage] = []
 
-    async with BifrostResponsesModel(
-        base_url=BIFROST_BASE_URL,
-        username=credentials["BIFROST_USERNAME"],
-        password=credentials["BIFROST_PASSWORD"],
-        virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
-        model=MODEL,
-    ) as model:
+    async with (
+        BifrostResponsesModel(
+            base_url=BIFROST_BASE_URL,
+            username=credentials["BIFROST_USERNAME"],
+            password=credentials["BIFROST_PASSWORD"],
+            virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
+            model=MODEL,
+        ) as model,
+        TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", "")) as tavily_client,
+    ):
+        registry = ToolRegistry(
+            [
+                CurrentTimeV1Tool(),
+                WebExtractV1Tool(tavily_client),
+                WebSearchV1Tool(tavily_client),
+            ]
+        )
+        tool_runner = ToolRunner(registry)
+        deep_research_agent = DeepResearchV1Agent(
+            model=model,
+            tool_runner=tool_runner,
+            on_tool_result=turn_display.record_subagent_tool_result,
+        )
+        agent_registry = AgentRegistry([deep_research_agent])
+        agent_runner = AgentRunner(
+            agent_registry,
+            on_start=turn_display.record_agent_start,
+            on_result=turn_display.record_agent_result,
+        )
         agent = GeneralConversationV1Agent(
             model=model,
             tool_runner=tool_runner,
+            agent_runner=agent_runner,
             on_tool_result=turn_display.record_tool_result,
         )
         print_banner(agent.definition.id, run_id, conversation_id)
@@ -209,6 +285,9 @@ async def run_cli() -> None:
                 return
             if user_input == "/help":
                 print_help()
+                continue
+            if user_input == "/agents":
+                print_agents(agent_registry, agent.definition.subagent_ids)
                 continue
             if user_input == "/reset":
                 run_id = new_ulid()
@@ -244,6 +323,7 @@ async def run_cli() -> None:
                 objective="Respond to the latest user message.",
                 input=agent_input.model_dump(mode="json"),
                 allowed_tool_ids=agent.definition.tool_ids,
+                allowed_subagent_ids=agent.definition.subagent_ids,
             )
 
             turn_display.start()
