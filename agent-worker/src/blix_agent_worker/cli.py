@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 from datetime import UTC, datetime
 
@@ -140,11 +139,8 @@ class BlixTurnDisplay:
         self._record_tool_result(call, result, prefix="      ↳  tool  ")
 
     def _record_tool_result(self, call: ToolCall, result: ToolResult, *, prefix: str) -> None:
-        arguments = json.dumps(call.arguments, ensure_ascii=False, separators=(", ", ": "))
         event = Text(prefix, style="muted")
         event.append(call.tool_id, style="bold muted")
-        if arguments != "{}":
-            event.append(f"  {arguments}", style="muted")
         event.append(f"  ·  {result.status.value}", style="muted")
         self._activity_events.append(event)
         self._refresh()
