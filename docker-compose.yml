@@ -1,6 +1,22 @@
 name: blix
 
 services:
+  cli:
+    profiles:
+      - manual
+    build:
+      context: ./cli
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./cli:/app
+      - cli_gopath:/go
+      - cli_build_cache:/root/.cache/go-build
+    environment:
+      RUNWAY_URL: ${CLI_RUNWAY_URL:-http://host.docker.internal:10400}
+
   runway:
     container_name: blix-runway
     build:
@@ -81,5 +97,7 @@ services:
 
 volumes:
   agent_worker_venv:
+  cli_build_cache:
+  cli_gopath:
   pgdata:
   runway_gopath:
