@@ -2,4 +2,4 @@ FROM ghcr.io/astral-sh/uv:python3.12-alpine
 
 WORKDIR /app
 
-CMD ["uv", "run", "blix-agent-worker"]
+CMD ["uv", "run", "watchfiles", "--filter", "python", "--target-type", "command", "blix-agent-worker", "src"]
