@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
@@ -95,6 +96,17 @@ type apiError struct {
 	Error string `json:"error"`
 }
 
+type eventsMsg struct {
+	events []executionEvent
+	err    error
+}
+
+type turnStatus struct {
+	frames  []string
+	frame   int
+	enabled bool
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -159,9 +171,7 @@ func runSession(ctx context.Context, api *client) error {
 			continue
 		}
 		fmt.Println()
-		fmt.Println(pinkStyle.Render("●  blix"))
-		fmt.Println(mutedStyle.Render("   thinking…"))
-		content, err := waitForResponse(ctx, api, current.Run.ID, appended.EventPosition)
+		content, err := runTurn(ctx, api, current.Run.ID, appended.EventPosition)
 		if err != nil {
 			fmt.Println(errorPanel(err.Error()))
 			continue
@@ -187,56 +197,162 @@ func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 	return createdRun{}, fmt.Errorf("runway did not become ready: %w", lastErr)
 }
 
-func waitForResponse(ctx context.Context, api *client, runID string, after uint64) (string, error) {
+func runTurn(ctx context.Context, api *client, runID string, after uint64) (string, error) {
+	fmt.Println(pinkStyle.Render("●  blix"))
+
+	turnCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	status := newTurnStatus()
+	status.render()
+	defer status.clear()
+
+	ticker := time.NewTicker(spinner.Dot.FPS)
+	defer ticker.Stop()
+	events := watchEvents(turnCtx, api, runID, after)
 	toolIDs := make(map[string]string)
+
 	for {
-		events, err := api.listEvents(ctx, runID, after)
-		if err != nil {
-			return "", err
-		}
-		for _, event := range events {
-			after = event.Position
-			switch event.Type {
-			case "tool.call_v1":
-				var payload toolCallPayload
-				if json.Unmarshal(event.Payload, &payload) == nil {
-					toolIDs[event.EntityID] = payload.ToolID
-				}
-			case "tool.result_v1":
-				var payload toolResultPayload
-				if json.Unmarshal(event.Payload, &payload) == nil {
-					toolID := toolIDs[event.EntityID]
-					if toolID == "" {
-						toolID = "tool"
-					}
-					fmt.Println(mutedStyle.Render(fmt.Sprintf("   ↳  tool  %s  ·  %s", toolID, payload.Status)))
-				}
-			case "model.response_v1":
-				var payload modelResponsePayload
-				if json.Unmarshal(event.Payload, &payload) == nil {
-					tokens := payload.InputTokens + payload.OutputTokens
-					fmt.Println(mutedStyle.Render(fmt.Sprintf("   ↳  model  call %d  ·  %d tokens", payload.Sequence, tokens)))
-				}
-			case "message.assistant_v1":
-				var payload assistantPayload
-				if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {
-					return "", errors.New("runway returned an invalid assistant message event")
-				}
-				return payload.Content, nil
-			case "execution.failed_v1":
-				var payload failedPayload
-				if json.Unmarshal(event.Payload, &payload) == nil && payload.Error.Message != "" {
-					return "", errors.New(payload.Error.Message)
-				}
-				return "", errors.New("agent execution failed")
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(250 * time.Millisecond):
+		case <-ticker.C:
+			status.advance()
+		case message, open := <-events:
+			if !open {
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				return "", errors.New("runway event stream closed unexpectedly")
+			}
+			if message.err != nil {
+				return "", message.err
+			}
+			for _, event := range message.events {
+				content, activity, done, err := applyEvent(event, toolIDs)
+				if activity != "" {
+					status.printActivity(activity)
+				}
+				if done {
+					return content, err
+				}
+			}
 		}
 	}
+}
+
+func newTurnStatus() *turnStatus {
+	return &turnStatus{
+		frames:  spinner.Dot.Frames,
+		enabled: term.IsTerminal(int(os.Stdout.Fd())),
+	}
+}
+
+func (s *turnStatus) advance() {
+	if !s.enabled {
+		return
+	}
+	s.frame = (s.frame + 1) % len(s.frames)
+	s.render()
+}
+
+func (s *turnStatus) render() {
+	if !s.enabled {
+		return
+	}
+	frame := pinkStyle.Render(s.frames[s.frame])
+	fmt.Print("\r\x1b[2K   " + frame + mutedStyle.Render("Blix is thinking…"))
+}
+
+func (s *turnStatus) clear() {
+	if s.enabled {
+		fmt.Print("\r\x1b[2K")
+	}
+}
+
+func (s *turnStatus) printActivity(activity string) {
+	s.clear()
+	fmt.Println(activity)
+	s.render()
+}
+
+func applyEvent(event executionEvent, toolIDs map[string]string) (string, string, bool, error) {
+	switch event.Type {
+	case "tool.call_v1":
+		var payload toolCallPayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			toolIDs[event.EntityID] = payload.ToolID
+		}
+	case "tool.result_v1":
+		var payload toolResultPayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			toolID := toolIDs[event.EntityID]
+			if toolID == "" {
+				toolID = "tool"
+			}
+			activity := mutedStyle.Render(fmt.Sprintf("   ↳  tool   %s  ·  %s", toolID, payload.Status))
+			return "", activity, false, nil
+		}
+	case "model.response_v1":
+		var payload modelResponsePayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			tokens := payload.InputTokens + payload.OutputTokens
+			activity := mutedStyle.Render(fmt.Sprintf("   ↳  model  call %d  ·  %d tokens", payload.Sequence, tokens))
+			return "", activity, false, nil
+		}
+	case "message.assistant_v1":
+		var payload assistantPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {
+			return "", "", true, errors.New("runway returned an invalid assistant message event")
+		}
+		return payload.Content, "", true, nil
+	case "execution.failed_v1":
+		var payload failedPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.Error.Message != "" {
+			return "", "", true, errors.New(payload.Error.Message)
+		}
+		return "", "", true, errors.New("agent execution failed")
+	}
+	return "", "", false, nil
+}
+
+func watchEvents(
+	ctx context.Context,
+	api *client,
+	runID string,
+	after uint64,
+) <-chan eventsMsg {
+	messages := make(chan eventsMsg)
+	go func() {
+		defer close(messages)
+		position := after
+		for {
+			events, err := api.listEvents(ctx, runID, position)
+			if err != nil {
+				select {
+				case messages <- eventsMsg{err: err}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			for _, event := range events {
+				position = event.Position
+			}
+			if len(events) > 0 {
+				select {
+				case messages <- eventsMsg{events: events}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}()
+	return messages
 }
 
 func (c *client) createRun(ctx context.Context) (createdRun, error) {

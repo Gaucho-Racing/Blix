@@ -53,25 +53,6 @@ services:
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
 
-  cli:
-    container_name: blix-cli
-    build:
-      context: ./cli
-      dockerfile: Dockerfile.dev
-    profiles:
-      - cli
-    stdin_open: true
-    tty: true
-    working_dir: /app
-    volumes:
-      - ./cli:/app
-      - cli_gopath:/go
-    depends_on:
-      runway:
-        condition: service_started
-    environment:
-      RUNWAY_URL: http://runway:9999
-
   db:
     container_name: blix-db
     image: postgres:18-alpine
@@ -99,6 +80,5 @@ services:
 
 volumes:
   agent_worker_venv:
-  cli_gopath:
   pgdata:
   runway_gopath:

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
 
-docker compose up --build -d runway agent-worker
-docker compose run --build --rm --no-deps cli
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$script_dir/../cli"
+exec go run .
