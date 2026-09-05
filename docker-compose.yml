@@ -48,6 +48,7 @@ services:
     env_file:
       - ./.env
     environment:
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
       MQTT_HOST: nanomq
       MQTT_PORT: 1883

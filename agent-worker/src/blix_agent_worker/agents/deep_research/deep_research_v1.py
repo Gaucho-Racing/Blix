@@ -3,7 +3,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Self
 
-from pydantic import Field, HttpUrl, ValidationError, model_validator
+from pydantic import Field, HttpUrl, TypeAdapter, ValidationError, field_validator, model_validator
 
 from blix_agent_worker.agents.callables import CallableCatalog, CallableNotFoundError
 from blix_agent_worker.agents.deep_research.prompt import (
@@ -38,7 +38,9 @@ from blix_agent_worker.models.llm import (
     ModelResponse,
 )
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
-from blix_agent_worker.tools import ToolNotFoundError, ToolRunner
+from blix_agent_worker.tools import ToolRunner
+
+_HTTP_URL_VALIDATOR = TypeAdapter(HttpUrl)
 
 
 class DeepResearchV1Input(ContractModel):
@@ -48,7 +50,13 @@ class DeepResearchV1Input(ContractModel):
 class DeepResearchSource(ContractModel):
     index: Annotated[int, Field(ge=1)]
     title: NonEmptyText
-    url: HttpUrl
+    url: NonEmptyText
+
+    @field_validator("url")
+    @classmethod
+    def url_must_be_http(cls, value: str) -> str:
+        _HTTP_URL_VALIDATOR.validate_python(value)
+        return value
 
 
 class DeepResearchV1Output(ContractModel):
@@ -87,7 +95,7 @@ class DeepResearchV1Agent:
         input_schema=DeepResearchV1Input.model_json_schema(mode="validation"),
         output_schema=DeepResearchV1Output.model_json_schema(mode="serialization"),
         model_profile="deep_research",
-        tool_ids=("web_search_v1", "web_extract_v1"),
+        tool_ids=("current_time_v1", "web_extract_v1", "web_search_v1"),
     )
 
     def __init__(
@@ -117,33 +125,8 @@ class DeepResearchV1Agent:
                 details=validation_error_details(error),
             )
 
-        configured_tool_ids = frozenset(self.definition.tool_ids)
-        allowed_tool_ids = configured_tool_ids if task.allowed_tool_ids is None else frozenset(task.allowed_tool_ids)
-        disallowed_tool_ids = allowed_tool_ids.difference(configured_tool_ids)
-        if disallowed_tool_ids:
-            return self._failure(
-                task,
-                "invalid_tool_scope",
-                "The task grants tools that are not configured for this agent.",
-                details={"tool_ids": sorted(disallowed_tool_ids)},
-            )
-        if task.allowed_subagent_ids:
-            return self._failure(
-                task,
-                "invalid_subagent_scope",
-                "The deep research agent does not allow subagent delegation.",
-                details={"agent_ids": sorted(task.allowed_subagent_ids)},
-            )
-
-        try:
-            tool_definitions = self._tool_runner.registry.definitions(allowed_tool_ids)
-        except ToolNotFoundError as error:
-            return self._failure(
-                task,
-                "agent_configuration_error",
-                str(error),
-                details={"tool_id": error.tool_id},
-            )
+        tool_definitions = self._tool_runner.registry.definitions()
+        allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
 
         catalog = CallableCatalog(tools=tool_definitions)
         prompt = DEEP_RESEARCH_V1_USER_PROMPT.format(

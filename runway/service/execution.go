@@ -47,7 +47,24 @@ type ExecutionContext struct {
 	ParentExecutionID *string         `json:"parent_execution_id"`
 	AgentID           string          `json:"agent_id"`
 	Version           uint64          `json:"version"`
+	Task              json.RawMessage `json:"task,omitempty"`
 	Messages          []model.Message `json:"messages"`
+}
+
+type Delegation struct {
+	WorkerID        string          `json:"worker_id"`
+	ExpectedVersion uint64          `json:"expected_version"`
+	Task            json.RawMessage `json:"task"`
+}
+
+type DelegatedExecution struct {
+	ExecutionID   string `json:"execution_id"`
+	ParentVersion uint64 `json:"parent_version"`
+}
+
+type ExecutionResult struct {
+	Status string          `json:"status"`
+	Result json.RawMessage `json:"result"`
 }
 
 type ToolCheckpoint struct {
@@ -93,10 +110,35 @@ type Completion struct {
 	Usage           map[string]any `json:"usage"`
 }
 
+type AgentCompletion struct {
+	WorkerID        string          `json:"worker_id"`
+	ExpectedVersion uint64          `json:"expected_version"`
+	Result          json.RawMessage `json:"result"`
+}
+
 type Failure struct {
 	WorkerID        string         `json:"worker_id"`
 	ExpectedVersion uint64         `json:"expected_version"`
 	Error           map[string]any `json:"error"`
+}
+
+type agentTaskPayload struct {
+	RunID             string          `json:"run_id"`
+	ExecutionID       string          `json:"execution_id"`
+	ParentExecutionID *string         `json:"parent_execution_id"`
+	AgentID           string          `json:"agent_id"`
+	Objective         string          `json:"objective"`
+	Input             json.RawMessage `json:"input"`
+}
+
+type agentResultPayload struct {
+	RunID             string          `json:"run_id"`
+	ExecutionID       string          `json:"execution_id"`
+	ParentExecutionID *string         `json:"parent_execution_id"`
+	AgentID           string          `json:"agent_id"`
+	Status            string          `json:"status"`
+	Output            json.RawMessage `json:"output"`
+	Error             json.RawMessage `json:"error"`
 }
 
 func NewExecutionService(database *gorm.DB, configuration config.Config) *ExecutionService {
@@ -246,6 +288,7 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			ParentExecutionID: execution.ParentExecutionID,
 			AgentID:           execution.AgentID,
 			Version:           execution.Version,
+			Task:              json.RawMessage(execution.Task),
 			Messages:          messages,
 		}
 		return nil
@@ -254,6 +297,104 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		return ExecutionContext{}, err
 	}
 	return claimed, nil
+}
+
+func (s *ExecutionService) DelegateExecution(
+	ctx context.Context,
+	parentExecutionID string,
+	delegation Delegation,
+) (DelegatedExecution, error) {
+	var task agentTaskPayload
+	if err := json.Unmarshal(delegation.Task, &task); err != nil {
+		return DelegatedExecution{}, fmt.Errorf("%w: task is invalid: %v", ErrInvalid, err)
+	}
+	if !identifier.IsValid(task.ExecutionID) || task.ExecutionID == parentExecutionID {
+		return DelegatedExecution{}, fmt.Errorf("%w: child execution_id is invalid", ErrInvalid)
+	}
+	if task.ParentExecutionID == nil || *task.ParentExecutionID != parentExecutionID {
+		return DelegatedExecution{}, fmt.Errorf("%w: task parent_execution_id is invalid", ErrInvalid)
+	}
+	if !versionedIdentifierPattern.MatchString(task.AgentID) {
+		return DelegatedExecution{}, fmt.Errorf("%w: task agent_id is invalid", ErrInvalid)
+	}
+	if strings.TrimSpace(task.Objective) == "" || !validJSONObject(task.Input) {
+		return DelegatedExecution{}, fmt.Errorf("%w: task objective and object input are required", ErrInvalid)
+	}
+
+	var delegated DelegatedExecution
+	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		parent, err := s.lockOwnedExecution(
+			tx,
+			parentExecutionID,
+			delegation.WorkerID,
+			delegation.ExpectedVersion,
+		)
+		if err != nil {
+			return err
+		}
+		if task.RunID != parent.RunID {
+			return ErrConflict
+		}
+
+		child := model.AgentExecution{
+			ID:                task.ExecutionID,
+			RunID:             parent.RunID,
+			ParentExecutionID: &parent.ID,
+			AgentID:           task.AgentID,
+			Status:            model.ExecutionStatusQueued,
+			Version:           1,
+			Task:              datatypes.JSON(delegation.Task),
+		}
+		if err := tx.Create(&child).Error; err != nil {
+			return err
+		}
+		if err := s.appendEvent(
+			tx,
+			parent.RunID,
+			parent.ID,
+			model.EventTypeAgentCall,
+			child.ID,
+			delegation.Task,
+		); err != nil {
+			return err
+		}
+		parent.Version++
+		if err := tx.Save(&parent).Error; err != nil {
+			return err
+		}
+		if err := s.createDispatch(tx, child); err != nil {
+			return err
+		}
+		delegated = DelegatedExecution{ExecutionID: child.ID, ParentVersion: parent.Version}
+		return nil
+	})
+	return delegated, err
+}
+
+func (s *ExecutionService) GetExecutionResult(
+	ctx context.Context,
+	executionID string,
+	parentExecutionID string,
+	workerID string,
+) (ExecutionResult, error) {
+	if parentExecutionID == "" || workerID == "" {
+		return ExecutionResult{}, fmt.Errorf("%w: parent_execution_id and worker_id are required", ErrInvalid)
+	}
+	var child model.AgentExecution
+	if err := s.database.WithContext(ctx).First(&child, "id = ?", executionID).Error; err != nil {
+		return ExecutionResult{}, mapDatabaseError(err)
+	}
+	if child.ParentExecutionID == nil || *child.ParentExecutionID != parentExecutionID {
+		return ExecutionResult{}, ErrConflict
+	}
+	var parent model.AgentExecution
+	if err := s.database.WithContext(ctx).First(&parent, "id = ?", parentExecutionID).Error; err != nil {
+		return ExecutionResult{}, mapDatabaseError(err)
+	}
+	if parent.Status != model.ExecutionStatusRunning || parent.ClaimedBy != workerID {
+		return ExecutionResult{}, ErrConflict
+	}
+	return ExecutionResult{Status: child.Status, Result: json.RawMessage(child.Result)}, nil
 }
 
 func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID string, checkpoint ToolCheckpoint) (uint64, error) {
@@ -356,18 +497,22 @@ func (s *ExecutionService) CheckpointModel(
 		if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != checkpoint.WorkerID {
 			return ErrConflict
 		}
-		var messageCount int64
-		if err := tx.Model(&model.Message{}).
-			Where(
-				"id = ? AND parent_execution_id = ? AND role = ?",
-				checkpoint.TurnMessageID,
-				execution.ID,
-				model.MessageRoleUser,
-			).
-			Count(&messageCount).Error; err != nil {
-			return err
-		}
-		if messageCount == 0 {
+		if execution.ParentExecutionID == nil {
+			var messageCount int64
+			if err := tx.Model(&model.Message{}).
+				Where(
+					"id = ? AND parent_execution_id = ? AND role = ?",
+					checkpoint.TurnMessageID,
+					execution.ID,
+					model.MessageRoleUser,
+				).
+				Count(&messageCount).Error; err != nil {
+				return err
+			}
+			if messageCount == 0 {
+				return ErrConflict
+			}
+		} else if checkpoint.TurnMessageID != execution.ID {
 			return ErrConflict
 		}
 		var existing model.ExecutionEvent
@@ -465,6 +610,58 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 	return appended, err
 }
 
+func (s *ExecutionService) CompleteAgentExecution(
+	ctx context.Context,
+	executionID string,
+	completion AgentCompletion,
+) (model.ExecutionEvent, error) {
+	var result agentResultPayload
+	if err := json.Unmarshal(completion.Result, &result); err != nil {
+		return model.ExecutionEvent{}, fmt.Errorf("%w: result is invalid: %v", ErrInvalid, err)
+	}
+	if result.Status != model.ExecutionStatusSucceeded &&
+		result.Status != model.ExecutionStatusFailed &&
+		result.Status != model.ExecutionStatusCancelled {
+		return model.ExecutionEvent{}, fmt.Errorf("%w: result status is not terminal", ErrInvalid)
+	}
+	var event model.ExecutionEvent
+	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		execution, err := s.lockOwnedExecution(tx, executionID, completion.WorkerID, completion.ExpectedVersion)
+		if err != nil {
+			return err
+		}
+		if execution.ParentExecutionID == nil ||
+			result.RunID != execution.RunID ||
+			result.ExecutionID != execution.ID ||
+			result.ParentExecutionID == nil ||
+			*result.ParentExecutionID != *execution.ParentExecutionID ||
+			result.AgentID != execution.AgentID {
+			return ErrConflict
+		}
+
+		event = model.ExecutionEvent{
+			ID:          identifier.New(),
+			RunID:       execution.RunID,
+			ExecutionID: *execution.ParentExecutionID,
+			Type:        model.EventTypeAgentResult,
+			EntityID:    execution.ID,
+			Payload:     datatypes.JSON(completion.Result),
+		}
+		if err := tx.Create(&event).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		execution.Result = datatypes.JSON(completion.Result)
+		execution.Status = result.Status
+		execution.CompletedAt = &now
+		execution.Version++
+		execution.ClaimedBy = ""
+		execution.ClaimedAt = nil
+		return tx.Save(&execution).Error
+	})
+	return event, err
+}
+
 func (s *ExecutionService) FailExecution(ctx context.Context, executionID string, failure Failure) (model.ExecutionEvent, error) {
 	var event model.ExecutionEvent
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -472,22 +669,48 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(map[string]any{"error": failure.Error})
-		if err != nil {
-			return err
-		}
-		event = model.ExecutionEvent{
-			ID:          identifier.New(),
-			RunID:       execution.RunID,
-			ExecutionID: execution.ID,
-			Type:        model.EventTypeExecutionFailed,
-			EntityID:    execution.ID,
-			Payload:     payload,
+		if execution.ParentExecutionID == nil {
+			payload, err := json.Marshal(map[string]any{"error": failure.Error})
+			if err != nil {
+				return err
+			}
+			event = model.ExecutionEvent{
+				ID:          identifier.New(),
+				RunID:       execution.RunID,
+				ExecutionID: execution.ID,
+				Type:        model.EventTypeExecutionFailed,
+				EntityID:    execution.ID,
+				Payload:     payload,
+			}
+			execution.Status = model.ExecutionStatusIdle
+		} else {
+			payload, err := json.Marshal(map[string]any{
+				"run_id":              execution.RunID,
+				"execution_id":        execution.ID,
+				"parent_execution_id": execution.ParentExecutionID,
+				"agent_id":            execution.AgentID,
+				"status":              model.ExecutionStatusFailed,
+				"error":               failure.Error,
+			})
+			if err != nil {
+				return err
+			}
+			event = model.ExecutionEvent{
+				ID:          identifier.New(),
+				RunID:       execution.RunID,
+				ExecutionID: *execution.ParentExecutionID,
+				Type:        model.EventTypeAgentResult,
+				EntityID:    execution.ID,
+				Payload:     payload,
+			}
+			now := time.Now().UTC()
+			execution.Result = datatypes.JSON(payload)
+			execution.Status = model.ExecutionStatusFailed
+			execution.CompletedAt = &now
 		}
 		if err := tx.Create(&event).Error; err != nil {
 			return err
 		}
-		execution.Status = model.ExecutionStatusIdle
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
@@ -518,9 +741,10 @@ func (s *ExecutionService) ListEvents(ctx context.Context, runID string, after u
 func (s *ExecutionService) createDispatch(tx *gorm.DB, execution model.AgentExecution) error {
 	outboxID := identifier.New()
 	payload, err := json.Marshal(map[string]any{
-		"event_id":     outboxID,
-		"run_id":       execution.RunID,
-		"execution_id": execution.ID,
+		"event_id":            outboxID,
+		"run_id":              execution.RunID,
+		"execution_id":        execution.ID,
+		"parent_execution_id": execution.ParentExecutionID,
 	})
 	if err != nil {
 		return err
@@ -576,6 +800,11 @@ func nullableJSON(value json.RawMessage) datatypes.JSON {
 		return nil
 	}
 	return datatypes.JSON(value)
+}
+
+func validJSONObject(value json.RawMessage) bool {
+	var object map[string]any
+	return json.Unmarshal(value, &object) == nil && object != nil
 }
 
 func mapDatabaseError(err error) error {

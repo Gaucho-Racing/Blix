@@ -75,6 +75,15 @@ type toolResultPayload struct {
 	Status string `json:"status"`
 }
 
+type agentCallPayload struct {
+	AgentID string `json:"agent_id"`
+}
+
+type agentResultPayload struct {
+	AgentID string `json:"agent_id"`
+	Status  string `json:"status"`
+}
+
 type assistantPayload struct {
 	Content string `json:"content"`
 }
@@ -278,6 +287,18 @@ func (s *turnStatus) printActivity(activity string) {
 
 func applyEvent(event executionEvent, toolIDs map[string]string) (string, string, bool, error) {
 	switch event.Type {
+	case "agent.call_v1":
+		var payload agentCallPayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			activity := mutedStyle.Render(fmt.Sprintf("   ↳  agent  %s  ·  queued", payload.AgentID))
+			return "", activity, false, nil
+		}
+	case "agent.result_v1":
+		var payload agentResultPayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			activity := mutedStyle.Render(fmt.Sprintf("   ↳  agent  %s  ·  %s", payload.AgentID, payload.Status))
+			return "", activity, false, nil
+		}
 	case "tool.call_v1":
 		var payload toolCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {

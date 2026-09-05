@@ -2,11 +2,10 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Self
 
-from pydantic import Field, JsonValue, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from blix_agent_worker.agents.callables import CallableCatalog, CallableCatalogError, CallableNotFoundError
 from blix_agent_worker.agents.general_conversation.prompt import GENERAL_CONVERSATION_V1_SYSTEM_PROMPT
-from blix_agent_worker.agents.registry import AgentNotFoundError
 from blix_agent_worker.agents.runner import AgentRunner
 from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
@@ -35,7 +34,7 @@ from blix_agent_worker.models.llm import (
 )
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
-from blix_agent_worker.tools import ToolNotFoundError, ToolRunner
+from blix_agent_worker.tools import ToolRunner
 
 
 class GeneralConversationV1Input(ContractModel):
@@ -61,7 +60,7 @@ class GeneralConversationV1Agent:
         input_schema=GeneralConversationV1Input.model_json_schema(mode="validation"),
         output_schema=GeneralConversationV1Output.model_json_schema(mode="serialization"),
         model_profile="general_reasoning",
-        tool_ids=("current_time_v1",),
+        tool_ids=("current_time_v1", "web_extract_v1", "web_search_v1"),
         subagent_ids=("deep_research_v1",),
     )
 
@@ -98,51 +97,12 @@ class GeneralConversationV1Agent:
         if any(message.parent_execution_id != task.execution_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the agent execution.")
 
-        configured_tool_ids = frozenset(self.definition.tool_ids)
-        allowed_tool_ids = configured_tool_ids if task.allowed_tool_ids is None else frozenset(task.allowed_tool_ids)
-        disallowed_tool_ids = allowed_tool_ids.difference(configured_tool_ids)
-        if disallowed_tool_ids:
-            disallowed_values: list[JsonValue] = [tool_id for tool_id in sorted(disallowed_tool_ids)]
-            return self._failure(
-                task,
-                "invalid_tool_scope",
-                "The task grants tools that are not configured for this agent.",
-                details={"tool_ids": disallowed_values},
-            )
-
+        tool_definitions = self._tool_runner.registry.definitions()
+        allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
+        subagent_definitions = self._agent_runner.registry.definitions()
+        allowed_subagent_ids = frozenset(definition.id for definition in subagent_definitions)
         try:
-            tool_definitions = self._tool_runner.registry.definitions(allowed_tool_ids)
-        except ToolNotFoundError as error:
-            return self._failure(
-                task,
-                "agent_configuration_error",
-                str(error),
-                details={"tool_id": error.tool_id},
-            )
-
-        configured_subagent_ids = frozenset(self.definition.subagent_ids)
-        allowed_subagent_ids = (
-            configured_subagent_ids if task.allowed_subagent_ids is None else frozenset(task.allowed_subagent_ids)
-        )
-        disallowed_subagent_ids = allowed_subagent_ids.difference(configured_subagent_ids)
-        if disallowed_subagent_ids:
-            disallowed_values = [agent_id for agent_id in sorted(disallowed_subagent_ids)]
-            return self._failure(
-                task,
-                "invalid_subagent_scope",
-                "The task grants subagents that are not configured for this agent.",
-                details={"agent_ids": disallowed_values},
-            )
-        try:
-            subagent_definitions = self._agent_runner.registry.definitions(allowed_subagent_ids)
             catalog = CallableCatalog(tools=tool_definitions, agents=subagent_definitions)
-        except AgentNotFoundError as error:
-            return self._failure(
-                task,
-                "agent_configuration_error",
-                str(error),
-                details={"agent_id": error.agent_id},
-            )
         except CallableCatalogError as error:
             return self._failure(task, "agent_configuration_error", str(error))
 

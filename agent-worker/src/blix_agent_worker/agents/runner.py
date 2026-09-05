@@ -1,4 +1,4 @@
-from collections.abc import Callable, Collection
+from collections.abc import Awaitable, Callable, Collection
 
 from pydantic import ValidationError
 
@@ -25,10 +25,12 @@ class AgentRunner:
         self,
         registry: AgentRegistry,
         *,
+        executor: Callable[[AgentTask], Awaitable[AgentResult]] | None = None,
         on_start: Callable[[AgentTask], None] | None = None,
         on_result: Callable[[AgentResult], None] | None = None,
     ) -> None:
         self.registry = registry
+        self._executor = executor
         self._on_start = on_start
         self._on_result = on_result
 
@@ -86,8 +88,8 @@ class AgentRunner:
             input=delegation.input,
             context=parent_task.context,
             artifact_refs=parent_task.artifact_refs,
-            allowed_tool_ids=agent.definition.tool_ids,
-            allowed_subagent_ids=agent.definition.subagent_ids,
+            allowed_tool_ids=None,
+            allowed_subagent_ids=None,
             delegation_depth=parent_task.delegation_depth + 1,
             response_schema=agent.definition.output_schema,
         )
@@ -95,7 +97,7 @@ class AgentRunner:
             self._on_start(task)
 
         try:
-            result = await agent.run(task)
+            result = await self._executor(task) if self._executor is not None else await agent.run(task)
         except Exception:
             return self._emit(
                 self._failure(

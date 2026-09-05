@@ -7,7 +7,8 @@ from dataclasses import dataclass
 import aiomqtt
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from blix_agent_worker.agents import AgentRegistry, AgentRunner
+from blix_agent_worker.agents import AgentNotFoundError, AgentRegistry, AgentRunner
+from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
 from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Agent,
     GeneralConversationV1Input,
@@ -30,6 +31,8 @@ MODEL = "openai/gpt-5.6-luna"
 
 logger = logging.getLogger("blix_agent_worker")
 
+DEFAULT_AGENT_WORKER_CONCURRENCY = 4
+
 
 class DispatchMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -37,6 +40,7 @@ class DispatchMessage(BaseModel):
     event_id: str
     run_id: str
     execution_id: str
+    parent_execution_id: str | None = None
 
 
 @dataclass
@@ -73,6 +77,7 @@ class AgentWorker:
             raise
 
         state = ExecutionState(version=execution.version)
+        turn_message_id = execution.messages[-1].message_id if execution.messages else execution.execution_id
 
         async def checkpoint(call: ToolCall, result: ToolResult) -> None:
             state.version = await self._runway.checkpoint_tool(
@@ -89,13 +94,39 @@ class AgentWorker:
                 self._worker_id,
                 state.version,
                 MODEL,
-                execution.messages[-1].message_id,
+                turn_message_id,
                 sequence,
                 response,
             )
 
+        async def delegate(task: AgentTask) -> AgentResult:
+            delegated = await self._runway.delegate_execution(
+                execution.execution_id,
+                self._worker_id,
+                state.version,
+                task,
+            )
+            state.version = delegated.parent_version
+            while True:
+                result = await self._runway.get_execution_result(
+                    delegated.execution_id,
+                    execution.execution_id,
+                    self._worker_id,
+                )
+                if result.result is not None:
+                    return result.result
+                await asyncio.sleep(0.25)
+
         try:
-            result = await self._run_execution(execution, checkpoint, checkpoint_model)
+            result = await self._run_execution(execution, checkpoint, checkpoint_model, delegate)
+            if execution.parent_execution_id is not None:
+                await self._runway.complete_agent_execution(
+                    execution.execution_id,
+                    self._worker_id,
+                    state.version,
+                    result,
+                )
+                return
             if result.status is AgentResultStatus.SUCCEEDED:
                 output = GeneralConversationV1Output.model_validate(result.output)
                 await self._runway.complete_execution(
@@ -130,7 +161,28 @@ class AgentWorker:
         execution: ExecutionContext,
         checkpoint: Callable[[ToolCall, ToolResult], Awaitable[None]],
         checkpoint_model: Callable[[int, ModelResponse], Awaitable[None]],
+        delegate: Callable[[AgentTask], Awaitable[AgentResult]],
     ) -> AgentResult:
+        deep_research = DeepResearchV1Agent(
+            model=self._model,
+            tool_runner=self._tool_runner,
+            on_tool_result=checkpoint,
+            on_model_response=checkpoint_model,
+        )
+        agent_registry = AgentRegistry([deep_research])
+        if execution.parent_execution_id is not None:
+            if execution.task is None:
+                return self._agent_failure(execution, "missing_agent_task", "The delegated execution has no task.")
+            try:
+                agent = agent_registry.resolve(execution.agent_id)
+            except AgentNotFoundError:
+                return self._agent_failure(
+                    execution,
+                    "agent_not_registered",
+                    f"Agent {execution.agent_id!r} is not registered on this worker.",
+                )
+            return await agent.run(execution.task)
+
         messages = tuple(
             ConversationMessage(
                 message_id=message.message_id,
@@ -146,7 +198,7 @@ class AgentWorker:
         agent = GeneralConversationV1Agent(
             model=self._model,
             tool_runner=self._tool_runner,
-            agent_runner=AgentRunner(AgentRegistry()),
+            agent_runner=AgentRunner(agent_registry, executor=delegate),
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
         )
@@ -157,15 +209,27 @@ class AgentWorker:
             agent_id=execution.agent_id,
             objective="Respond to the latest user message.",
             input=agent_input.model_dump(mode="json"),
-            allowed_tool_ids=agent.definition.tool_ids,
-            allowed_subagent_ids=(),
         )
         return await agent.run(task)
+
+    @staticmethod
+    def _agent_failure(execution: ExecutionContext, code: str, message: str) -> AgentResult:
+        return AgentResult(
+            run_id=execution.run_id,
+            execution_id=execution.execution_id,
+            parent_execution_id=execution.parent_execution_id,
+            agent_id=execution.agent_id,
+            status=AgentResultStatus.FAILED,
+            error=ContractError(code=code, message=message),
+        )
 
 
 async def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     credentials = _bifrost_credentials()
+    concurrency = _agent_worker_concurrency()
+    entrypoint_slots = concurrency // 2
+    specialist_slots = concurrency - entrypoint_slots
     runway_url = os.environ.get("RUNWAY_URL", "http://localhost:10400").strip()
     mqtt_host = os.environ.get("MQTT_HOST", "localhost").strip()
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
@@ -187,6 +251,18 @@ async def run() -> None:
         TavilyClient() as tavily,
     ):
         worker = AgentWorker(runway, worker_id, model, tavily)
+        entrypoint_capacity = asyncio.Semaphore(entrypoint_slots)
+        specialist_capacity = asyncio.Semaphore(specialist_slots)
+        active_executions: set[asyncio.Task[None]] = set()
+
+        async def execute(dispatch: DispatchMessage) -> None:
+            capacity = specialist_capacity if dispatch.parent_execution_id is not None else entrypoint_capacity
+            async with capacity:
+                try:
+                    await worker.handle(dispatch)
+                except Exception:
+                    logger.exception("dispatch for execution %s failed", dispatch.execution_id)
+
         client = aiomqtt.Client(
             mqtt_host,
             port=mqtt_port,
@@ -196,17 +272,37 @@ async def run() -> None:
             try:
                 async with client:
                     await client.subscribe(topic, qos=1)
-                    logger.info("worker %s subscribed to %s", worker_id, topic)
+                    logger.info(
+                        "worker %s subscribed to %s with concurrency=%d (%d entrypoint, %d specialist)",
+                        worker_id,
+                        topic,
+                        concurrency,
+                        entrypoint_slots,
+                        specialist_slots,
+                    )
                     async for message in client.messages:
                         try:
                             dispatch = DispatchMessage.model_validate_json(message.payload)
                         except ValidationError:
                             logger.exception("discarding invalid dispatch message")
                             continue
-                        await worker.handle(dispatch)
+                        task = asyncio.create_task(execute(dispatch))
+                        active_executions.add(task)
+                        task.add_done_callback(active_executions.discard)
             except aiomqtt.MqttError as error:
                 logger.warning("MQTT connection failed; reconnecting: %s", error)
                 await asyncio.sleep(2)
+
+
+def _agent_worker_concurrency() -> int:
+    raw_value = os.environ.get("AGENT_WORKER_CONCURRENCY", str(DEFAULT_AGENT_WORKER_CONCURRENCY)).strip()
+    try:
+        concurrency = int(raw_value)
+    except ValueError as error:
+        raise RuntimeError("AGENT_WORKER_CONCURRENCY must be an integer.") from error
+    if concurrency < 2:
+        raise RuntimeError("AGENT_WORKER_CONCURRENCY must be at least 2 when agent delegation is enabled.")
+    return concurrency
 
 
 def _bifrost_credentials() -> dict[str, str]:

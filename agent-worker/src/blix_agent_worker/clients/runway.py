@@ -3,7 +3,7 @@ from typing import Self
 
 import httpx
 
-from blix_agent_worker.models.agent import AgentUsage
+from blix_agent_worker.models.agent import AgentResult, AgentTask, AgentUsage
 from blix_agent_worker.models.common import ULID, ContractError, ContractModel
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
@@ -32,11 +32,22 @@ class ExecutionContext(ContractModel):
     parent_execution_id: ULID | None = None
     agent_id: str
     version: int
+    task: AgentTask | None = None
     messages: tuple[RunwayMessage, ...]
 
 
 class VersionResponse(ContractModel):
     version: int
+
+
+class DelegatedExecution(ContractModel):
+    execution_id: ULID
+    parent_version: int
+
+
+class ExecutionResult(ContractModel):
+    status: str
+    result: AgentResult | None = None
 
 
 class RunwayClient:
@@ -110,6 +121,38 @@ class RunwayClient:
         )
         return VersionResponse.model_validate(body).version
 
+    async def delegate_execution(
+        self,
+        parent_execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        task: AgentTask,
+    ) -> DelegatedExecution:
+        body = await self._post(
+            f"internal/v1/executions/{parent_execution_id}/delegations",
+            {
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "task": task.model_dump(mode="json"),
+            },
+        )
+        return DelegatedExecution.model_validate(body)
+
+    async def get_execution_result(
+        self,
+        execution_id: str,
+        parent_execution_id: str,
+        worker_id: str,
+    ) -> ExecutionResult:
+        body = await self._get(
+            f"internal/v1/executions/{execution_id}/result",
+            {
+                "parent_execution_id": parent_execution_id,
+                "worker_id": worker_id,
+            },
+        )
+        return ExecutionResult.model_validate(body)
+
     async def complete_execution(
         self,
         execution_id: str,
@@ -125,6 +168,22 @@ class RunwayClient:
                 "expected_version": expected_version,
                 "content": content,
                 "usage": usage.model_dump(mode="json"),
+            },
+        )
+
+    async def complete_agent_execution(
+        self,
+        execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        result: AgentResult,
+    ) -> None:
+        await self._post(
+            f"internal/v1/executions/{execution_id}/agent-complete",
+            {
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "result": result.model_dump(mode="json"),
             },
         )
 
@@ -147,6 +206,18 @@ class RunwayClient:
     async def _post(self, path: str, payload: object) -> object:
         try:
             response = await self._client.post(path, json=payload)
+        except httpx.RequestError as error:
+            raise RunwayClientError("Runway is unavailable.") from error
+        if response.is_error:
+            raise RunwayClientError(self._error_message(response), status_code=response.status_code)
+        try:
+            return response.json()
+        except ValueError as error:
+            raise RunwayClientError("Runway returned invalid JSON.", status_code=response.status_code) from error
+
+    async def _get(self, path: str, params: dict[str, str]) -> object:
+        try:
+            response = await self._client.get(path, params=params)
         except httpx.RequestError as error:
             raise RunwayClientError("Runway is unavailable.") from error
         if response.is_error:

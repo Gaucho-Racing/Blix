@@ -25,6 +25,34 @@ func (h *Handler) ClaimExecution(c *gin.Context) {
 	c.JSON(http.StatusOK, claimed)
 }
 
+func (h *Handler) DelegateExecution(c *gin.Context) {
+	var request service.Delegation
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	delegated, err := h.executions.DelegateExecution(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, delegated)
+}
+
+func (h *Handler) GetExecutionResult(c *gin.Context) {
+	result, err := h.executions.GetExecutionResult(
+		c.Request.Context(),
+		c.Param("executionID"),
+		c.Query("parent_execution_id"),
+		c.Query("worker_id"),
+	)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *Handler) CheckpointTool(c *gin.Context) {
 	var request service.ToolCheckpoint
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -65,6 +93,20 @@ func (h *Handler) CompleteExecution(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, appended)
+}
+
+func (h *Handler) CompleteAgentExecution(c *gin.Context) {
+	var request service.AgentCompletion
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	event, err := h.executions.CompleteAgentExecution(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, event)
 }
 
 func (h *Handler) FailExecution(c *gin.Context) {
