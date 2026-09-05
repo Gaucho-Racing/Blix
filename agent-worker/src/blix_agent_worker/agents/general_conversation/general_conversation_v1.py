@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Self
 
 from pydantic import Field, JsonValue, ValidationError, model_validator
@@ -31,6 +31,7 @@ from blix_agent_worker.models.llm import (
     ModelMessage,
     ModelMessageRole,
     ModelRequest,
+    ModelResponse,
 )
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
@@ -70,12 +71,14 @@ class GeneralConversationV1Agent:
         model: LanguageModel,
         tool_runner: ToolRunner,
         agent_runner: AgentRunner,
-        on_tool_result: Callable[[ToolCall, ToolResult], None] | None = None,
+        on_tool_result: Callable[[ToolCall, ToolResult], Awaitable[None]] | None = None,
+        on_model_response: Callable[[int, ModelResponse], Awaitable[None]] | None = None,
     ) -> None:
         self._model = model
         self._tool_runner = tool_runner
         self._agent_runner = agent_runner
         self._on_tool_result = on_tool_result
+        self._on_model_response = on_model_response
 
     async def run(self, task: AgentTask) -> AgentResult:
         if task.agent_id != self.definition.id:
@@ -188,6 +191,9 @@ class GeneralConversationV1Agent:
                     ),
                 )
 
+            if self._on_model_response is not None:
+                await self._on_model_response(model_calls, response)
+
             input_tokens += response.usage.input_tokens
             output_tokens += response.usage.output_tokens
             continuation = response.continuation
@@ -276,7 +282,7 @@ class GeneralConversationV1Agent:
                     tool_result = await self._tool_runner.execute(call)
 
                 if self._on_tool_result is not None:
-                    self._on_tool_result(call, tool_result)
+                    await self._on_tool_result(call, tool_result)
 
                 messages.append(
                     ModelMessage(

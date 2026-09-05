@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Self
 
 from pydantic import Field, HttpUrl, ValidationError, model_validator
@@ -35,6 +35,7 @@ from blix_agent_worker.models.llm import (
     ModelMessageRole,
     ModelOutputFormat,
     ModelRequest,
+    ModelResponse,
 )
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolNotFoundError, ToolRunner
@@ -94,11 +95,13 @@ class DeepResearchV1Agent:
         *,
         model: LanguageModel,
         tool_runner: ToolRunner,
-        on_tool_result: Callable[[ToolCall, ToolResult], None] | None = None,
+        on_tool_result: Callable[[ToolCall, ToolResult], Awaitable[None]] | None = None,
+        on_model_response: Callable[[int, ModelResponse], Awaitable[None]] | None = None,
     ) -> None:
         self._model = model
         self._tool_runner = tool_runner
         self._on_tool_result = on_tool_result
+        self._on_model_response = on_model_response
 
     async def run(self, task: AgentTask) -> AgentResult:
         if task.agent_id != self.definition.id:
@@ -148,9 +151,7 @@ class DeepResearchV1Agent:
             question=agent_input.question,
         )
         if task.context:
-            prompt += DEEP_RESEARCH_V1_CONTEXT_SECTION.format(
-                context=json.dumps(task.context, ensure_ascii=False)
-            )
+            prompt += DEEP_RESEARCH_V1_CONTEXT_SECTION.format(context=json.dumps(task.context, ensure_ascii=False))
         messages = [
             ModelMessage(role=ModelMessageRole.SYSTEM, content=self.definition.instructions),
             ModelMessage(role=ModelMessageRole.USER, content=prompt),
@@ -183,6 +184,9 @@ class DeepResearchV1Agent:
                     retryable=error.retryable,
                     usage=self._usage(model_calls, tool_calls, input_tokens, output_tokens),
                 )
+
+            if self._on_model_response is not None:
+                await self._on_model_response(model_calls, response)
 
             input_tokens += response.usage.input_tokens
             output_tokens += response.usage.output_tokens
@@ -259,7 +263,7 @@ class DeepResearchV1Agent:
                     tool_result = await self._tool_runner.execute(call)
 
                 if self._on_tool_result is not None:
-                    self._on_tool_result(call, tool_result)
+                    await self._on_tool_result(call, tool_result)
                 if (
                     tool_result.status is ToolResultStatus.FAILED
                     and tool_result.error is not None

@@ -1,0 +1,31 @@
+package model
+
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
+
+const (
+	EventTypeUserMessage      = "message.user_v1"
+	EventTypeAssistantMessage = "message.assistant_v1"
+	EventTypeToolCall         = "tool.call_v1"
+	EventTypeToolResult       = "tool.result_v1"
+	EventTypeModelResponse    = "model.response_v1"
+	EventTypeExecutionFailed  = "execution.failed_v1"
+)
+
+type ExecutionEvent struct {
+	Position    uint64         `json:"position" gorm:"primaryKey;autoIncrement"`
+	ID          string         `json:"event_id" gorm:"uniqueIndex;not null"`
+	RunID       string         `json:"run_id" gorm:"index;not null"`
+	ExecutionID string         `json:"execution_id" gorm:"index;not null"`
+	Type        string         `json:"type" gorm:"index;not null"`
+	EntityID    string         `json:"entity_id" gorm:"index;not null"`
+	Payload     datatypes.JSON `json:"payload" gorm:"type:jsonb;not null"`
+	CreatedAt   time.Time      `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (ExecutionEvent) TableName() string {
+	return "runway_execution_event"
+}

@@ -1,0 +1,104 @@
+name: blix
+
+services:
+  runway:
+    container_name: blix-runway
+    build:
+      context: ./runway
+      dockerfile: Dockerfile.dev
+    restart: always
+    working_dir: /app
+    ports:
+      - "127.0.0.1:10400:9999"
+    volumes:
+      - ./runway:/app
+      - runway_gopath:/go
+    depends_on:
+      db:
+        condition: service_healthy
+      nanomq:
+        condition: service_started
+    environment:
+      ENV: DEV
+      PORT: 9999
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: blix
+      MQTT_URL: mqtt://nanomq:1883
+      MQTT_CLIENT_ID: blix-runway
+      MQTT_EXECUTION_READY_TOPIC: blix/v1/executions/ready
+
+  agent-worker:
+    container_name: blix-agent-worker
+    build:
+      context: ./agent-worker
+      dockerfile: Dockerfile.dev
+    restart: always
+    working_dir: /app
+    volumes:
+      - ./agent-worker:/app
+      - agent_worker_venv:/app/.venv
+    depends_on:
+      runway:
+        condition: service_started
+      nanomq:
+        condition: service_started
+    env_file:
+      - ./.env
+    environment:
+      RUNWAY_URL: http://runway:9999
+      MQTT_HOST: nanomq
+      MQTT_PORT: 1883
+      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+
+  cli:
+    container_name: blix-cli
+    build:
+      context: ./cli
+      dockerfile: Dockerfile.dev
+    profiles:
+      - cli
+    stdin_open: true
+    tty: true
+    working_dir: /app
+    volumes:
+      - ./cli:/app
+      - cli_gopath:/go
+    depends_on:
+      runway:
+        condition: service_started
+    environment:
+      RUNWAY_URL: http://runway:9999
+
+  db:
+    container_name: blix-db
+    image: postgres:18-alpine
+    restart: always
+    ports:
+      - "127.0.0.1:5434:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: blix
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blix"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+  nanomq:
+    container_name: blix-nanomq
+    image: emqx/nanomq:0.25.6
+    restart: always
+    ports:
+      - "127.0.0.1:1883:1883"
+
+volumes:
+  agent_worker_venv:
+  cli_gopath:
+  pgdata:
+  runway_gopath:
