@@ -1,6 +1,20 @@
 name: blix
 
 services:
+  kerbecs:
+    container_name: blix-kerbecs
+    image: bk1031/kerbecs:latest
+    restart: always
+    ports:
+      - "127.0.0.1:10310:10310"
+    volumes:
+      - ./kerbecs.yaml:/etc/kerbecs/kerbecs.yaml:ro
+    environment:
+      KERBECS_CONFIG: /etc/kerbecs/kerbecs.yaml
+    depends_on:
+      - runway
+      - web
+
   web:
     container_name: blix-web
     image: node:22-alpine
