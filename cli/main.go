@@ -15,7 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
@@ -116,6 +119,11 @@ type turnStatus struct {
 	enabled bool
 }
 
+type lineInputModel struct {
+	input       textinput.Model
+	interrupted bool
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -143,12 +151,14 @@ func runSession(ctx context.Context, api *client) error {
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print(userStyle.Render("●  you") + " " + mutedStyle.Render("›") + " ")
-		if !scanner.Scan() {
-			fmt.Println()
-			return scanner.Err()
+		line, err := readInput(ctx, scanner)
+		if errors.Is(err, io.EOF) {
+			return nil
 		}
-		input := strings.TrimSpace(scanner.Text())
+		if err != nil {
+			return err
+		}
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
@@ -187,6 +197,70 @@ func runSession(ctx context.Context, api *client) error {
 		}
 		fmt.Println(responsePanel(content))
 	}
+}
+
+func readInput(ctx context.Context, scanner *bufio.Scanner) (string, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Print(userStyle.Render("●  you") + " " + mutedStyle.Render("›") + " ")
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return "", err
+			}
+			return "", io.EOF
+		}
+		return scanner.Text(), nil
+	}
+
+	result, err := tea.NewProgram(newLineInputModel(), tea.WithContext(ctx)).Run()
+	if err != nil {
+		return "", err
+	}
+	completed, ok := result.(lineInputModel)
+	if !ok {
+		return "", errors.New("terminal input returned an unexpected model")
+	}
+	if completed.interrupted {
+		return "", context.Canceled
+	}
+	return completed.input.Value(), nil
+}
+
+func newLineInputModel() lineInputModel {
+	input := textinput.New()
+	input.Prompt = ""
+	input.CharLimit = 0
+	styles := textinput.DefaultDarkStyles()
+	styles.Focused.Text = mutedStyle
+	styles.Focused.Prompt = mutedStyle
+	styles.Cursor.Color = white
+	input.SetStyles(styles)
+	input.KeyMap.DeleteBeforeCursor = key.NewBinding(key.WithKeys("ctrl+u", "super+backspace"))
+	return lineInputModel{input: input}
+}
+
+func (m lineInputModel) Init() tea.Cmd {
+	return m.input.Focus()
+}
+
+func (m lineInputModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if keypress, ok := message.(tea.KeyPressMsg); ok {
+		switch keypress.Keystroke() {
+		case "enter":
+			m.input.Blur()
+			return m, tea.Quit
+		case "ctrl+c":
+			m.interrupted = true
+			return m, tea.Quit
+		}
+	}
+	var command tea.Cmd
+	m.input, command = m.input.Update(message)
+	return m, command
+}
+
+func (m lineInputModel) View() tea.View {
+	content := userStyle.Render("●  you") + " " + mutedStyle.Render("›") + " " + m.input.View()
+	return tea.NewView(content)
 }
 
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
