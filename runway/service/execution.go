@@ -42,19 +42,22 @@ type AppendedMessage struct {
 }
 
 type ExecutionContext struct {
-	RunID             string          `json:"run_id"`
-	ExecutionID       string          `json:"execution_id"`
-	ParentExecutionID *string         `json:"parent_execution_id"`
-	AgentID           string          `json:"agent_id"`
-	Version           uint64          `json:"version"`
-	Task              json.RawMessage `json:"task,omitempty"`
-	Messages          []model.Message `json:"messages"`
+	RunID                string          `json:"run_id"`
+	ExecutionID          string          `json:"execution_id"`
+	ParentExecutionID    *string         `json:"parent_execution_id"`
+	AgentID              string          `json:"agent_id"`
+	Version              uint64          `json:"version"`
+	Task                 json.RawMessage `json:"task,omitempty"`
+	State                json.RawMessage `json:"state,omitempty"`
+	WaitingOnExecutionID *string         `json:"waiting_on_execution_id,omitempty"`
+	Messages             []model.Message `json:"messages"`
 }
 
 type Delegation struct {
 	WorkerID        string          `json:"worker_id"`
 	ExpectedVersion uint64          `json:"expected_version"`
 	Task            json.RawMessage `json:"task"`
+	State           json.RawMessage `json:"state"`
 }
 
 type DelegatedExecution struct {
@@ -72,18 +75,21 @@ type ToolCheckpoint struct {
 	ExpectedVersion uint64          `json:"expected_version"`
 	Call            json.RawMessage `json:"call"`
 	Result          json.RawMessage `json:"result"`
+	State           json.RawMessage `json:"state"`
 }
 
 type ModelCheckpoint struct {
-	WorkerID        string   `json:"worker_id"`
-	ExpectedVersion uint64   `json:"expected_version"`
-	Model           string   `json:"model"`
-	TurnMessageID   string   `json:"turn_message_id"`
-	Sequence        uint64   `json:"sequence"`
-	InputTokens     uint64   `json:"input_tokens"`
-	OutputTokens    uint64   `json:"output_tokens"`
-	CallableIDs     []string `json:"callable_ids"`
-	HasContent      bool     `json:"has_content"`
+	WorkerID        string          `json:"worker_id"`
+	ExpectedVersion uint64          `json:"expected_version"`
+	Model           string          `json:"model"`
+	TurnMessageID   string          `json:"turn_message_id"`
+	Sequence        uint64          `json:"sequence"`
+	InputTokens     uint64          `json:"input_tokens"`
+	OutputTokens    uint64          `json:"output_tokens"`
+	CallableIDs     []string        `json:"callable_ids"`
+	HasContent      bool            `json:"has_content"`
+	Response        json.RawMessage `json:"response"`
+	State           json.RawMessage `json:"state"`
 }
 
 type toolCallPayload struct {
@@ -123,12 +129,27 @@ type Failure struct {
 }
 
 type agentTaskPayload struct {
+	SchemaVersion     uint64          `json:"schema_version"`
 	RunID             string          `json:"run_id"`
 	ExecutionID       string          `json:"execution_id"`
 	ParentExecutionID *string         `json:"parent_execution_id"`
 	AgentID           string          `json:"agent_id"`
 	Objective         string          `json:"objective"`
 	Input             json.RawMessage `json:"input"`
+}
+
+type pendingAgentCallPayload struct {
+	RequestRef   string           `json:"request_ref"`
+	RequestIndex uint64           `json:"request_index"`
+	Task         agentTaskPayload `json:"task"`
+}
+
+type agentExecutionStatePayload struct {
+	SchemaVersion    uint64                   `json:"schema_version"`
+	AgentID          string                   `json:"agent_id"`
+	Phase            string                   `json:"phase"`
+	NextCallIndex    uint64                   `json:"next_call_index"`
+	PendingAgentCall *pendingAgentCallPayload `json:"pending_agent_call"`
 }
 
 type agentResultPayload struct {
@@ -232,6 +253,8 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.State = nil
+		execution.WaitingOnExecutionID = nil
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -283,13 +306,15 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			return err
 		}
 		claimed = ExecutionContext{
-			RunID:             execution.RunID,
-			ExecutionID:       execution.ID,
-			ParentExecutionID: execution.ParentExecutionID,
-			AgentID:           execution.AgentID,
-			Version:           execution.Version,
-			Task:              json.RawMessage(execution.Task),
-			Messages:          messages,
+			RunID:                execution.RunID,
+			ExecutionID:          execution.ID,
+			ParentExecutionID:    execution.ParentExecutionID,
+			AgentID:              execution.AgentID,
+			Version:              execution.Version,
+			Task:                 json.RawMessage(execution.Task),
+			State:                json.RawMessage(execution.State),
+			WaitingOnExecutionID: execution.WaitingOnExecutionID,
+			Messages:             messages,
 		}
 		return nil
 	})
@@ -308,7 +333,11 @@ func (s *ExecutionService) DelegateExecution(
 	if err := json.Unmarshal(delegation.Task, &task); err != nil {
 		return DelegatedExecution{}, fmt.Errorf("%w: task is invalid: %v", ErrInvalid, err)
 	}
-	if !identifier.IsValid(task.ExecutionID) || task.ExecutionID == parentExecutionID {
+	state, err := decodeExecutionState(delegation.State)
+	if err != nil {
+		return DelegatedExecution{}, err
+	}
+	if task.SchemaVersion != 1 || !identifier.IsValid(task.ExecutionID) || task.ExecutionID == parentExecutionID {
 		return DelegatedExecution{}, fmt.Errorf("%w: child execution_id is invalid", ErrInvalid)
 	}
 	if task.ParentExecutionID == nil || *task.ParentExecutionID != parentExecutionID {
@@ -320,9 +349,18 @@ func (s *ExecutionService) DelegateExecution(
 	if strings.TrimSpace(task.Objective) == "" || !validJSONObject(task.Input) {
 		return DelegatedExecution{}, fmt.Errorf("%w: task objective and object input are required", ErrInvalid)
 	}
+	if state.Phase != "waiting_for_agent" ||
+		state.PendingAgentCall == nil ||
+		state.PendingAgentCall.Task.ExecutionID != task.ExecutionID ||
+		state.PendingAgentCall.Task.RunID != task.RunID ||
+		state.PendingAgentCall.Task.AgentID != task.AgentID ||
+		state.PendingAgentCall.Task.ParentExecutionID == nil ||
+		*state.PendingAgentCall.Task.ParentExecutionID != parentExecutionID {
+		return DelegatedExecution{}, fmt.Errorf("%w: state does not describe the delegated child", ErrInvalid)
+	}
 
 	var delegated DelegatedExecution
-	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		parent, err := s.lockOwnedExecution(
 			tx,
 			parentExecutionID,
@@ -333,6 +371,9 @@ func (s *ExecutionService) DelegateExecution(
 			return err
 		}
 		if task.RunID != parent.RunID {
+			return ErrConflict
+		}
+		if state.AgentID != parent.AgentID {
 			return ErrConflict
 		}
 
@@ -358,7 +399,28 @@ func (s *ExecutionService) DelegateExecution(
 		); err != nil {
 			return err
 		}
+		suspendedPayload, err := json.Marshal(map[string]any{
+			"waiting_on_execution_id": child.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(
+			tx,
+			parent.RunID,
+			parent.ID,
+			model.EventTypeExecutionSuspended,
+			parent.ID,
+			suspendedPayload,
+		); err != nil {
+			return err
+		}
+		parent.State = datatypes.JSON(delegation.State)
+		parent.WaitingOnExecutionID = &child.ID
+		parent.Status = model.ExecutionStatusWaiting
 		parent.Version++
+		parent.ClaimedBy = ""
+		parent.ClaimedAt = nil
 		if err := tx.Save(&parent).Error; err != nil {
 			return err
 		}
@@ -412,8 +474,15 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 	if result.CallID != call.CallID || result.RunID != call.RunID || result.ParentExecutionID != executionID {
 		return 0, fmt.Errorf("%w: result identity does not match call", ErrInvalid)
 	}
+	state, err := decodeExecutionState(checkpoint.State)
+	if err != nil {
+		return 0, err
+	}
+	if state.Phase == "waiting_for_agent" {
+		return 0, fmt.Errorf("%w: tool checkpoint state cannot be waiting for an agent", ErrInvalid)
+	}
 	var version uint64
-	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var execution model.AgentExecution
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
 			return mapDatabaseError(err)
@@ -422,6 +491,9 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 			return ErrConflict
 		}
 		if execution.RunID != call.RunID {
+			return ErrConflict
+		}
+		if state.AgentID != execution.AgentID {
 			return ErrConflict
 		}
 		var existing model.ToolCall
@@ -457,6 +529,8 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 		if err := s.appendEvent(tx, execution.RunID, execution.ID, model.EventTypeToolResult, call.CallID, checkpoint.Result); err != nil {
 			return err
 		}
+		execution.State = datatypes.JSON(checkpoint.State)
+		execution.WaitingOnExecutionID = nil
 		execution.Version++
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -476,6 +550,13 @@ func (s *ExecutionService) CheckpointModel(
 	if checkpoint.Model == "" || checkpoint.TurnMessageID == "" || checkpoint.Sequence == 0 {
 		return 0, fmt.Errorf("%w: model, turn_message_id, and a positive sequence are required", ErrInvalid)
 	}
+	state, err := decodeExecutionState(checkpoint.State)
+	if err != nil {
+		return 0, err
+	}
+	if state.Phase == "waiting_for_agent" || !validJSONObject(checkpoint.Response) {
+		return 0, fmt.Errorf("%w: model checkpoint response or state is invalid", ErrInvalid)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"model":           checkpoint.Model,
 		"turn_message_id": checkpoint.TurnMessageID,
@@ -484,6 +565,7 @@ func (s *ExecutionService) CheckpointModel(
 		"output_tokens":   checkpoint.OutputTokens,
 		"callable_ids":    checkpoint.CallableIDs,
 		"has_content":     checkpoint.HasContent,
+		"response":        checkpoint.Response,
 	})
 	if err != nil {
 		return 0, err
@@ -495,6 +577,9 @@ func (s *ExecutionService) CheckpointModel(
 			return mapDatabaseError(err)
 		}
 		if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != checkpoint.WorkerID {
+			return ErrConflict
+		}
+		if state.AgentID != execution.AgentID {
 			return ErrConflict
 		}
 		if execution.ParentExecutionID == nil {
@@ -544,6 +629,8 @@ func (s *ExecutionService) CheckpointModel(
 		); err != nil {
 			return err
 		}
+		execution.State = datatypes.JSON(checkpoint.State)
+		execution.WaitingOnExecutionID = nil
 		execution.Version++
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -601,6 +688,7 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.WaitingOnExecutionID = nil
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -657,7 +745,10 @@ func (s *ExecutionService) CompleteAgentExecution(
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
-		return tx.Save(&execution).Error
+		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		return s.resumeParent(tx, execution)
 	})
 	return event, err
 }
@@ -669,7 +760,8 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		if err != nil {
 			return err
 		}
-		if execution.ParentExecutionID == nil {
+		isChild := execution.ParentExecutionID != nil
+		if !isChild {
 			payload, err := json.Marshal(map[string]any{"error": failure.Error})
 			if err != nil {
 				return err
@@ -683,6 +775,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 				Payload:     payload,
 			}
 			execution.Status = model.ExecutionStatusIdle
+			execution.WaitingOnExecutionID = nil
 		} else {
 			payload, err := json.Marshal(map[string]any{
 				"run_id":              execution.RunID,
@@ -714,9 +807,53 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
-		return tx.Save(&execution).Error
+		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		if isChild {
+			return s.resumeParent(tx, execution)
+		}
+		return nil
 	})
 	return event, err
+}
+
+func (s *ExecutionService) resumeParent(tx *gorm.DB, child model.AgentExecution) error {
+	if child.ParentExecutionID == nil {
+		return ErrConflict
+	}
+	var parent model.AgentExecution
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, "id = ?", *child.ParentExecutionID).Error; err != nil {
+		return mapDatabaseError(err)
+	}
+	if parent.Status != model.ExecutionStatusWaiting ||
+		parent.WaitingOnExecutionID == nil ||
+		*parent.WaitingOnExecutionID != child.ID {
+		return ErrConflict
+	}
+	payload, err := json.Marshal(map[string]any{
+		"completed_execution_id": child.ID,
+		"status":                 child.Status,
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.appendEvent(
+		tx,
+		parent.RunID,
+		parent.ID,
+		model.EventTypeExecutionResumed,
+		parent.ID,
+		payload,
+	); err != nil {
+		return err
+	}
+	parent.Status = model.ExecutionStatusQueued
+	parent.Version++
+	if err := tx.Save(&parent).Error; err != nil {
+		return err
+	}
+	return s.createDispatch(tx, parent)
 }
 
 func (s *ExecutionService) ListEvents(ctx context.Context, runID string, after uint64) ([]model.ExecutionEvent, error) {
@@ -805,6 +942,36 @@ func nullableJSON(value json.RawMessage) datatypes.JSON {
 func validJSONObject(value json.RawMessage) bool {
 	var object map[string]any
 	return json.Unmarshal(value, &object) == nil && object != nil
+}
+
+func decodeExecutionState(value json.RawMessage) (agentExecutionStatePayload, error) {
+	var state agentExecutionStatePayload
+	if err := json.Unmarshal(value, &state); err != nil {
+		return agentExecutionStatePayload{}, fmt.Errorf("%w: execution state is invalid: %v", ErrInvalid, err)
+	}
+	if state.SchemaVersion != 1 || !versionedIdentifierPattern.MatchString(state.AgentID) || state.Phase == "" {
+		return agentExecutionStatePayload{}, fmt.Errorf("%w: execution state identity is invalid", ErrInvalid)
+	}
+	switch state.Phase {
+	case "ready_for_model", "completed":
+		if state.NextCallIndex != 0 || state.PendingAgentCall != nil {
+			return agentExecutionStatePayload{}, fmt.Errorf("%w: execution state call position is invalid", ErrInvalid)
+		}
+	case "processing_calls":
+		if state.PendingAgentCall != nil {
+			return agentExecutionStatePayload{}, fmt.Errorf("%w: only a waiting state may contain a pending agent call", ErrInvalid)
+		}
+	case "waiting_for_agent":
+		if state.PendingAgentCall == nil ||
+			strings.TrimSpace(state.PendingAgentCall.RequestRef) == "" ||
+			state.PendingAgentCall.Task.SchemaVersion != 1 ||
+			state.PendingAgentCall.RequestIndex != state.NextCallIndex {
+			return agentExecutionStatePayload{}, fmt.Errorf("%w: waiting state has an invalid pending agent call", ErrInvalid)
+		}
+	default:
+		return agentExecutionStatePayload{}, fmt.Errorf("%w: execution state phase is invalid", ErrInvalid)
+	}
+	return state, nil
 }
 
 func mapDatabaseError(err error) error {

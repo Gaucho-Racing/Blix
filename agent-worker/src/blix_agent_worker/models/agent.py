@@ -12,6 +12,7 @@ from blix_agent_worker.models.common import (
     NonEmptyText,
     VersionedIdentifier,
 )
+from blix_agent_worker.models.llm import ModelContinuation, ModelMessage
 
 
 class AgentKind(StrEnum):
@@ -94,6 +95,52 @@ class AgentUsage(ContractModel):
     output_tokens: Annotated[int, Field(ge=0)] = 0
 
 
+class AgentExecutionPhase(StrEnum):
+    READY_FOR_MODEL = "ready_for_model"
+    PROCESSING_CALLS = "processing_calls"
+    WAITING_FOR_AGENT = "waiting_for_agent"
+    COMPLETED = "completed"
+
+
+class PendingAgentCall(ContractModel):
+    request_ref: NonEmptyText
+    request_index: Annotated[int, Field(ge=0)]
+    task: AgentTask
+
+
+class AgentExecutionState(ContractModel):
+    schema_version: Literal[1] = 1
+    agent_id: VersionedIdentifier
+    phase: AgentExecutionPhase
+    messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
+    continuation: ModelContinuation | None = None
+    usage: AgentUsage = Field(default_factory=AgentUsage)
+    next_call_index: Annotated[int, Field(ge=0)] = 0
+    pending_agent_call: PendingAgentCall | None = None
+
+    @model_validator(mode="after")
+    def validate_pending_agent_call(self) -> Self:
+        if self.phase is AgentExecutionPhase.WAITING_FOR_AGENT and self.pending_agent_call is None:
+            raise ValueError("a waiting execution must contain a pending agent call")
+        if self.phase is not AgentExecutionPhase.WAITING_FOR_AGENT and self.pending_agent_call is not None:
+            raise ValueError("only a waiting execution may contain a pending agent call")
+        if self.pending_agent_call is not None and self.pending_agent_call.request_index != self.next_call_index:
+            raise ValueError("the pending agent call must match next_call_index")
+        return self
+
+
+class AgentSuspension(ContractModel):
+    state: AgentExecutionState
+    child_task: AgentTask
+
+    @model_validator(mode="after")
+    def child_task_must_match_pending_call(self) -> Self:
+        pending = self.state.pending_agent_call
+        if pending is None or pending.task != self.child_task:
+            raise ValueError("the suspended child task must match the pending agent call")
+        return self
+
+
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
     run_id: ULID
@@ -120,3 +167,6 @@ class AgentResult(ContractModel):
         if self.status is not AgentResultStatus.SUCCEEDED and self.error is None:
             raise ValueError("an unsuccessful agent result must contain error")
         return self
+
+
+type AgentRunOutcome = AgentResult | AgentSuspension

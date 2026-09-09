@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Callable, Collection
 
 from pydantic import ValidationError
 
@@ -25,22 +25,20 @@ class AgentRunner:
         self,
         registry: AgentRegistry,
         *,
-        executor: Callable[[AgentTask], Awaitable[AgentResult]] | None = None,
         on_start: Callable[[AgentTask], None] | None = None,
         on_result: Callable[[AgentResult], None] | None = None,
     ) -> None:
         self.registry = registry
-        self._executor = executor
         self._on_start = on_start
         self._on_result = on_result
 
-    async def execute(
+    def prepare(
         self,
         *,
         parent_task: AgentTask,
         request: ModelCallRequest,
         allowed_agent_ids: Collection[str],
-    ) -> AgentResult:
+    ) -> AgentTask | AgentResult:
         execution_id = new_ulid()
         if request.callable_id not in allowed_agent_ids:
             return self._emit(
@@ -95,20 +93,9 @@ class AgentRunner:
         )
         if self._on_start is not None:
             self._on_start(task)
+        return task
 
-        try:
-            result = await self._executor(task) if self._executor is not None else await agent.run(task)
-        except Exception:
-            return self._emit(
-                self._failure(
-                    parent_task,
-                    execution_id,
-                    agent.definition.id,
-                    "agent_execution_failed",
-                    f"Agent {agent.definition.id!r} failed unexpectedly.",
-                )
-            )
-
+    def validate_result(self, task: AgentTask, result: AgentResult) -> AgentResult:
         if (
             result.run_id != task.run_id
             or result.execution_id != task.execution_id
@@ -116,12 +103,16 @@ class AgentRunner:
             or result.agent_id != task.agent_id
         ):
             return self._emit(
-                self._failure(
-                    parent_task,
-                    execution_id,
-                    agent.definition.id,
-                    "invalid_agent_result",
-                    f"Agent {agent.definition.id!r} returned mismatched execution metadata.",
+                AgentResult(
+                    run_id=task.run_id,
+                    execution_id=task.execution_id,
+                    parent_execution_id=task.parent_execution_id,
+                    agent_id=task.agent_id,
+                    status=AgentResultStatus.FAILED,
+                    error=ContractError(
+                        code="invalid_agent_result",
+                        message=f"Agent {task.agent_id!r} returned mismatched execution metadata.",
+                    ),
                 )
             )
         return self._emit(result)

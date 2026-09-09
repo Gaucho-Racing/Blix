@@ -3,7 +3,7 @@ from typing import Self
 
 import httpx
 
-from blix_agent_worker.models.agent import AgentResult, AgentTask, AgentUsage
+from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
 from blix_agent_worker.models.common import ULID, ContractError, ContractModel
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
@@ -33,6 +33,8 @@ class ExecutionContext(ContractModel):
     agent_id: str
     version: int
     task: AgentTask | None = None
+    state: AgentExecutionState | None = None
+    waiting_on_execution_id: ULID | None = None
     messages: tuple[RunwayMessage, ...]
 
 
@@ -83,6 +85,7 @@ class RunwayClient:
         expected_version: int,
         call: ToolCall,
         result: ToolResult,
+        state: AgentExecutionState,
     ) -> int:
         body = await self._post(
             f"internal/v1/executions/{execution_id}/tool-checkpoints",
@@ -91,6 +94,7 @@ class RunwayClient:
                 "expected_version": expected_version,
                 "call": call.model_dump(mode="json"),
                 "result": result.model_dump(mode="json"),
+                "state": state.model_dump(mode="json"),
             },
         )
         return VersionResponse.model_validate(body).version
@@ -104,6 +108,7 @@ class RunwayClient:
         turn_message_id: str,
         sequence: int,
         response: ModelResponse,
+        state: AgentExecutionState,
     ) -> int:
         body = await self._post(
             f"internal/v1/executions/{execution_id}/model-checkpoints",
@@ -117,6 +122,8 @@ class RunwayClient:
                 "output_tokens": response.usage.output_tokens,
                 "callable_ids": [request.callable_id for request in response.message.call_requests],
                 "has_content": response.message.content is not None,
+                "response": response.model_dump(mode="json", exclude={"continuation"}),
+                "state": state.model_dump(mode="json"),
             },
         )
         return VersionResponse.model_validate(body).version
@@ -127,6 +134,7 @@ class RunwayClient:
         worker_id: str,
         expected_version: int,
         task: AgentTask,
+        state: AgentExecutionState,
     ) -> DelegatedExecution:
         body = await self._post(
             f"internal/v1/executions/{parent_execution_id}/delegations",
@@ -134,6 +142,7 @@ class RunwayClient:
                 "worker_id": worker_id,
                 "expected_version": expected_version,
                 "task": task.model_dump(mode="json"),
+                "state": state.model_dump(mode="json"),
             },
         )
         return DelegatedExecution.model_validate(body)

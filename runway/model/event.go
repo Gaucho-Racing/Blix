@@ -7,14 +7,16 @@ import (
 )
 
 const (
-	EventTypeUserMessage      = "message.user_v1"
-	EventTypeAssistantMessage = "message.assistant_v1"
-	EventTypeToolCall         = "tool.call_v1"
-	EventTypeToolResult       = "tool.result_v1"
-	EventTypeModelResponse    = "model.response_v1"
-	EventTypeAgentCall        = "agent.call_v1"
-	EventTypeAgentResult      = "agent.result_v1"
-	EventTypeExecutionFailed  = "execution.failed_v1"
+	EventTypeUserMessage        = "message.user_v1"
+	EventTypeAssistantMessage   = "message.assistant_v1"
+	EventTypeToolCall           = "tool.call_v1"
+	EventTypeToolResult         = "tool.result_v1"
+	EventTypeModelResponse      = "model.response_v1"
+	EventTypeAgentCall          = "agent.call_v1"
+	EventTypeAgentResult        = "agent.result_v1"
+	EventTypeExecutionSuspended = "execution.suspended_v1"
+	EventTypeExecutionResumed   = "execution.resumed_v1"
+	EventTypeExecutionFailed    = "execution.failed_v1"
 )
 
 type ExecutionEvent struct {
