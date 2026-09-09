@@ -14,11 +14,12 @@ import (
 
 type Handler struct {
 	executions *service.ExecutionService
+	events     *service.EventHub
 }
 
-func Run(ctx context.Context, port string, production bool, executions *service.ExecutionService) error {
+func Run(ctx context.Context, port string, production bool, executions *service.ExecutionService, events *service.EventHub) error {
 	api := InitializeRouter(production)
-	InitializeRoutes(api, executions)
+	InitializeRoutes(api, executions, events)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api,
@@ -53,14 +54,16 @@ func InitializeRouter(production bool) *gin.Engine {
 	return gin.Default()
 }
 
-func InitializeRoutes(router *gin.Engine, executions *service.ExecutionService) {
-	handler := &Handler{executions: executions}
+func InitializeRoutes(router *gin.Engine, executions *service.ExecutionService, events *service.EventHub) {
+	handler := &Handler{executions: executions, events: events}
 	router.GET("/ping", Ping)
+	router.GET("/v1/events/stream", handler.StreamAllEvents)
 	router.GET("/v1/runs", handler.ListRuns)
 	router.POST("/v1/runs", handler.CreateRun)
 	router.GET("/v1/runs/:runID", handler.GetRun)
 	router.POST("/v1/runs/:runID/messages", handler.AppendMessage)
 	router.GET("/v1/runs/:runID/events", handler.ListEvents)
+	router.GET("/v1/runs/:runID/events/stream", handler.StreamRunEvents)
 	router.GET("/v1/executions/:executionID", handler.GetExecution)
 	router.POST("/internal/v1/executions/:executionID/claim", handler.ClaimExecution)
 	router.POST("/internal/v1/executions/:executionID/heartbeat", handler.HeartbeatExecution)

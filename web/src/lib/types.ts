@@ -16,6 +16,7 @@ export interface RunSummary {
   execution_status: ExecutionStatus
   execution_count: number
   event_count: number
+  last_event_position: number
   created_at: string
   last_activity_at: string
 }

@@ -57,6 +57,7 @@ h1 { margin-bottom: 7px; font-size: 29px; line-height: 1.15; letter-spacing: -.0
 .page-header p { max-width: 660px; margin-bottom: 0; color: var(--muted); font-size: 14px; }
 .live-indicator { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: #77717b; font: 600 10px "Geist Mono Variable"; letter-spacing: .08em; }
 .live-indicator span, .live-indicator i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(74,222,128,.45); animation: pulse 2s ease-in-out infinite; }
+.stream-connecting i, .stream-reconnecting i { background: var(--amber); box-shadow: 0 0 8px rgba(251,191,36,.4); }
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 .stat-card { min-height: 89px; padding: 18px; display: flex; align-items: flex-start; gap: 13px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.018); }

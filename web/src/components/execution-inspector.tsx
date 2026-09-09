@@ -16,7 +16,6 @@ export function ExecutionInspector({ executionID }: ExecutionInspectorProps) {
   const query = useQuery({
     queryKey: ["execution", executionID],
     queryFn: () => getExecution(executionID),
-    refetchInterval: 3_000,
   })
 
   if (query.isPending) {

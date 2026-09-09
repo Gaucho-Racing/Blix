@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	EventTypeRunCreated         = "run.created_v1"
 	EventTypeUserMessage        = "message.user_v1"
 	EventTypeAssistantMessage   = "message.assistant_v1"
 	EventTypeToolCall           = "tool.call_v1"

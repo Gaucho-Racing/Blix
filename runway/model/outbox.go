@@ -7,14 +7,15 @@ import (
 )
 
 type OutboxMessage struct {
-	ID              string         `gorm:"primaryKey"`
-	ExecutionID     string         `gorm:"index;not null"`
-	Topic           string         `gorm:"index;not null"`
-	Payload         datatypes.JSON `gorm:"type:jsonb;not null"`
-	PublishAttempts uint64         `gorm:"not null"`
-	LastPublishedAt *time.Time
-	AcknowledgedAt  *time.Time `gorm:"index"`
-	CreatedAt       time.Time  `gorm:"autoCreateTime"`
+	ID                   string         `gorm:"primaryKey"`
+	ExecutionID          string         `gorm:"index;not null"`
+	Topic                string         `gorm:"index;not null"`
+	Payload              datatypes.JSON `gorm:"type:jsonb;not null"`
+	AcknowledgeOnPublish bool           `gorm:"not null;default:false"`
+	PublishAttempts      uint64         `gorm:"not null"`
+	LastPublishedAt      *time.Time
+	AcknowledgedAt       *time.Time `gorm:"index"`
+	CreatedAt            time.Time  `gorm:"autoCreateTime"`
 }
 
 func (OutboxMessage) TableName() string {

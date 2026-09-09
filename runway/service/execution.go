@@ -28,6 +28,7 @@ var versionedIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*_v[1-9][0-9
 type ExecutionService struct {
 	database            *gorm.DB
 	executionReadyTopic string
+	runEventTopicPrefix string
 	leaseDuration       time.Duration
 }
 
@@ -177,6 +178,7 @@ func NewExecutionService(database *gorm.DB, configuration config.Config) *Execut
 	return &ExecutionService{
 		database:            database,
 		executionReadyTopic: configuration.MQTTExecutionReadyTopic,
+		runEventTopicPrefix: configuration.MQTTRunEventTopicPrefix,
 		leaseDuration:       configuration.ExecutionLeaseDuration,
 	}
 }
@@ -203,7 +205,18 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (Creat
 		if err := tx.Create(&run).Error; err != nil {
 			return err
 		}
-		return tx.Create(&execution).Error
+		if err := tx.Create(&execution).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"run_id":            run.ID,
+			"root_execution_id": execution.ID,
+			"agent_id":          execution.AgentID,
+		})
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(tx, run.ID, execution.ID, model.EventTypeRunCreated, run.ID, payload)
 	})
 	if err != nil {
 		return CreatedRun{}, fmt.Errorf("create run: %w", err)
@@ -253,7 +266,7 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 			EntityID:    message.ID,
 			Payload:     payload,
 		}
-		if err := tx.Create(&event).Error; err != nil {
+		if err := s.persistEvent(tx, &event); err != nil {
 			return err
 		}
 		message.EventPosition = event.Position
@@ -964,6 +977,18 @@ func (s *ExecutionService) ListEvents(ctx context.Context, runID string, after u
 	return events, nil
 }
 
+func (s *ExecutionService) ListAllEvents(ctx context.Context, after uint64) ([]model.ExecutionEvent, error) {
+	var events []model.ExecutionEvent
+	if err := s.database.WithContext(ctx).
+		Where("position > ?", after).
+		Order("position ASC").
+		Limit(100).
+		Find(&events).Error; err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 func (s *ExecutionService) createDispatch(tx *gorm.DB, execution model.AgentExecution) error {
 	outboxID := identifier.New()
 	payload, err := json.Marshal(map[string]any{
@@ -991,13 +1016,31 @@ func (s *ExecutionService) appendEvent(
 	entityID string,
 	payload []byte,
 ) error {
-	return tx.Create(&model.ExecutionEvent{
+	event := model.ExecutionEvent{
 		ID:          identifier.New(),
 		RunID:       runID,
 		ExecutionID: executionID,
 		Type:        eventType,
 		EntityID:    entityID,
 		Payload:     payload,
+	}
+	return s.persistEvent(tx, &event)
+}
+
+func (s *ExecutionService) persistEvent(tx *gorm.DB, event *model.ExecutionEvent) error {
+	if err := tx.Create(event).Error; err != nil {
+		return err
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.OutboxMessage{
+		ID:                   identifier.New(),
+		ExecutionID:          event.ExecutionID,
+		Topic:                s.runEventTopicPrefix + "/" + event.RunID + "/events",
+		Payload:              payload,
+		AcknowledgeOnPublish: true,
 	}).Error
 }
 

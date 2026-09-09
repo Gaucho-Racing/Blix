@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
 import { StatusBadge } from "@/components/status-badge"
+import { RunListEventStream } from "@/components/event-stream"
 import { listRuns } from "@/lib/api"
 import { formatIdentifier, formatRelative, formatTimestamp } from "@/lib/format"
 import type { RunSummary } from "@/lib/types"
@@ -15,7 +16,6 @@ export function RunsPage() {
   const query = useQuery({
     queryKey: ["runs"],
     queryFn: listRuns,
-    refetchInterval: 2_000,
   })
   const runs = query.data ?? noRuns
   const filteredRuns = useMemo(() => {
@@ -30,6 +30,7 @@ export function RunsPage() {
   const active = runs.filter((run) => ["queued", "running", "waiting"].includes(run.execution_status)).length
   const failures = runs.filter((run) => run.execution_status === "failed").length
   const eventCount = runs.reduce((total, run) => total + run.event_count, 0)
+  const streamCursor = runs.reduce((latest, run) => Math.max(latest, run.last_event_position), 0)
 
   return (
     <div className="page">
@@ -39,7 +40,7 @@ export function RunsPage() {
           <h1>Execution runs</h1>
           <p>Trace agent work from intake through every model, tool, and delegation checkpoint.</p>
         </div>
-        <div className="live-indicator"><span /> LIVE · 2S</div>
+        {query.data && <RunListEventStream initialCursor={streamCursor} />}
       </header>
 
       <section className="stat-grid" aria-label="Run summary">

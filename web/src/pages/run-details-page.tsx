@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
 import { EventTimeline } from "@/components/event-timeline"
+import { RunEventStream } from "@/components/event-stream"
 import { ExecutionInspector } from "@/components/execution-inspector"
 import { ExecutionList } from "@/components/execution-list"
 import { StatusBadge } from "@/components/status-badge"
@@ -17,16 +18,11 @@ export function RunDetailsPage() {
     queryKey: ["run", runID],
     queryFn: () => getRun(runID),
     enabled: Boolean(runID),
-    refetchInterval: (query) => {
-      const live = query.state.data?.executions.some((execution) => ["queued", "running", "waiting"].includes(execution.status))
-      return live ? 1_500 : 5_000
-    },
   })
   const eventsQuery = useQuery({
     queryKey: ["run-events", runID],
     queryFn: () => getRunEvents(runID),
     enabled: Boolean(runID),
-    refetchInterval: 2_000,
   })
 
   if (runQuery.isPending) {
@@ -55,7 +51,13 @@ export function RunDetailsPage() {
           <span><GitFork size={14} /> {run.execution_count} executions</span>
           <span><Database size={14} /> {run.event_count} events</span>
           <span><Clock3 size={14} /> {formatTimestamp(run.created_at)}</span>
-          <span className="live-indicator"><i /> LIVE</span>
+          {eventsQuery.data && (
+            <RunEventStream
+              initialCursor={eventsQuery.data.at(-1)?.position ?? run.last_event_position}
+              key={runID}
+              runID={runID}
+            />
+          )}
         </div>
       </header>
 

@@ -34,7 +34,8 @@ func run(configuration config.Config) error {
 	if err != nil {
 		return err
 	}
-	publisher, err := mqtt.Connect(ctx, configuration)
+	eventHub := service.NewEventHub()
+	publisher, err := mqtt.Connect(ctx, configuration, eventHub.Publish)
 	if err != nil {
 		return err
 	}
@@ -52,5 +53,5 @@ func run(configuration config.Config) error {
 	go outbox.Run(ctx)
 	go leaseReaper.Run(ctx)
 
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions)
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions, eventHub)
 }

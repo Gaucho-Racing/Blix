@@ -54,12 +54,16 @@ func (d *OutboxDispatcher) dispatch(ctx context.Context) {
 			return
 		}
 		now := time.Now().UTC()
+		updates := map[string]any{
+			"last_published_at": now,
+			"publish_attempts":  gorm.Expr("publish_attempts + 1"),
+		}
+		if message.AcknowledgeOnPublish {
+			updates["acknowledged_at"] = now
+		}
 		if err := d.database.WithContext(ctx).Model(&model.OutboxMessage{}).
 			Where("id = ? AND acknowledged_at IS NULL", message.ID).
-			Updates(map[string]any{
-				"last_published_at": now,
-				"publish_attempts":  gorm.Expr("publish_attempts + 1"),
-			}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			logger.SugarLogger.Errorf("failed to update outbox message %s: %v", message.ID, err)
 		}
 	}

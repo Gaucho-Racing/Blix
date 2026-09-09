@@ -19,6 +19,7 @@ type Config struct {
 	MQTTURL                 string
 	MQTTClientID            string
 	MQTTExecutionReadyTopic string
+	MQTTRunEventTopicPrefix string
 	OutboxPollInterval      time.Duration
 	ExecutionLeaseDuration  time.Duration
 	LeaseSweepInterval      time.Duration
@@ -52,12 +53,16 @@ func Load() (Config, error) {
 		MQTTURL:                 value("MQTT_URL", "mqtt://localhost:1883"),
 		MQTTClientID:            value("MQTT_CLIENT_ID", "blix-runway"),
 		MQTTExecutionReadyTopic: value("MQTT_EXECUTION_READY_TOPIC", "blix/v1/executions/ready"),
+		MQTTRunEventTopicPrefix: strings.TrimRight(value("MQTT_RUN_EVENT_TOPIC_PREFIX", "blix/v1/runs"), "/"),
 		OutboxPollInterval:      pollInterval,
 		ExecutionLeaseDuration:  leaseDuration,
 		LeaseSweepInterval:      leaseSweepInterval,
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")
+	}
+	if configuration.MQTTRunEventTopicPrefix == "" || strings.ContainsAny(configuration.MQTTRunEventTopicPrefix, "+#") {
+		return Config{}, fmt.Errorf("MQTT_RUN_EVENT_TOPIC_PREFIX must be a concrete MQTT topic prefix")
 	}
 	return configuration, nil
 }

@@ -12,16 +12,17 @@ import (
 )
 
 type RunSummary struct {
-	RunID           string    `json:"run_id"`
-	Kind            string    `json:"kind"`
-	Status          string    `json:"status"`
-	RootExecutionID string    `json:"root_execution_id"`
-	AgentID         string    `json:"agent_id"`
-	ExecutionStatus string    `json:"execution_status"`
-	ExecutionCount  int64     `json:"execution_count"`
-	EventCount      int64     `json:"event_count"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastActivityAt  time.Time `json:"last_activity_at"`
+	RunID             string    `json:"run_id"`
+	Kind              string    `json:"kind"`
+	Status            string    `json:"status"`
+	RootExecutionID   string    `json:"root_execution_id"`
+	AgentID           string    `json:"agent_id"`
+	ExecutionStatus   string    `json:"execution_status"`
+	ExecutionCount    int64     `json:"execution_count"`
+	EventCount        int64     `json:"event_count"`
+	LastEventPosition uint64    `json:"last_event_position"`
+	CreatedAt         time.Time `json:"created_at"`
+	LastActivityAt    time.Time `json:"last_activity_at"`
 }
 
 type ExecutionSummary struct {
@@ -68,6 +69,7 @@ func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummar
 			root.status AS execution_status,
 			(SELECT COUNT(*) FROM runway_agent_execution execution WHERE execution.run_id = r.id) AS execution_count,
 			(SELECT COUNT(*) FROM runway_execution_event event WHERE event.run_id = r.id) AS event_count,
+			COALESCE((SELECT MAX(event.position) FROM runway_execution_event event WHERE event.run_id = r.id), 0) AS last_event_position,
 			r.created_at,
 			COALESCE(
 				(SELECT MAX(event.created_at) FROM runway_execution_event event WHERE event.run_id = r.id),
@@ -101,6 +103,7 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 		return RunDetails{}, err
 	}
 	lastActivityAt := run.CreatedAt
+	var lastEventPosition uint64
 	var latestEvent model.ExecutionEvent
 	err := s.database.WithContext(ctx).
 		Where("run_id = ?", run.ID).
@@ -108,6 +111,7 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 		First(&latestEvent).Error
 	if err == nil {
 		lastActivityAt = latestEvent.CreatedAt
+		lastEventPosition = latestEvent.Position
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return RunDetails{}, err
 	}
@@ -126,16 +130,17 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 	}
 	return RunDetails{
 		Run: RunSummary{
-			RunID:           run.ID,
-			Kind:            run.Kind,
-			Status:          run.Status,
-			RootExecutionID: run.RootExecutionID,
-			AgentID:         rootExecution.AgentID,
-			ExecutionStatus: rootExecution.Status,
-			ExecutionCount:  int64(len(executions)),
-			EventCount:      eventCount,
-			CreatedAt:       run.CreatedAt,
-			LastActivityAt:  lastActivityAt,
+			RunID:             run.ID,
+			Kind:              run.Kind,
+			Status:            run.Status,
+			RootExecutionID:   run.RootExecutionID,
+			AgentID:           rootExecution.AgentID,
+			ExecutionStatus:   rootExecution.Status,
+			ExecutionCount:    int64(len(executions)),
+			EventCount:        eventCount,
+			LastEventPosition: lastEventPosition,
+			CreatedAt:         run.CreatedAt,
+			LastActivityAt:    lastActivityAt,
 		},
 		Executions: executionSummaries,
 	}, nil
