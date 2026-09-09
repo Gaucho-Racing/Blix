@@ -1,4 +1,4 @@
-import { Activity, Bot, BookOpen, Braces, CalendarClock, Gauge, MessageSquare, Radio, Workflow, Wrench } from "lucide-react"
+import { Bot, BookOpen, CalendarClock, ChevronUp, Gauge, MessageSquare, Workflow, Wrench } from "lucide-react"
 import { Link, NavLink, Outlet } from "react-router-dom"
 
 const navClassName = ({ isActive }: { isActive: boolean }) => `nav-item${isActive ? " active" : ""}`
@@ -11,7 +11,7 @@ export function AppShell() {
           <span className="brand-mark">B</span>
           <span>
             <strong>Blix</strong>
-            <small>internal agent</small>
+            <small>Gaucho Racing AI</small>
           </span>
         </Link>
 
@@ -58,14 +58,17 @@ export function AppShell() {
         </nav>
 
         <div className="sidebar-spacer" />
-        <div className="system-card">
-          <div className="system-card-title">
-            <Activity size={14} /> local stack
-          </div>
-          <div className="system-row"><Radio size={13} /> Runway <span className="healthy-dot" /></div>
-          <div className="system-row"><Braces size={13} /> read-only console</div>
+        <div className="runtime-status">
+          <span className="healthy-dot" /> Runway connected
         </div>
-        <div className="environment-label">LOCAL DEVELOPMENT</div>
+        <button className="workspace-switcher" type="button">
+          <span className="workspace-avatar">GR</span>
+          <span className="workspace-copy">
+            <strong>Gaucho Racing</strong>
+            <small>Local workspace</small>
+          </span>
+          <ChevronUp size={15} />
+        </button>
       </aside>
       <main className="main-content"><Outlet /></main>
     </div>
