@@ -1,6 +1,7 @@
 import { Bot, CornerDownRight } from "lucide-react"
 
 import { StatusBadge } from "@/components/status-badge"
+import { formatIdentifier } from "@/lib/format"
 import type { ExecutionSummary } from "@/lib/types"
 
 interface ExecutionListProps {
@@ -41,7 +42,7 @@ export function ExecutionList({ executions, selectedID, onSelect }: ExecutionLis
             </span>
             <span className="execution-copy">
               <strong>{execution.agent_id}</strong>
-              <code>{execution.execution_id}</code>
+              <code>{formatIdentifier(execution.execution_id, "execution")}</code>
             </span>
             <StatusBadge status={execution.status} />
           </button>

@@ -5,7 +5,7 @@ import { Link } from "react-router-dom"
 
 import { StatusBadge } from "@/components/status-badge"
 import { listRuns } from "@/lib/api"
-import { formatRelative, formatTimestamp } from "@/lib/format"
+import { formatIdentifier, formatRelative, formatTimestamp } from "@/lib/format"
 import type { RunSummary } from "@/lib/types"
 
 const noRuns: RunSummary[] = []
@@ -22,7 +22,8 @@ export function RunsPage() {
     const needle = search.trim().toLowerCase()
     if (!needle) return runs
     return runs.filter((run) =>
-      [run.run_id, run.agent_id, run.kind, run.execution_status].some((value) => value.toLowerCase().includes(needle)),
+      [run.run_id, formatIdentifier(run.run_id, "run"), run.agent_id, run.kind, run.execution_status]
+        .some((value) => value.toLowerCase().includes(needle)),
     )
   }, [runs, search])
 
@@ -76,7 +77,7 @@ export function RunsPage() {
                     <td>
                       <Link className="run-link" to={`/runs/${run.run_id}`}>
                         <strong>{run.agent_id}</strong>
-                        <code>{run.run_id}</code>
+                        <code>{formatIdentifier(run.run_id, "run")}</code>
                       </Link>
                     </td>
                     <td><StatusBadge status={run.execution_status} /></td>

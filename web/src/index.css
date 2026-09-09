@@ -150,7 +150,7 @@ h1 { margin-bottom: 7px; font-size: 29px; line-height: 1.15; letter-spacing: -.0
 .timeline-heading strong { color: #bbb5bf; font: 550 10px "Geist Mono Variable"; text-transform: uppercase; letter-spacing: .04em; }
 .timeline-heading time { color: #57525a; font: 9px "Geist Mono Variable"; }
 .timeline-summary { overflow: hidden; color: #96909a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.timeline-meta { display: flex; gap: 10px; color: #514d54; font-size: 8px; }
+.timeline-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: #514d54; font-size: 8px; }
 .timeline-event[open] > summary { background: rgba(255,255,255,.015); }
 .timeline-event[open] > .json-block { margin: 0 18px 13px 61px; border: 1px solid var(--border); border-radius: 6px; max-height: 360px; }
 
