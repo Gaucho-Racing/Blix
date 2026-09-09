@@ -56,9 +56,12 @@ func InitializeRouter(production bool) *gin.Engine {
 func InitializeRoutes(router *gin.Engine, executions *service.ExecutionService) {
 	handler := &Handler{executions: executions}
 	router.GET("/ping", Ping)
+	router.GET("/v1/runs", handler.ListRuns)
 	router.POST("/v1/runs", handler.CreateRun)
+	router.GET("/v1/runs/:runID", handler.GetRun)
 	router.POST("/v1/runs/:runID/messages", handler.AppendMessage)
 	router.GET("/v1/runs/:runID/events", handler.ListEvents)
+	router.GET("/v1/executions/:executionID", handler.GetExecution)
 	router.POST("/internal/v1/executions/:executionID/claim", handler.ClaimExecution)
 	router.POST("/internal/v1/executions/:executionID/heartbeat", handler.HeartbeatExecution)
 	router.POST("/internal/v1/executions/:executionID/delegations", handler.DelegateExecution)

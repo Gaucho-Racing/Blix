@@ -16,6 +16,29 @@ type appendMessageRequest struct {
 	Content string `json:"content" binding:"required"`
 }
 
+func (h *Handler) ListRuns(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	runs, err := h.executions.ListRuns(c.Request.Context(), limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runs": runs})
+}
+
+func (h *Handler) GetRun(c *gin.Context) {
+	run, err := h.executions.GetRun(c.Request.Context(), c.Param("runID"))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, run)
+}
+
 func (h *Handler) CreateRun(c *gin.Context) {
 	var request createRunRequest
 	if err := c.ShouldBindJSON(&request); err != nil {

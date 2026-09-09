@@ -11,6 +11,15 @@ type claimExecutionRequest struct {
 	WorkerID string `json:"worker_id" binding:"required"`
 }
 
+func (h *Handler) GetExecution(c *gin.Context) {
+	execution, err := h.executions.GetExecution(c.Request.Context(), c.Param("executionID"))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, execution)
+}
+
 func (h *Handler) ClaimExecution(c *gin.Context) {
 	var request claimExecutionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {

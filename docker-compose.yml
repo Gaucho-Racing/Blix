@@ -1,6 +1,23 @@
 name: blix
 
 services:
+  web:
+    container_name: blix-web
+    image: node:22-alpine
+    restart: always
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    depends_on:
+      runway:
+        condition: service_started
+    environment:
+      WEB_RUNWAY_URL: http://runway:9999
+
   cli:
     profiles:
       - manual
@@ -103,3 +120,4 @@ volumes:
   cli_gopath:
   pgdata:
   runway_gopath:
+  web_node_modules:
