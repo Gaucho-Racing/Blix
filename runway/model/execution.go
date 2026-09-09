@@ -25,6 +25,7 @@ type AgentExecution struct {
 	Version              uint64         `json:"version" gorm:"not null"`
 	ClaimedBy            string         `json:"claimed_by,omitempty" gorm:"index"`
 	ClaimedAt            *time.Time     `json:"claimed_at,omitempty"`
+	LeaseExpiresAt       *time.Time     `json:"lease_expires_at,omitempty" gorm:"index"`
 	Task                 datatypes.JSON `json:"task,omitempty" gorm:"type:jsonb"`
 	State                datatypes.JSON `json:"state,omitempty" gorm:"type:jsonb"`
 	Result               datatypes.JSON `json:"result,omitempty" gorm:"type:jsonb"`

@@ -48,7 +48,9 @@ func run(configuration config.Config) error {
 
 	executions := service.NewExecutionService(db, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
+	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)
 	go outbox.Run(ctx)
+	go leaseReaper.Run(ctx)
 
 	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions)
 }

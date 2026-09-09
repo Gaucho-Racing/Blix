@@ -14,8 +14,10 @@ const (
 	EventTypeModelResponse      = "model.response_v1"
 	EventTypeAgentCall          = "agent.call_v1"
 	EventTypeAgentResult        = "agent.result_v1"
+	EventTypeExecutionClaimed   = "execution.claimed_v1"
 	EventTypeExecutionSuspended = "execution.suspended_v1"
 	EventTypeExecutionResumed   = "execution.resumed_v1"
+	EventTypeExecutionLeaseLost = "execution.lease_expired_v1"
 	EventTypeExecutionFailed    = "execution.failed_v1"
 )
 

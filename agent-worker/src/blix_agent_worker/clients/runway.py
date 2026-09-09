@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Self
 
 import httpx
+from pydantic import Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
 from blix_agent_worker.models.common import ULID, ContractError, ContractModel
@@ -35,6 +36,8 @@ class ExecutionContext(ContractModel):
     task: AgentTask | None = None
     state: AgentExecutionState | None = None
     waiting_on_execution_id: ULID | None = None
+    lease_expires_at: datetime
+    lease_renew_after_ms: int = Field(gt=0)
     messages: tuple[RunwayMessage, ...]
 
 
@@ -50,6 +53,10 @@ class DelegatedExecution(ContractModel):
 class ExecutionResult(ContractModel):
     status: str
     result: AgentResult | None = None
+
+
+class LeaseHeartbeat(ContractModel):
+    lease_expires_at: datetime
 
 
 class RunwayClient:
@@ -77,6 +84,13 @@ class RunwayClient:
             {"worker_id": worker_id},
         )
         return ExecutionContext.model_validate(body)
+
+    async def heartbeat_execution(self, execution_id: str, worker_id: str) -> LeaseHeartbeat:
+        body = await self._post(
+            f"internal/v1/executions/{execution_id}/heartbeat",
+            {"worker_id": worker_id},
+        )
+        return LeaseHeartbeat.model_validate(body)
 
     async def checkpoint_tool(
         self,

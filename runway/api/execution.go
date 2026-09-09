@@ -25,6 +25,20 @@ func (h *Handler) ClaimExecution(c *gin.Context) {
 	c.JSON(http.StatusOK, claimed)
 }
 
+func (h *Handler) HeartbeatExecution(c *gin.Context) {
+	var request service.Heartbeat
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	heartbeat, err := h.executions.HeartbeatExecution(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, heartbeat)
+}
+
 func (h *Handler) DelegateExecution(c *gin.Context) {
 	var request service.Delegation
 	if err := c.ShouldBindJSON(&request); err != nil {

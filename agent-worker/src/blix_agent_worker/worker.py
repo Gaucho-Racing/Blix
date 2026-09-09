@@ -83,6 +83,25 @@ class AgentWorker:
                 return
             raise
 
+        owner_task = asyncio.current_task()
+        if owner_task is None:
+            raise RuntimeError("execution handler has no owning task")
+        relinquishing_lease = asyncio.Event()
+        heartbeat_task = asyncio.create_task(
+            self._maintain_lease(
+                execution.execution_id,
+                execution.lease_renew_after_ms,
+                owner_task,
+                relinquishing_lease,
+            )
+        )
+        try:
+            await self._handle_claimed(execution, relinquishing_lease)
+        finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+    async def _handle_claimed(self, execution: ExecutionContext, relinquishing_lease: asyncio.Event) -> None:
         state = ExecutionState(version=execution.version)
         turn_message_id = execution.messages[-1].message_id if execution.messages else execution.execution_id
 
@@ -126,6 +145,7 @@ class AgentWorker:
 
             outcome = await self._run_execution(execution, checkpoint, checkpoint_model, resume_result)
             if isinstance(outcome, AgentSuspension):
+                relinquishing_lease.set()
                 await self._runway.delegate_execution(
                     execution.execution_id,
                     self._worker_id,
@@ -136,6 +156,7 @@ class AgentWorker:
                 return
             result = outcome
             if execution.parent_execution_id is not None:
+                relinquishing_lease.set()
                 await self._runway.complete_agent_execution(
                     execution.execution_id,
                     self._worker_id,
@@ -145,6 +166,7 @@ class AgentWorker:
                 return
             if result.status is AgentResultStatus.SUCCEEDED:
                 output = GeneralConversationV1Output.model_validate(result.output)
+                relinquishing_lease.set()
                 await self._runway.complete_execution(
                     execution.execution_id,
                     self._worker_id,
@@ -154,6 +176,7 @@ class AgentWorker:
                 )
                 return
             error = result.error or ContractError(code="agent_execution_failed", message="The agent execution failed.")
+            relinquishing_lease.set()
             await self._runway.fail_execution(
                 execution.execution_id,
                 self._worker_id,
@@ -163,6 +186,7 @@ class AgentWorker:
         except Exception as error:
             logger.exception("execution %s failed", execution.execution_id)
             try:
+                relinquishing_lease.set()
                 await self._runway.fail_execution(
                     execution.execution_id,
                     self._worker_id,
@@ -171,6 +195,30 @@ class AgentWorker:
                 )
             except RunwayClientError:
                 logger.exception("failed to persist failure for execution %s", execution.execution_id)
+
+    async def _maintain_lease(
+        self,
+        execution_id: str,
+        renew_after_ms: int,
+        owner_task: asyncio.Task[None],
+        relinquishing_lease: asyncio.Event,
+    ) -> None:
+        renew_after_seconds = renew_after_ms / 1000
+        while True:
+            await asyncio.sleep(renew_after_seconds)
+            try:
+                await self._runway.heartbeat_execution(execution_id, self._worker_id)
+            except RunwayClientError as error:
+                if error.status_code in {404, 409}:
+                    if not relinquishing_lease.is_set():
+                        logger.warning("execution %s lost its lease", execution_id)
+                        owner_task.cancel()
+                    return
+                logger.warning("failed to renew lease for execution %s: %s", execution_id, error)
+            except Exception:
+                logger.exception("invalid lease heartbeat response for execution %s", execution_id)
+                owner_task.cancel()
+                return
 
     async def _run_execution(
         self,

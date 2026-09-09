@@ -321,6 +321,8 @@ func applyEvent(event executionEvent, toolIDs map[string]string) (string, string
 			activity := mutedStyle.Render(fmt.Sprintf("   ↳  model  call %d  ·  %d tokens", payload.Sequence, tokens))
 			return "", activity, false, nil
 		}
+	case "execution.lease_expired_v1":
+		return "", mutedStyle.Render("   ↳  execution lease expired  ·  requeued"), false, nil
 	case "message.assistant_v1":
 		var payload assistantPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {

@@ -28,6 +28,7 @@ var versionedIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*_v[1-9][0-9
 type ExecutionService struct {
 	database            *gorm.DB
 	executionReadyTopic string
+	leaseDuration       time.Duration
 }
 
 type CreatedRun struct {
@@ -50,7 +51,17 @@ type ExecutionContext struct {
 	Task                 json.RawMessage `json:"task,omitempty"`
 	State                json.RawMessage `json:"state,omitempty"`
 	WaitingOnExecutionID *string         `json:"waiting_on_execution_id,omitempty"`
+	LeaseExpiresAt       *time.Time      `json:"lease_expires_at"`
+	LeaseRenewAfterMS    uint64          `json:"lease_renew_after_ms"`
 	Messages             []model.Message `json:"messages"`
+}
+
+type Heartbeat struct {
+	WorkerID string `json:"worker_id"`
+}
+
+type LeaseHeartbeat struct {
+	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
 type Delegation struct {
@@ -166,6 +177,7 @@ func NewExecutionService(database *gorm.DB, configuration config.Config) *Execut
 	return &ExecutionService{
 		database:            database,
 		executionReadyTopic: configuration.MQTTExecutionReadyTopic,
+		leaseDuration:       configuration.ExecutionLeaseDuration,
 	}
 }
 
@@ -253,6 +265,7 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.LeaseExpiresAt = nil
 		execution.State = nil
 		execution.WaitingOnExecutionID = nil
 		if err := tx.Save(&execution).Error; err != nil {
@@ -289,11 +302,31 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			return ErrConflict
 		}
 		now := time.Now().UTC()
+		leaseExpiresAt := now.Add(s.leaseDuration)
 		execution.Status = model.ExecutionStatusRunning
 		execution.ClaimedBy = workerID
 		execution.ClaimedAt = &now
+		execution.LeaseExpiresAt = &leaseExpiresAt
 		execution.Version++
 		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		claimedPayload, err := json.Marshal(map[string]any{
+			"worker_id":        workerID,
+			"lease_expires_at": leaseExpiresAt,
+			"version":          execution.Version,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(
+			tx,
+			execution.RunID,
+			execution.ID,
+			model.EventTypeExecutionClaimed,
+			execution.ID,
+			claimedPayload,
+		); err != nil {
 			return err
 		}
 		if err := tx.Model(&model.OutboxMessage{}).
@@ -314,6 +347,8 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			Task:                 json.RawMessage(execution.Task),
 			State:                json.RawMessage(execution.State),
 			WaitingOnExecutionID: execution.WaitingOnExecutionID,
+			LeaseExpiresAt:       execution.LeaseExpiresAt,
+			LeaseRenewAfterMS:    uint64((s.leaseDuration / 3).Milliseconds()),
 			Messages:             messages,
 		}
 		return nil
@@ -322,6 +357,43 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		return ExecutionContext{}, err
 	}
 	return claimed, nil
+}
+
+func (s *ExecutionService) HeartbeatExecution(
+	ctx context.Context,
+	executionID string,
+	heartbeat Heartbeat,
+) (LeaseHeartbeat, error) {
+	workerID := strings.TrimSpace(heartbeat.WorkerID)
+	if workerID == "" {
+		return LeaseHeartbeat{}, fmt.Errorf("%w: worker_id cannot be empty", ErrInvalid)
+	}
+	heartbeatAt := time.Now().UTC()
+	leaseExpiresAt := heartbeatAt.Add(s.leaseDuration)
+	result := s.database.WithContext(ctx).
+		Model(&model.AgentExecution{}).
+		Where(
+			"id = ? AND status = ? AND claimed_by = ? AND lease_expires_at > ?",
+			executionID,
+			model.ExecutionStatusRunning,
+			workerID,
+			heartbeatAt,
+		).
+		Update("lease_expires_at", leaseExpiresAt)
+	if result.Error != nil {
+		return LeaseHeartbeat{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := s.database.WithContext(ctx).Model(&model.AgentExecution{}).Where("id = ?", executionID).Count(&count).Error; err != nil {
+			return LeaseHeartbeat{}, err
+		}
+		if count == 0 {
+			return LeaseHeartbeat{}, ErrNotFound
+		}
+		return LeaseHeartbeat{}, ErrConflict
+	}
+	return LeaseHeartbeat{LeaseExpiresAt: leaseExpiresAt}, nil
 }
 
 func (s *ExecutionService) DelegateExecution(
@@ -421,6 +493,7 @@ func (s *ExecutionService) DelegateExecution(
 		parent.Version++
 		parent.ClaimedBy = ""
 		parent.ClaimedAt = nil
+		parent.LeaseExpiresAt = nil
 		if err := tx.Save(&parent).Error; err != nil {
 			return err
 		}
@@ -453,7 +526,9 @@ func (s *ExecutionService) GetExecutionResult(
 	if err := s.database.WithContext(ctx).First(&parent, "id = ?", parentExecutionID).Error; err != nil {
 		return ExecutionResult{}, mapDatabaseError(err)
 	}
-	if parent.Status != model.ExecutionStatusRunning || parent.ClaimedBy != workerID {
+	if parent.Status != model.ExecutionStatusRunning ||
+		parent.ClaimedBy != workerID ||
+		!hasActiveLease(parent, time.Now().UTC()) {
 		return ExecutionResult{}, ErrConflict
 	}
 	return ExecutionResult{Status: child.Status, Result: json.RawMessage(child.Result)}, nil
@@ -487,7 +562,9 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
 			return mapDatabaseError(err)
 		}
-		if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != checkpoint.WorkerID {
+		if execution.Status != model.ExecutionStatusRunning ||
+			execution.ClaimedBy != checkpoint.WorkerID ||
+			!hasActiveLease(execution, time.Now().UTC()) {
 			return ErrConflict
 		}
 		if execution.RunID != call.RunID {
@@ -531,6 +608,8 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 		}
 		execution.State = datatypes.JSON(checkpoint.State)
 		execution.WaitingOnExecutionID = nil
+		leaseExpiresAt := time.Now().UTC().Add(s.leaseDuration)
+		execution.LeaseExpiresAt = &leaseExpiresAt
 		execution.Version++
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -576,7 +655,9 @@ func (s *ExecutionService) CheckpointModel(
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
 			return mapDatabaseError(err)
 		}
-		if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != checkpoint.WorkerID {
+		if execution.Status != model.ExecutionStatusRunning ||
+			execution.ClaimedBy != checkpoint.WorkerID ||
+			!hasActiveLease(execution, time.Now().UTC()) {
 			return ErrConflict
 		}
 		if state.AgentID != execution.AgentID {
@@ -631,6 +712,8 @@ func (s *ExecutionService) CheckpointModel(
 		}
 		execution.State = datatypes.JSON(checkpoint.State)
 		execution.WaitingOnExecutionID = nil
+		leaseExpiresAt := time.Now().UTC().Add(s.leaseDuration)
+		execution.LeaseExpiresAt = &leaseExpiresAt
 		execution.Version++
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -688,6 +771,7 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.LeaseExpiresAt = nil
 		execution.WaitingOnExecutionID = nil
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -745,6 +829,7 @@ func (s *ExecutionService) CompleteAgentExecution(
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.LeaseExpiresAt = nil
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -807,6 +892,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		execution.Version++
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
+		execution.LeaseExpiresAt = nil
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -850,6 +936,9 @@ func (s *ExecutionService) resumeParent(tx *gorm.DB, child model.AgentExecution)
 	}
 	parent.Status = model.ExecutionStatusQueued
 	parent.Version++
+	parent.ClaimedBy = ""
+	parent.ClaimedAt = nil
+	parent.LeaseExpiresAt = nil
 	if err := tx.Save(&parent).Error; err != nil {
 		return err
 	}
@@ -922,13 +1011,19 @@ func (s *ExecutionService) lockOwnedExecution(
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
 		return model.AgentExecution{}, mapDatabaseError(err)
 	}
-	if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != workerID {
+	if execution.Status != model.ExecutionStatusRunning ||
+		execution.ClaimedBy != workerID ||
+		!hasActiveLease(execution, time.Now().UTC()) {
 		return model.AgentExecution{}, ErrConflict
 	}
 	if execution.Version != expectedVersion {
 		return model.AgentExecution{}, ErrConflict
 	}
 	return execution, nil
+}
+
+func hasActiveLease(execution model.AgentExecution, now time.Time) bool {
+	return execution.LeaseExpiresAt != nil && execution.LeaseExpiresAt.After(now)
 }
 
 func nullableJSON(value json.RawMessage) datatypes.JSON {
