@@ -24,7 +24,7 @@ from blix_agent_worker.models.agent import (
     AgentSuspension,
     AgentTask,
 )
-from blix_agent_worker.models.common import ContractError, new_ulid
+from blix_agent_worker.models.common import ContractError, EventID, ExecutionID, RunID, new_ulid
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -44,10 +44,10 @@ DEFAULT_AGENT_WORKER_CONCURRENCY = 4
 class DispatchMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    event_id: str
-    run_id: str
-    execution_id: str
-    parent_execution_id: str | None = None
+    event_id: EventID
+    run_id: RunID
+    execution_id: ExecutionID
+    parent_execution_id: ExecutionID | None = None
 
 
 @dataclass
@@ -299,7 +299,7 @@ async def run() -> None:
         "MQTT_EXECUTION_READY_TOPIC",
         "$share/blix-agent-workers/blix/v1/executions/ready",
     ).strip()
-    worker_id = f"agent-worker-{new_ulid()}"
+    worker_id = new_ulid("worker")
 
     async with (
         RunwayClient(runway_url) as runway,

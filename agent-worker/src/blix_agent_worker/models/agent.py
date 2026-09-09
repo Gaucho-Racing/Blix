@@ -4,12 +4,13 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
-    ULID,
     ContractError,
     ContractModel,
+    ExecutionID,
     Identifier,
     JsonObject,
     NonEmptyText,
+    RunID,
     VersionedIdentifier,
 )
 from blix_agent_worker.models.llm import ModelContinuation, ModelMessage
@@ -54,9 +55,9 @@ class AgentDefinition(ContractModel):
 
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: ULID
-    execution_id: ULID
-    parent_execution_id: ULID | None = None
+    run_id: RunID
+    execution_id: ExecutionID
+    parent_execution_id: ExecutionID | None = None
     agent_id: VersionedIdentifier
     objective: NonEmptyText
     input: JsonObject = Field(default_factory=dict)
@@ -143,9 +144,9 @@ class AgentSuspension(ContractModel):
 
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: ULID
-    execution_id: ULID
-    parent_execution_id: ULID | None = None
+    run_id: RunID
+    execution_id: ExecutionID
+    parent_execution_id: ExecutionID | None = None
     agent_id: VersionedIdentifier
     status: AgentResultStatus
     output: JsonValue = None

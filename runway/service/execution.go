@@ -189,12 +189,12 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (Creat
 		return CreatedRun{}, fmt.Errorf("%w: agent_id must be a versioned identifier", ErrInvalid)
 	}
 	run := model.Run{
-		ID:     identifier.New(),
+		ID:     identifier.New(identifier.Run),
 		Kind:   model.RunKindConversation,
 		Status: model.RunStatusActive,
 	}
 	execution := model.AgentExecution{
-		ID:      identifier.New(),
+		ID:      identifier.New(identifier.Execution),
 		RunID:   run.ID,
 		AgentID: agentID,
 		Status:  model.ExecutionStatusIdle,
@@ -225,6 +225,9 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (Creat
 }
 
 func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, content string) (AppendedMessage, error) {
+	if !identifier.IsValid(runID, identifier.Run) {
+		return AppendedMessage{}, fmt.Errorf("%w: run_id is invalid", ErrInvalid)
+	}
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return AppendedMessage{}, fmt.Errorf("%w: content cannot be empty", ErrInvalid)
@@ -244,7 +247,7 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		}
 
 		message := model.Message{
-			ID:                identifier.New(),
+			ID:                identifier.New(identifier.Message),
 			RunID:             run.ID,
 			ParentExecutionID: execution.ID,
 			Role:              model.MessageRoleUser,
@@ -259,7 +262,7 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 			return err
 		}
 		event := model.ExecutionEvent{
-			ID:          identifier.New(),
+			ID:          identifier.New(identifier.Event),
 			RunID:       run.ID,
 			ExecutionID: execution.ID,
 			Type:        model.EventTypeUserMessage,
@@ -302,8 +305,8 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 
 func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID string, workerID string) (ExecutionContext, error) {
 	workerID = strings.TrimSpace(workerID)
-	if workerID == "" {
-		return ExecutionContext{}, fmt.Errorf("%w: worker_id cannot be empty", ErrInvalid)
+	if !identifier.IsValid(executionID, identifier.Execution) || !identifier.IsValid(workerID, identifier.Worker) {
+		return ExecutionContext{}, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
 	}
 	var claimed ExecutionContext
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -378,8 +381,8 @@ func (s *ExecutionService) HeartbeatExecution(
 	heartbeat Heartbeat,
 ) (LeaseHeartbeat, error) {
 	workerID := strings.TrimSpace(heartbeat.WorkerID)
-	if workerID == "" {
-		return LeaseHeartbeat{}, fmt.Errorf("%w: worker_id cannot be empty", ErrInvalid)
+	if !identifier.IsValid(executionID, identifier.Execution) || !identifier.IsValid(workerID, identifier.Worker) {
+		return LeaseHeartbeat{}, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
 	}
 	heartbeatAt := time.Now().UTC()
 	leaseExpiresAt := heartbeatAt.Add(s.leaseDuration)
@@ -414,6 +417,10 @@ func (s *ExecutionService) DelegateExecution(
 	parentExecutionID string,
 	delegation Delegation,
 ) (DelegatedExecution, error) {
+	if !identifier.IsValid(parentExecutionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(delegation.WorkerID), identifier.Worker) {
+		return DelegatedExecution{}, fmt.Errorf("%w: parent_execution_id or worker_id is invalid", ErrInvalid)
+	}
 	var task agentTaskPayload
 	if err := json.Unmarshal(delegation.Task, &task); err != nil {
 		return DelegatedExecution{}, fmt.Errorf("%w: task is invalid: %v", ErrInvalid, err)
@@ -422,7 +429,10 @@ func (s *ExecutionService) DelegateExecution(
 	if err != nil {
 		return DelegatedExecution{}, err
 	}
-	if task.SchemaVersion != 1 || !identifier.IsValid(task.ExecutionID) || task.ExecutionID == parentExecutionID {
+	if task.SchemaVersion != 1 ||
+		!identifier.IsValid(task.RunID, identifier.Run) ||
+		!identifier.IsValid(task.ExecutionID, identifier.Execution) ||
+		task.ExecutionID == parentExecutionID {
 		return DelegatedExecution{}, fmt.Errorf("%w: child execution_id is invalid", ErrInvalid)
 	}
 	if task.ParentExecutionID == nil || *task.ParentExecutionID != parentExecutionID {
@@ -525,8 +535,10 @@ func (s *ExecutionService) GetExecutionResult(
 	parentExecutionID string,
 	workerID string,
 ) (ExecutionResult, error) {
-	if parentExecutionID == "" || workerID == "" {
-		return ExecutionResult{}, fmt.Errorf("%w: parent_execution_id and worker_id are required", ErrInvalid)
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(parentExecutionID, identifier.Execution) ||
+		!identifier.IsValid(workerID, identifier.Worker) {
+		return ExecutionResult{}, fmt.Errorf("%w: execution_id, parent_execution_id, or worker_id is invalid", ErrInvalid)
 	}
 	var child model.AgentExecution
 	if err := s.database.WithContext(ctx).First(&child, "id = ?", executionID).Error; err != nil {
@@ -548,6 +560,10 @@ func (s *ExecutionService) GetExecutionResult(
 }
 
 func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID string, checkpoint ToolCheckpoint) (uint64, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(checkpoint.WorkerID), identifier.Worker) {
+		return 0, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
+	}
 	var call toolCallPayload
 	if err := json.Unmarshal(checkpoint.Call, &call); err != nil {
 		return 0, fmt.Errorf("%w: call is invalid: %v", ErrInvalid, err)
@@ -556,7 +572,9 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 	if err := json.Unmarshal(checkpoint.Result, &result); err != nil {
 		return 0, fmt.Errorf("%w: result is invalid: %v", ErrInvalid, err)
 	}
-	if call.CallID == "" || call.RunID == "" || call.ParentExecutionID != executionID || call.ToolID == "" {
+	if !identifier.IsValid(call.CallID, identifier.Call) ||
+		!identifier.IsValid(call.RunID, identifier.Run) ||
+		call.ParentExecutionID != executionID || call.ToolID == "" {
 		return 0, fmt.Errorf("%w: call identity is invalid", ErrInvalid)
 	}
 	if result.CallID != call.CallID || result.RunID != call.RunID || result.ParentExecutionID != executionID {
@@ -639,7 +657,11 @@ func (s *ExecutionService) CheckpointModel(
 	checkpoint ModelCheckpoint,
 ) (uint64, error) {
 	checkpoint.Model = strings.TrimSpace(checkpoint.Model)
-	if checkpoint.Model == "" || checkpoint.TurnMessageID == "" || checkpoint.Sequence == 0 {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(checkpoint.WorkerID), identifier.Worker) ||
+		checkpoint.Model == "" ||
+		!identifier.IsOneOf(checkpoint.TurnMessageID, identifier.Message, identifier.Execution) ||
+		checkpoint.Sequence == 0 {
 		return 0, fmt.Errorf("%w: model, turn_message_id, and a positive sequence are required", ErrInvalid)
 	}
 	state, err := decodeExecutionState(checkpoint.State)
@@ -712,7 +734,7 @@ func (s *ExecutionService) CheckpointModel(
 		if execution.Version != checkpoint.ExpectedVersion {
 			return ErrConflict
 		}
-		modelCallID := identifier.New()
+		modelCallID := identifier.New(identifier.ModelCall)
 		if err := s.appendEvent(
 			tx,
 			execution.RunID,
@@ -738,6 +760,10 @@ func (s *ExecutionService) CheckpointModel(
 }
 
 func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID string, completion Completion) (AppendedMessage, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(completion.WorkerID), identifier.Worker) {
+		return AppendedMessage{}, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
+	}
 	content := strings.TrimSpace(completion.Content)
 	if content == "" {
 		return AppendedMessage{}, fmt.Errorf("%w: content cannot be empty", ErrInvalid)
@@ -749,7 +775,7 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 			return err
 		}
 		message := model.Message{
-			ID:                identifier.New(),
+			ID:                identifier.New(identifier.Message),
 			RunID:             execution.RunID,
 			ParentExecutionID: execution.ID,
 			Role:              model.MessageRoleAssistant,
@@ -766,7 +792,7 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 			return err
 		}
 		event := model.ExecutionEvent{
-			ID:          identifier.New(),
+			ID:          identifier.New(identifier.Event),
 			RunID:       execution.RunID,
 			ExecutionID: execution.ID,
 			Type:        model.EventTypeAssistantMessage,
@@ -800,6 +826,10 @@ func (s *ExecutionService) CompleteAgentExecution(
 	executionID string,
 	completion AgentCompletion,
 ) (model.ExecutionEvent, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(completion.WorkerID), identifier.Worker) {
+		return model.ExecutionEvent{}, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
+	}
 	var result agentResultPayload
 	if err := json.Unmarshal(completion.Result, &result); err != nil {
 		return model.ExecutionEvent{}, fmt.Errorf("%w: result is invalid: %v", ErrInvalid, err)
@@ -825,7 +855,7 @@ func (s *ExecutionService) CompleteAgentExecution(
 		}
 
 		event = model.ExecutionEvent{
-			ID:          identifier.New(),
+			ID:          identifier.New(identifier.Event),
 			RunID:       execution.RunID,
 			ExecutionID: *execution.ParentExecutionID,
 			Type:        model.EventTypeAgentResult,
@@ -852,6 +882,10 @@ func (s *ExecutionService) CompleteAgentExecution(
 }
 
 func (s *ExecutionService) FailExecution(ctx context.Context, executionID string, failure Failure) (model.ExecutionEvent, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(failure.WorkerID), identifier.Worker) {
+		return model.ExecutionEvent{}, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
+	}
 	var event model.ExecutionEvent
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		execution, err := s.lockOwnedExecution(tx, executionID, failure.WorkerID, failure.ExpectedVersion)
@@ -865,7 +899,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 				return err
 			}
 			event = model.ExecutionEvent{
-				ID:          identifier.New(),
+				ID:          identifier.New(identifier.Event),
 				RunID:       execution.RunID,
 				ExecutionID: execution.ID,
 				Type:        model.EventTypeExecutionFailed,
@@ -887,7 +921,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 				return err
 			}
 			event = model.ExecutionEvent{
-				ID:          identifier.New(),
+				ID:          identifier.New(identifier.Event),
 				RunID:       execution.RunID,
 				ExecutionID: *execution.ParentExecutionID,
 				Type:        model.EventTypeAgentResult,
@@ -959,6 +993,9 @@ func (s *ExecutionService) resumeParent(tx *gorm.DB, child model.AgentExecution)
 }
 
 func (s *ExecutionService) ListEvents(ctx context.Context, runID string, after uint64) ([]model.ExecutionEvent, error) {
+	if !identifier.IsValid(runID, identifier.Run) {
+		return nil, fmt.Errorf("%w: run_id is invalid", ErrInvalid)
+	}
 	var count int64
 	if err := s.database.WithContext(ctx).Model(&model.Run{}).Where("id = ?", runID).Count(&count).Error; err != nil {
 		return nil, err
@@ -990,9 +1027,9 @@ func (s *ExecutionService) ListAllEvents(ctx context.Context, after uint64) ([]m
 }
 
 func (s *ExecutionService) createDispatch(tx *gorm.DB, execution model.AgentExecution) error {
-	outboxID := identifier.New()
+	dispatchEventID := identifier.New(identifier.Event)
 	payload, err := json.Marshal(map[string]any{
-		"event_id":            outboxID,
+		"event_id":            dispatchEventID,
 		"run_id":              execution.RunID,
 		"execution_id":        execution.ID,
 		"parent_execution_id": execution.ParentExecutionID,
@@ -1001,7 +1038,7 @@ func (s *ExecutionService) createDispatch(tx *gorm.DB, execution model.AgentExec
 		return err
 	}
 	return tx.Create(&model.OutboxMessage{
-		ID:          outboxID,
+		ID:          identifier.New(identifier.Outbox),
 		ExecutionID: execution.ID,
 		Topic:       s.executionReadyTopic,
 		Payload:     payload,
@@ -1017,7 +1054,7 @@ func (s *ExecutionService) appendEvent(
 	payload []byte,
 ) error {
 	event := model.ExecutionEvent{
-		ID:          identifier.New(),
+		ID:          identifier.New(identifier.Event),
 		RunID:       runID,
 		ExecutionID: executionID,
 		Type:        eventType,
@@ -1036,7 +1073,7 @@ func (s *ExecutionService) persistEvent(tx *gorm.DB, event *model.ExecutionEvent
 		return err
 	}
 	return tx.Create(&model.OutboxMessage{
-		ID:                   identifier.New(),
+		ID:                   identifier.New(identifier.Outbox),
 		ExecutionID:          event.ExecutionID,
 		Topic:                s.runEventTopicPrefix + "/" + event.RunID + "/events",
 		Payload:              payload,

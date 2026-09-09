@@ -9,7 +9,7 @@ import { ExecutionInspector } from "@/components/execution-inspector"
 import { ExecutionList } from "@/components/execution-list"
 import { StatusBadge } from "@/components/status-badge"
 import { getRun, getRunEvents } from "@/lib/api"
-import { formatIdentifier, formatTimestamp } from "@/lib/format"
+import { formatTimestamp } from "@/lib/format"
 
 export function RunDetailsPage() {
   const { runID = "" } = useParams()
@@ -45,7 +45,7 @@ export function RunDetailsPage() {
       <header className="run-header">
         <div>
           <div className="run-title-line"><h1>{run.agent_id}</h1><StatusBadge status={run.execution_status} /></div>
-          <code>{formatIdentifier(run.run_id, "run")}</code>
+          <code>{run.run_id}</code>
         </div>
         <div className="run-header-meta">
           <span><GitFork size={14} /> {run.execution_count} executions</span>

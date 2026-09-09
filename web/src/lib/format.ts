@@ -23,35 +23,8 @@ export function eventLabel(type: string): string {
   return type.replace(/_v\d+$/, "").replaceAll(".", " ").replaceAll("_", " ")
 }
 
-export type IdentifierPrefix = "run" | "execution" | "event" | "call" | "message" | "model_call" | "worker" | "outbox"
-
-const rawULIDPattern = /^[0-9a-hjkmnp-tv-z]{26}$/i
-
-export function formatIdentifier(value: string, prefix: IdentifierPrefix): string {
-  return rawULIDPattern.test(value) ? `${prefix}_${value}` : value
-}
-
-const identifierPrefixes: Record<string, IdentifierPrefix> = {
-  run_id: "run",
-  root_execution_id: "execution",
-  execution_id: "execution",
-  parent_execution_id: "execution",
-  waiting_on_execution_id: "execution",
-  completed_execution_id: "execution",
-  event_id: "event",
-  message_id: "message",
-  turn_message_id: "message",
-  call_id: "call",
-  model_call_id: "model_call",
-  worker_id: "worker",
-  outbox_id: "outbox",
-}
-
-export function formatIdentifiersInJSON(value: unknown, key?: string): unknown {
+export function formatIdentifiersInJSON(value: unknown): unknown {
   if (typeof value === "string") {
-    if (key && identifierPrefixes[key]) {
-      return formatIdentifier(value, identifierPrefixes[key])
-    }
     const trimmed = value.trim()
     if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
       try {
@@ -67,7 +40,7 @@ export function formatIdentifiersInJSON(value: unknown, key?: string): unknown {
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([entryKey, entryValue]) => [entryKey, formatIdentifiersInJSON(entryValue, entryKey)]),
+      Object.entries(value).map(([entryKey, entryValue]) => [entryKey, formatIdentifiersInJSON(entryValue)]),
     )
   }
   return value

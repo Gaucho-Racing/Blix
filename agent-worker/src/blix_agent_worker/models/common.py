@@ -1,18 +1,50 @@
-from typing import Annotated, cast
+from collections.abc import Callable
+from typing import Annotated, Literal
 
 import ulid
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, JsonValue, ValidationError
 
 
-def _normalize_ulid(value: object) -> object:
-    if isinstance(value, ulid.ULID):
-        return str(value)
-    if not isinstance(value, str):
+IdentifierPrefix = Literal["run", "execution", "event", "message", "call", "modelcall", "worker", "outbox", "job"]
+
+
+def _prefixed_ulid_validator(prefix: IdentifierPrefix) -> Callable[[object], object]:
+    def validate(value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        try:
+            parsed_prefix, parsed = ulid.parse_prefixed(value)
+        except ulid.ULIDError as error:
+            raise ValueError("invalid prefixed ULID") from error
+        if parsed_prefix != prefix or parsed.prefixed(parsed_prefix) != value:
+            raise ValueError(f"identifier must be a canonical {prefix}_ prefixed ULID")
         return value
-    try:
-        return str(ulid.parse_strict(value))
-    except ulid.ULIDError as error:
-        raise ValueError("invalid ULID") from error
+
+    return validate
+
+
+def _prefixed_ulid(prefix: IdentifierPrefix) -> object:
+    length = len(prefix) + 27
+    return Annotated[
+        str,
+        Field(min_length=length, max_length=length),
+        BeforeValidator(_prefixed_ulid_validator(prefix)),
+    ]
+
+
+RunID = _prefixed_ulid("run")
+ExecutionID = _prefixed_ulid("execution")
+EventID = _prefixed_ulid("event")
+MessageID = _prefixed_ulid("message")
+CallID = _prefixed_ulid("call")
+ModelCallID = _prefixed_ulid("modelcall")
+WorkerID = _prefixed_ulid("worker")
+OutboxID = _prefixed_ulid("outbox")
+JobID = _prefixed_ulid("job")
+
+
+def new_ulid(prefix: IdentifierPrefix) -> str:
+    return ulid.make().prefixed(prefix)
 
 
 Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")]
@@ -21,16 +53,7 @@ VersionedIdentifier = Annotated[
     Field(min_length=4, max_length=64, pattern=r"^[a-z][a-z0-9_]*_v[1-9][0-9]*$"),
 ]
 NonEmptyText = Annotated[str, Field(min_length=1)]
-ULID = Annotated[
-    str,
-    Field(min_length=26, max_length=26, pattern=r"^[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$"),
-    BeforeValidator(_normalize_ulid),
-]
 type JsonObject = dict[str, JsonValue]
-
-
-def new_ulid() -> ULID:
-    return cast(ULID, str(ulid.make()))
 
 
 def validation_error_details(error: ValidationError) -> JsonObject:

@@ -4,7 +4,7 @@ from typing import Self
 
 from pydantic import model_validator
 
-from blix_agent_worker.models.common import ULID, ContractModel, NonEmptyText
+from blix_agent_worker.models.common import ContractModel, ExecutionID, MessageID, NonEmptyText, RunID
 
 
 class ConversationMessageRole(StrEnum):
@@ -13,9 +13,9 @@ class ConversationMessageRole(StrEnum):
 
 
 class ConversationMessage(ContractModel):
-    message_id: ULID
-    run_id: ULID
-    parent_execution_id: ULID
+    message_id: MessageID
+    run_id: RunID
+    parent_execution_id: ExecutionID
     role: ConversationMessageRole
     content: NonEmptyText
     created_at: datetime

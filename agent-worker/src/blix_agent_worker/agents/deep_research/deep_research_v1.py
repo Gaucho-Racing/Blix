@@ -269,7 +269,7 @@ class DeepResearchV1Agent:
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(
                 run_id=task.run_id,
-                call_id=new_ulid(),
+                call_id=new_ulid("call"),
                 parent_execution_id=task.execution_id,
                 tool_id=model_call_request.callable_id,
                 arguments=model_call_request.arguments,

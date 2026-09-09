@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gaucho-racing/blix/runway/model"
+	"github.com/gaucho-racing/blix/runway/pkg/identifier"
 	"gorm.io/gorm"
 )
 
@@ -84,6 +85,9 @@ func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummar
 }
 
 func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails, error) {
+	if !identifier.IsValid(runID, identifier.Run) {
+		return RunDetails{}, ErrInvalid
+	}
 	var run model.Run
 	if err := s.database.WithContext(ctx).First(&run, "id = ?", runID).Error; err != nil {
 		return RunDetails{}, mapDatabaseError(err)
@@ -147,6 +151,9 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 }
 
 func (s *ExecutionService) GetExecution(ctx context.Context, executionID string) (ExecutionDetails, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) {
+		return ExecutionDetails{}, ErrInvalid
+	}
 	var execution model.AgentExecution
 	if err := s.database.WithContext(ctx).First(&execution, "id = ?", executionID).Error; err != nil {
 		return ExecutionDetails{}, mapDatabaseError(err)

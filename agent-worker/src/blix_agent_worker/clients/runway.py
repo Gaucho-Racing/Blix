@@ -5,7 +5,7 @@ import httpx
 from pydantic import Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
-from blix_agent_worker.models.common import ULID, ContractError, ContractModel
+from blix_agent_worker.models.common import ContractError, ContractModel, ExecutionID, MessageID, RunID
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -18,9 +18,9 @@ class RunwayClientError(Exception):
 
 
 class RunwayMessage(ContractModel):
-    message_id: ULID
-    run_id: ULID
-    parent_execution_id: ULID
+    message_id: MessageID
+    run_id: RunID
+    parent_execution_id: ExecutionID
     event_position: int
     role: ConversationMessageRole
     content: str
@@ -28,14 +28,14 @@ class RunwayMessage(ContractModel):
 
 
 class ExecutionContext(ContractModel):
-    run_id: ULID
-    execution_id: ULID
-    parent_execution_id: ULID | None = None
+    run_id: RunID
+    execution_id: ExecutionID
+    parent_execution_id: ExecutionID | None = None
     agent_id: str
     version: int
     task: AgentTask | None = None
     state: AgentExecutionState | None = None
-    waiting_on_execution_id: ULID | None = None
+    waiting_on_execution_id: ExecutionID | None = None
     lease_expires_at: datetime
     lease_renew_after_ms: int = Field(gt=0)
     messages: tuple[RunwayMessage, ...]
@@ -46,7 +46,7 @@ class VersionResponse(ContractModel):
 
 
 class DelegatedExecution(ContractModel):
-    execution_id: ULID
+    execution_id: ExecutionID
     parent_version: int
 
 

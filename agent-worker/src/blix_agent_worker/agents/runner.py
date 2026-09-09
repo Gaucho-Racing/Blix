@@ -39,7 +39,7 @@ class AgentRunner:
         request: ModelCallRequest,
         allowed_agent_ids: Collection[str],
     ) -> AgentTask | AgentResult:
-        execution_id = new_ulid()
+        execution_id = new_ulid("execution")
         if request.callable_id not in allowed_agent_ids:
             return self._emit(
                 self._failure(

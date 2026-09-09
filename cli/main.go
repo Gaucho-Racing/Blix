@@ -443,8 +443,8 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 func printBanner(current createdRun) {
 	lines := []string{
 		mutedStyle.Render("AGENT      ") + mutedStyle.Render(agentID),
-		mutedStyle.Render("RUN        ") + mutedStyle.Render("run_"+current.Run.ID),
-		mutedStyle.Render("EXECUTION  ") + mutedStyle.Render("execution_"+current.Execution.ID),
+		mutedStyle.Render("RUN        ") + mutedStyle.Render(current.Run.ID),
+		mutedStyle.Render("EXECUTION  ") + mutedStyle.Render(current.Execution.ID),
 		mutedStyle.Render("COMMANDS   ") + mutedStyle.Render("/help  /reset  /quit"),
 	}
 	width := terminalWidth() - 2

@@ -16,12 +16,10 @@ import type { ComponentType } from "react"
 
 import {
   eventLabel,
-  formatIdentifier,
   formatIdentifiersInJSON,
   formatTimestamp,
   readNumber,
   readString,
-  type IdentifierPrefix,
 } from "@/lib/format"
 import type { ExecutionEvent } from "@/lib/types"
 
@@ -40,13 +38,6 @@ const icons: Record<string, ComponentType<{ size?: number }>> = {
   "execution.failed_v1": CircleAlert,
 }
 
-function entityPrefix(eventType: string): IdentifierPrefix {
-  if (eventType.startsWith("message.")) return "message"
-  if (eventType.startsWith("tool.") || eventType.startsWith("agent.")) return "call"
-  if (eventType.startsWith("model.")) return "model_call"
-  return "execution"
-}
-
 function eventSummary(event: ExecutionEvent): string {
   const content = readString(event.payload, "content")
   if (content) return content
@@ -61,7 +52,7 @@ function eventSummary(event: ExecutionEvent): string {
   const identity = ["tool_id", "agent_id", "worker_id", "status"]
     .map((key) => readString(event.payload, key))
     .find(Boolean)
-  return identity ?? formatIdentifier(event.entity_id, entityPrefix(event.type))
+  return identity ?? event.entity_id
 }
 
 interface EventTimelineProps {
@@ -89,8 +80,8 @@ export function EventTimeline({ events }: EventTimelineProps) {
                 <span className="timeline-summary">{eventSummary(event)}</span>
                 <span className="timeline-meta">
                   <code>#{event.position}</code>
-                  <code>{formatIdentifier(event.event_id, "event")}</code>
-                  <code>{formatIdentifier(event.execution_id, "execution")}</code>
+                  <code>{event.event_id}</code>
+                  <code>{event.execution_id}</code>
                 </span>
               </span>
             </summary>
