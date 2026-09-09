@@ -15,6 +15,7 @@ import { LegacyRunRedirect } from "@/pages/legacy-run-redirect"
 import { PlaceholderPage } from "@/pages/placeholder-page"
 import { RunDetailsPage } from "@/pages/run-details-page"
 import { RunsPage } from "@/pages/runs-page"
+import { WorkersPage } from "@/pages/workers-page"
 import "@/index.css"
 
 const queryClient = new QueryClient({
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
       { path: "admin", element: <AdminOverviewPage /> },
       { path: "admin/runs", element: <RunsPage /> },
       { path: "admin/runs/:runID", element: <RunDetailsPage /> },
+      { path: "admin/workers", element: <WorkersPage /> },
       {
         path: "admin/agents",
         element: (

@@ -35,6 +35,7 @@ func run(configuration config.Config) error {
 		return err
 	}
 	eventHub := service.NewEventHub()
+	workerHub := service.NewWorkerHub()
 	publisher, err := mqtt.Connect(ctx, configuration, eventHub.Publish)
 	if err != nil {
 		return err
@@ -47,11 +48,12 @@ func run(configuration config.Config) error {
 		}
 	}()
 
-	executions := service.NewExecutionService(db, configuration)
+	workers := service.NewWorkerService(db, workerHub, configuration)
+	executions := service.NewExecutionService(db, workers, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
 	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)
 	go outbox.Run(ctx)
 	go leaseReaper.Run(ctx)
 
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions, eventHub)
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions, workers, eventHub, workerHub)
 }

@@ -222,12 +222,36 @@ h1, h2, h3, p { margin-top: 0; }
 .run-link { display: inline-grid; gap: 4px; color: inherit; text-decoration: none; }
 .run-link strong { color: var(--text); font-size: 12px; font-weight: 630; }
 .run-link code { color: var(--dim); font-size: 10px; }
+.worker-table-wrap { overflow-x: auto; }
+.worker-table { width: 100%; min-width: 1120px; border-collapse: collapse; table-layout: fixed; }
+.worker-column-identity { width: 250px; }
+.worker-column-status { width: 100px; }
+.worker-column-lifetime { width: 110px; }
+.worker-column-workload { width: 120px; }
+.worker-column-outcomes { width: 220px; }
+.worker-column-calls { width: 105px; }
+.worker-column-tokens { width: 130px; }
+.worker-column-heartbeat { width: 125px; }
+.worker-table th { height: 40px; padding: 0 16px; color: var(--dim); background: var(--surface-subtle); font: 650 9px "Geist Mono Variable"; letter-spacing: .1em; text-align: left; text-transform: uppercase; }
+.worker-table td { height: 74px; padding: 0 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.worker-table tbody tr { transition: background .15s ease; }
+.worker-table tbody tr:hover { background: var(--pink-faint); }
+.worker-identity { display: grid; gap: 5px; }
+.worker-identity strong { color: var(--text); font-size: 11px; font-weight: 630; }
+.worker-identity code { overflow: hidden; color: var(--dim); font-size: 9px; text-overflow: ellipsis; }
+.table-primary, .table-secondary { display: block; }
+.table-primary { color: var(--text); font-size: 11px; font-weight: 620; }
+.table-secondary { margin-top: 4px; color: var(--dim); font-size: 9px; }
 .status-badge { width: max-content; padding: 4px 7px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font: 600 10px "Geist Mono Variable"; letter-spacing: .04em; text-transform: uppercase; }
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-running, .status-queued { color: var(--pink-strong); border-color: #f2c9e4; background: var(--pink-soft); }
 .status-waiting { color: var(--amber); border-color: #f2dfb4; background: var(--amber-soft); }
 .status-failed, .status-cancelled { color: var(--red); border-color: #f3cbd2; background: var(--red-soft); }
 .status-succeeded { color: var(--green); border-color: #cce7d9; background: var(--green-soft); }
+.status-idle { color: var(--green); border-color: #cce7d9; background: var(--green-soft); }
+.status-active { color: var(--blue); border-color: #cbdff3; background: var(--blue-soft); }
+.status-saturated { color: var(--pink-strong); border-color: #f2c9e4; background: var(--pink-soft); }
+.status-offline { color: var(--dim); border-color: var(--border); background: var(--surface-subtle); }
 .loading-state, .error-state, .empty-state { min-height: 220px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--dim); font-size: 12px; }
 .error-state { color: var(--red); }
 .loading-state.compact, .error-state.compact, .empty-state.compact { min-height: 90px; }
@@ -296,7 +320,7 @@ h1, h2, h3, p { margin-top: 0; }
 .placeholder-label { display: block; margin-bottom: 13px; color: var(--pink); font: 650 10px "Geist Mono Variable"; letter-spacing: .12em; text-transform: uppercase; }
 .placeholder-panel h2 { margin: 0 0 8px; font-size: 20px; letter-spacing: -.025em; }
 .placeholder-panel p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
-.admin-destination-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.admin-destination-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
 .admin-destination { min-height: 156px; padding: 19px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: start; gap: 13px; color: inherit; text-decoration: none; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
 .admin-destination:hover { border-color: #efbfdc; background: var(--pink-faint); transform: translateY(-1px); }
 .admin-destination > svg { margin-top: 11px; color: var(--dim); }

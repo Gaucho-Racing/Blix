@@ -38,6 +38,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 	}
 	if err := database.AutoMigrate(
 		&model.Run{},
+		&model.AgentWorker{},
 		&model.AgentExecution{},
 		&model.ExecutionEvent{},
 		&model.Message{},

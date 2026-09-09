@@ -27,6 +27,7 @@ var versionedIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*_v[1-9][0-9
 
 type ExecutionService struct {
 	database            *gorm.DB
+	workers             *WorkerService
 	executionReadyTopic string
 	runEventTopicPrefix string
 	leaseDuration       time.Duration
@@ -174,9 +175,10 @@ type agentResultPayload struct {
 	Error             json.RawMessage `json:"error"`
 }
 
-func NewExecutionService(database *gorm.DB, configuration config.Config) *ExecutionService {
+func NewExecutionService(database *gorm.DB, workers *WorkerService, configuration config.Config) *ExecutionService {
 	return &ExecutionService{
 		database:            database,
+		workers:             workers,
 		executionReadyTopic: configuration.MQTTExecutionReadyTopic,
 		runEventTopicPrefix: configuration.MQTTRunEventTopicPrefix,
 		leaseDuration:       configuration.ExecutionLeaseDuration,
@@ -316,6 +318,9 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		}
 		if execution.Status != model.ExecutionStatusQueued {
 			return ErrConflict
+		}
+		if err := s.workers.recordClaim(tx, workerID); err != nil {
+			return err
 		}
 		now := time.Now().UTC()
 		leaseExpiresAt := now.Add(s.leaseDuration)
@@ -637,6 +642,9 @@ func (s *ExecutionService) CheckpointTool(ctx context.Context, executionID strin
 		if err := s.appendEvent(tx, execution.RunID, execution.ID, model.EventTypeToolResult, call.CallID, checkpoint.Result); err != nil {
 			return err
 		}
+		if err := s.workers.recordToolCall(tx, checkpoint.WorkerID); err != nil {
+			return err
+		}
 		execution.State = datatypes.JSON(checkpoint.State)
 		execution.WaitingOnExecutionID = nil
 		leaseExpiresAt := time.Now().UTC().Add(s.leaseDuration)
@@ -745,6 +753,14 @@ func (s *ExecutionService) CheckpointModel(
 		); err != nil {
 			return err
 		}
+		if err := s.workers.recordModelCall(
+			tx,
+			checkpoint.WorkerID,
+			checkpoint.InputTokens,
+			checkpoint.OutputTokens,
+		); err != nil {
+			return err
+		}
 		execution.State = datatypes.JSON(checkpoint.State)
 		execution.WaitingOnExecutionID = nil
 		leaseExpiresAt := time.Now().UTC().Add(s.leaseDuration)
@@ -804,6 +820,9 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		}
 		message.EventPosition = event.Position
 		if err := tx.Create(&message).Error; err != nil {
+			return err
+		}
+		if err := s.workers.recordCompletion(tx, completion.WorkerID, model.ExecutionStatusSucceeded); err != nil {
 			return err
 		}
 		execution.Status = model.ExecutionStatusIdle
@@ -873,6 +892,9 @@ func (s *ExecutionService) CompleteAgentExecution(
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
 		execution.LeaseExpiresAt = nil
+		if err := s.workers.recordCompletion(tx, completion.WorkerID, result.Status); err != nil {
+			return err
+		}
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -940,6 +962,9 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		execution.ClaimedBy = ""
 		execution.ClaimedAt = nil
 		execution.LeaseExpiresAt = nil
+		if err := s.workers.recordCompletion(tx, failure.WorkerID, model.ExecutionStatusFailed); err != nil {
+			return err
+		}
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}

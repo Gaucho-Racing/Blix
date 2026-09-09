@@ -1,4 +1,4 @@
-import { Bot, BookOpen, CalendarClock, ChevronUp, Gauge, MessageSquare, Workflow, Wrench } from "lucide-react"
+import { Bot, BookOpen, CalendarClock, ChevronUp, Gauge, MessageSquare, ServerCog, Workflow, Wrench } from "lucide-react"
 import { Link, NavLink, Outlet } from "react-router-dom"
 
 const navClassName = ({ isActive }: { isActive: boolean }) => `nav-item${isActive ? " active" : ""}`
@@ -44,6 +44,10 @@ export function AppShell() {
               <NavLink className={navClassName} to="/admin/runs">
                 <Workflow size={17} />
                 Runs
+              </NavLink>
+              <NavLink className={navClassName} to="/admin/workers">
+                <ServerCog size={17} />
+                Workers
               </NavLink>
               <NavLink className={navClassName} to="/admin/agents">
                 <Bot size={17} />

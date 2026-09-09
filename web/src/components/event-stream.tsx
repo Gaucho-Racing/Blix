@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
-import type { ExecutionEvent } from "@/lib/types"
+import type { ExecutionEvent, WorkerSummary } from "@/lib/types"
 
 type StreamStatus = "connecting" | "live" | "reconnecting"
 
@@ -96,6 +96,33 @@ export function RunEventStream({ runID, initialCursor }: RunEventStreamProps) {
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
     }
   }, [queryClient, stream])
+
+  return <StreamIndicator status={status} />
+}
+
+export function WorkerListEventStream() {
+  const queryClient = useQueryClient()
+  const [status, setStatus] = useState<StreamStatus>("connecting")
+
+  useEffect(() => {
+    const source = new EventSource("/api/v1/workers/stream")
+    source.onopen = () => setStatus("live")
+    source.onerror = () => setStatus("reconnecting")
+    source.onmessage = (message) => {
+      try {
+        const worker = JSON.parse(message.data) as WorkerSummary
+        queryClient.setQueryData<WorkerSummary[]>(["workers"], (current = []) => {
+          const remaining = current.filter((candidate) => candidate.worker_id !== worker.worker_id)
+          return [worker, ...remaining].sort(
+            (left, right) => new Date(right.last_seen_at).getTime() - new Date(left.last_seen_at).getTime(),
+          )
+        })
+      } catch {
+        return
+      }
+    }
+    return () => source.close()
+  }, [queryClient])
 
   return <StreamIndicator status={status} />
 }

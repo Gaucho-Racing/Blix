@@ -23,6 +23,8 @@ type Config struct {
 	OutboxPollInterval      time.Duration
 	ExecutionLeaseDuration  time.Duration
 	LeaseSweepInterval      time.Duration
+	WorkerHeartbeatInterval time.Duration
+	WorkerOfflineAfter      time.Duration
 }
 
 func Load() (Config, error) {
@@ -37,6 +39,14 @@ func Load() (Config, error) {
 	leaseSweepInterval, err := time.ParseDuration(value("EXECUTION_LEASE_SWEEP_INTERVAL", "5s"))
 	if err != nil || leaseSweepInterval <= 0 {
 		return Config{}, fmt.Errorf("EXECUTION_LEASE_SWEEP_INTERVAL must be a positive duration")
+	}
+	workerHeartbeatInterval, err := time.ParseDuration(value("WORKER_HEARTBEAT_INTERVAL", "5s"))
+	if err != nil || workerHeartbeatInterval <= 0 {
+		return Config{}, fmt.Errorf("WORKER_HEARTBEAT_INTERVAL must be a positive duration")
+	}
+	workerOfflineAfter, err := time.ParseDuration(value("WORKER_OFFLINE_AFTER", "15s"))
+	if err != nil || workerOfflineAfter < 2*workerHeartbeatInterval {
+		return Config{}, fmt.Errorf("WORKER_OFFLINE_AFTER must be at least twice WORKER_HEARTBEAT_INTERVAL")
 	}
 	port := value("PORT", "9999")
 	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
@@ -57,6 +67,8 @@ func Load() (Config, error) {
 		OutboxPollInterval:      pollInterval,
 		ExecutionLeaseDuration:  leaseDuration,
 		LeaseSweepInterval:      leaseSweepInterval,
+		WorkerHeartbeatInterval: workerHeartbeatInterval,
+		WorkerOfflineAfter:      workerOfflineAfter,
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")

@@ -5,7 +5,7 @@ import httpx
 from pydantic import Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
-from blix_agent_worker.models.common import ContractError, ContractModel, ExecutionID, MessageID, RunID
+from blix_agent_worker.models.common import ContractError, ContractModel, ExecutionID, MessageID, RunID, WorkerID
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -59,6 +59,11 @@ class LeaseHeartbeat(ContractModel):
     lease_expires_at: datetime
 
 
+class WorkerRegistration(ContractModel):
+    worker_id: WorkerID
+    heartbeat_interval_ms: int = Field(gt=0)
+
+
 class RunwayClient:
     def __init__(self, base_url: str) -> None:
         if not base_url.strip():
@@ -84,6 +89,16 @@ class RunwayClient:
             {"worker_id": worker_id},
         )
         return ExecutionContext.model_validate(body)
+
+    async def register_worker(self, worker_id: str, concurrency: int) -> WorkerRegistration:
+        body = await self._post(
+            "internal/v1/workers/register",
+            {"worker_id": worker_id, "concurrency": concurrency},
+        )
+        return WorkerRegistration.model_validate(body)
+
+    async def heartbeat_worker(self, worker_id: str) -> None:
+        await self._post(f"internal/v1/workers/{worker_id}/heartbeat", {})
 
     async def heartbeat_execution(self, execution_id: str, worker_id: str) -> LeaseHeartbeat:
         body = await self._post(

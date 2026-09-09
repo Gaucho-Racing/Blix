@@ -14,7 +14,13 @@ from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Input,
     GeneralConversationV1Output,
 )
-from blix_agent_worker.clients import ExecutionContext, RunwayClient, RunwayClientError, TavilyClient
+from blix_agent_worker.clients import (
+    ExecutionContext,
+    RunwayClient,
+    RunwayClientError,
+    TavilyClient,
+    WorkerRegistration,
+)
 from blix_agent_worker.llm import BifrostResponsesModel
 from blix_agent_worker.models.agent import (
     AgentExecutionState,
@@ -312,6 +318,15 @@ async def run() -> None:
         ) as model,
         TavilyClient() as tavily,
     ):
+        registration = await _register_worker(runway, worker_id, concurrency)
+        worker_heartbeat = asyncio.create_task(
+            _maintain_worker_registration(
+                runway,
+                worker_id,
+                concurrency,
+                registration.heartbeat_interval_ms,
+            )
+        )
         worker = AgentWorker(runway, worker_id, model, tavily)
         execution_capacity = asyncio.Semaphore(concurrency)
         active_executions: set[asyncio.Task[None]] = set()
@@ -331,31 +346,65 @@ async def run() -> None:
             port=mqtt_port,
             identifier=worker_id,
         )
-        while True:
-            try:
-                async with client:
-                    await client.subscribe(topic, qos=1)
-                    logger.info(
-                        "worker %s subscribed to %s with concurrency=%d",
-                        worker_id,
-                        topic,
-                        concurrency,
-                    )
-                    async for message in client.messages:
-                        try:
-                            dispatch = DispatchMessage.model_validate_json(message.payload)
-                        except ValidationError:
-                            logger.exception("discarding invalid dispatch message")
-                            continue
-                        if dispatch.execution_id in pending_execution_ids:
-                            continue
-                        pending_execution_ids.add(dispatch.execution_id)
-                        task = asyncio.create_task(execute(dispatch))
-                        active_executions.add(task)
-                        task.add_done_callback(active_executions.discard)
-            except aiomqtt.MqttError as error:
-                logger.warning("MQTT connection failed; reconnecting: %s", error)
-                await asyncio.sleep(2)
+        try:
+            while True:
+                try:
+                    async with client:
+                        await client.subscribe(topic, qos=1)
+                        logger.info(
+                            "worker %s subscribed to %s with concurrency=%d",
+                            worker_id,
+                            topic,
+                            concurrency,
+                        )
+                        async for message in client.messages:
+                            try:
+                                dispatch = DispatchMessage.model_validate_json(message.payload)
+                            except ValidationError:
+                                logger.exception("discarding invalid dispatch message")
+                                continue
+                            if dispatch.execution_id in pending_execution_ids:
+                                continue
+                            pending_execution_ids.add(dispatch.execution_id)
+                            task = asyncio.create_task(execute(dispatch))
+                            active_executions.add(task)
+                            task.add_done_callback(active_executions.discard)
+                except aiomqtt.MqttError as error:
+                    logger.warning("MQTT connection failed; reconnecting: %s", error)
+                    await asyncio.sleep(2)
+        finally:
+            worker_heartbeat.cancel()
+            await asyncio.gather(worker_heartbeat, return_exceptions=True)
+
+
+async def _register_worker(runway: RunwayClient, worker_id: str, concurrency: int) -> WorkerRegistration:
+    while True:
+        try:
+            registration = await runway.register_worker(worker_id, concurrency)
+            logger.info("registered worker %s with concurrency=%d", worker_id, concurrency)
+            return registration
+        except RunwayClientError as error:
+            logger.warning("worker registration failed; retrying: %s", error)
+            await asyncio.sleep(2)
+
+
+async def _maintain_worker_registration(
+    runway: RunwayClient,
+    worker_id: str,
+    concurrency: int,
+    heartbeat_interval_ms: int,
+) -> None:
+    heartbeat_interval_seconds = heartbeat_interval_ms / 1000
+    while True:
+        await asyncio.sleep(heartbeat_interval_seconds)
+        try:
+            await runway.heartbeat_worker(worker_id)
+        except RunwayClientError as error:
+            if error.status_code == 404:
+                registration = await _register_worker(runway, worker_id, concurrency)
+                heartbeat_interval_seconds = registration.heartbeat_interval_ms / 1000
+                continue
+            logger.warning("worker heartbeat failed: %s", error)
 
 
 def _agent_worker_concurrency() -> int:

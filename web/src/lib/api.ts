@@ -5,6 +5,7 @@ import type {
   ExecutionEvent,
   RunDetails,
   RunSummary,
+  WorkerSummary,
 } from "@/lib/types"
 
 const api = axios.create({
@@ -17,6 +18,13 @@ export async function listRuns(): Promise<RunSummary[]> {
     params: { limit: 100 },
   })
   return data.runs
+}
+
+export async function listWorkers(): Promise<WorkerSummary[]> {
+  const { data } = await api.get<{ workers: WorkerSummary[] }>("/workers", {
+    params: { limit: 100 },
+  })
+  return data.workers
 }
 
 export async function getRun(runID: string): Promise<RunDetails> {

@@ -60,3 +60,24 @@ export interface ExecutionEvent {
   payload: Record<string, unknown>
   created_at: string
 }
+
+export type WorkerStatus = "offline" | "idle" | "active" | "saturated"
+
+export interface WorkerSummary {
+  worker_id: string
+  status: WorkerStatus
+  concurrency: number
+  active_executions: number
+  available_concurrency: number
+  executions_claimed: number
+  executions_succeeded: number
+  executions_failed: number
+  executions_cancelled: number
+  model_calls: number
+  tool_calls: number
+  input_tokens: number
+  output_tokens: number
+  registered_at: string
+  last_seen_at: string
+  heartbeat_expires_at: string
+}

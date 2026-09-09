@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, Workflow, Wrench } from "lucide-react"
+import { Bot, ChevronRight, ServerCog, Workflow, Wrench } from "lucide-react"
 import { Link } from "react-router-dom"
 
 const destinations = [
@@ -7,6 +7,13 @@ const destinations = [
     href: "/admin/runs",
     icon: Workflow,
     label: "Runs",
+    status: "Live",
+  },
+  {
+    description: "Monitor online worker processes, capacity, uptime, and lifetime activity.",
+    href: "/admin/workers",
+    icon: ServerCog,
+    label: "Workers",
     status: "Live",
   },
   {
