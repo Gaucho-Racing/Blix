@@ -105,6 +105,8 @@ services:
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:10310}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
   agent-worker-2:
     container_name: blix-agent-worker-2
@@ -129,6 +131,8 @@ services:
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:10310}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
   agent-worker-3:
     container_name: blix-agent-worker-3
@@ -153,6 +157,8 @@ services:
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:10310}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
   db:
     container_name: blix-db

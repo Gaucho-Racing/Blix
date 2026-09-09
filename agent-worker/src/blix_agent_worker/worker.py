@@ -18,6 +18,7 @@ from blix_agent_worker.clients import (
     ExecutionContext,
     RunwayClient,
     RunwayClientError,
+    SentinelClient,
     TavilyClient,
     WorkerRegistration,
 )
@@ -36,6 +37,7 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
+from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
 from blix_agent_worker.tools.web_search import WebSearchV1Tool
 
@@ -68,6 +70,7 @@ class AgentWorker:
         worker_id: str,
         model: BifrostResponsesModel,
         tavily: TavilyClient,
+        sentinel: SentinelClient,
     ) -> None:
         self._runway = runway
         self._worker_id = worker_id
@@ -75,6 +78,7 @@ class AgentWorker:
         registry = ToolRegistry(
             [
                 CurrentTimeV1Tool(),
+                SentinelImpersonateV1Tool(sentinel),
                 WebExtractV1Tool(tavily),
                 WebSearchV1Tool(tavily),
             ]
@@ -317,6 +321,7 @@ async def run() -> None:
             model=MODEL,
         ) as model,
         TavilyClient() as tavily,
+        SentinelClient() as sentinel,
     ):
         registration = await _register_worker(runway, worker_id, concurrency)
         worker_heartbeat = asyncio.create_task(
@@ -327,7 +332,7 @@ async def run() -> None:
                 registration.heartbeat_interval_ms,
             )
         )
-        worker = AgentWorker(runway, worker_id, model, tavily)
+        worker = AgentWorker(runway, worker_id, model, tavily, sentinel)
         execution_capacity = asyncio.Semaphore(concurrency)
         active_executions: set[asyncio.Task[None]] = set()
         pending_execution_ids: set[str] = set()
