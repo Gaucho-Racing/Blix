@@ -1,28 +1,60 @@
-import { Activity, Braces, Radio, Workflow } from "lucide-react"
-import type { ReactNode } from "react"
-import { Link, NavLink } from "react-router-dom"
+import { Activity, Bot, BookOpen, Braces, CalendarClock, Gauge, MessageSquare, Radio, Workflow, Wrench } from "lucide-react"
+import { Link, NavLink, Outlet } from "react-router-dom"
 
-interface AppShellProps {
-  children: ReactNode
-}
+const navClassName = ({ isActive }: { isActive: boolean }) => `nav-item${isActive ? " active" : ""}`
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link className="brand" to="/">
+        <Link className="brand" to="/chat">
           <span className="brand-mark">B</span>
           <span>
             <strong>Blix</strong>
-            <small>control room</small>
+            <small>internal agent</small>
           </span>
         </Link>
 
-        <nav className="nav-list" aria-label="Main navigation">
-          <NavLink className={({ isActive }) => `nav-item${isActive ? " active" : ""}`} to="/runs">
-            <Workflow size={17} />
-            Runs
-          </NavLink>
+        <nav className="sidebar-nav" aria-label="Main navigation">
+          <section className="nav-section">
+            <div className="nav-label">Workspace</div>
+            <div className="nav-list">
+              <NavLink className={navClassName} to="/chat">
+                <MessageSquare size={17} />
+                Chat
+              </NavLink>
+              <NavLink className={navClassName} to="/knowledge">
+                <BookOpen size={17} />
+                Knowledge
+              </NavLink>
+              <NavLink className={navClassName} to="/automations">
+                <CalendarClock size={17} />
+                Automations
+              </NavLink>
+            </div>
+          </section>
+
+          <section className="nav-section admin-navigation">
+            <div className="nav-label">Admin</div>
+            <div className="nav-list">
+              <NavLink className={navClassName} end to="/admin">
+                <Gauge size={17} />
+                Overview
+              </NavLink>
+              <NavLink className={navClassName} to="/admin/runs">
+                <Workflow size={17} />
+                Runs
+              </NavLink>
+              <NavLink className={navClassName} to="/admin/agents">
+                <Bot size={17} />
+                Agents
+              </NavLink>
+              <NavLink className={navClassName} to="/admin/tools">
+                <Wrench size={17} />
+                Tools
+              </NavLink>
+            </div>
+          </section>
         </nav>
 
         <div className="sidebar-spacer" />
@@ -35,7 +67,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
         <div className="environment-label">LOCAL DEVELOPMENT</div>
       </aside>
-      <main className="main-content">{children}</main>
+      <main className="main-content"><Outlet /></main>
     </div>
   )
 }

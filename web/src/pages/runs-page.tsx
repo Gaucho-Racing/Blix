@@ -36,7 +36,7 @@ export function RunsPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <div className="eyebrow">OBSERVABILITY</div>
+          <div className="eyebrow">ADMIN · OBSERVABILITY</div>
           <h1>Execution runs</h1>
           <p>Trace agent work from intake through every model, tool, and delegation checkpoint.</p>
         </div>
@@ -76,7 +76,7 @@ export function RunsPage() {
                 {filteredRuns.map((run) => (
                   <tr key={run.run_id}>
                     <td>
-                      <Link className="run-link" to={`/runs/${run.run_id}`}>
+                      <Link className="run-link" to={`/admin/runs/${run.run_id}`}>
                         <strong>{run.agent_id}</strong>
                         <code>{formatIdentifier(run.run_id, "run")}</code>
                       </Link>

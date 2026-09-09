@@ -35,6 +35,10 @@ code, pre, .mono { font-family: "Geist Mono Variable", monospace; }
 .brand strong, .brand small { display: block; }
 .brand strong { font-size: 15px; letter-spacing: -.01em; }
 .brand small { margin-top: 1px; color: var(--dim); font-size: 11px; }
+.sidebar-nav { display: grid; gap: 24px; }
+.nav-section { display: grid; gap: 7px; }
+.nav-label { padding: 0 11px; color: #514d55; font: 650 9px "Geist Mono Variable"; letter-spacing: .13em; text-transform: uppercase; }
+.admin-navigation { padding-top: 20px; border-top: 1px solid var(--border); }
 .nav-list { display: grid; gap: 5px; }
 .nav-item { display: flex; align-items: center; gap: 10px; height: 39px; padding: 0 11px; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 550; }
 .nav-item:hover { color: #fff; background: var(--surface-hover); }
@@ -58,6 +62,25 @@ h1 { margin-bottom: 7px; font-size: 29px; line-height: 1.15; letter-spacing: -.0
 .live-indicator { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: #77717b; font: 600 10px "Geist Mono Variable"; letter-spacing: .08em; }
 .live-indicator span, .live-indicator i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(74,222,128,.45); animation: pulse 2s ease-in-out infinite; }
 .stream-connecting i, .stream-reconnecting i { background: var(--amber); box-shadow: 0 0 8px rgba(251,191,36,.4); }
+
+.placeholder-page, .admin-overview-page { max-width: 1120px; margin-left: 0; }
+.placeholder-panel { min-height: 300px; padding: 42px; display: flex; align-items: flex-start; gap: 22px; background: linear-gradient(135deg, rgba(225,5,163,.035), transparent 42%), rgba(13,12,15,.66); }
+.placeholder-panel > div:last-child { max-width: 560px; }
+.placeholder-icon, .admin-destination-icon { display: grid; place-items: center; border: 1px solid rgba(225,5,163,.24); color: var(--pink-bright); background: var(--pink-soft); }
+.placeholder-icon { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 12px; }
+.placeholder-label { display: block; margin-bottom: 13px; color: var(--pink); font: 650 10px "Geist Mono Variable"; letter-spacing: .12em; text-transform: uppercase; }
+.placeholder-panel h2 { margin-bottom: 8px; font-size: 20px; letter-spacing: -.025em; }
+.placeholder-panel p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.admin-destination-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.admin-destination { min-height: 156px; padding: 19px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: start; gap: 13px; color: inherit; text-decoration: none; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.admin-destination:hover { border-color: rgba(225,5,163,.28); background: var(--surface-hover); transform: translateY(-1px); }
+.admin-destination > svg { margin-top: 11px; color: var(--dim); }
+.admin-destination-icon { width: 38px; height: 38px; border-radius: 9px; }
+.admin-destination-copy { min-width: 0; }
+.admin-destination-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admin-destination h2 { margin: 0; font-size: 14px; }
+.admin-destination-copy span { color: var(--dim); font: 9px "Geist Mono Variable"; text-transform: uppercase; }
+.admin-destination p { margin: 13px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 .stat-card { min-height: 89px; padding: 18px; display: flex; align-items: flex-start; gap: 13px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.018); }
@@ -162,22 +185,28 @@ h1 { margin-bottom: 7px; font-size: 29px; line-height: 1.15; letter-spacing: -.0
   .app-shell { grid-template-columns: 74px minmax(0, 1fr); }
   .sidebar { padding-inline: 12px; }
   .brand { justify-content: center; padding-inline: 0; }
-  .brand > span:last-child, .nav-item:not(.active)::after, .nav-item { font-size: 0; }
+  .brand > span:last-child, .nav-label { display: none; }
+  .nav-item { font-size: 0; }
+  .sidebar-nav { gap: 18px; }
+  .admin-navigation { padding-top: 18px; }
   .nav-item { justify-content: center; padding: 0; }
   .system-card, .environment-label { display: none; }
   .page { padding-inline: 28px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-grid { grid-template-columns: 1fr; }
   .timeline-panel { grid-column: auto; }
+  .admin-destination-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 680px) {
   .app-shell { display: block; }
-  .sidebar { position: static; width: 100%; height: 62px; padding: 12px 18px; flex-direction: row; align-items: center; }
-  .brand { margin-right: 20px; padding: 0; }
+  .sidebar { position: static; width: 100%; height: 62px; padding: 12px 10px; flex-direction: row; align-items: center; overflow-x: auto; }
+  .brand { margin-right: 8px; padding: 0; }
   .brand-mark { width: 32px; height: 32px; }
-  .nav-list { display: flex; }
-  .nav-item { width: 40px; }
+  .sidebar-nav { min-width: 0; flex: 1; display: flex; justify-content: flex-end; gap: 5px; }
+  .nav-section, .nav-list { display: flex; gap: 3px; }
+  .admin-navigation { padding: 0 0 0 5px; border-top: 0; border-left: 1px solid var(--border); }
+  .nav-item { width: 36px; }
   .sidebar-spacer { display: none; }
   .page { padding: 30px 17px 48px; }
   .page-header, .run-header { align-items: flex-start; flex-direction: column; }
@@ -190,4 +219,5 @@ h1 { margin-bottom: 7px; font-size: 29px; line-height: 1.15; letter-spacing: -.0
   .metadata-grid { grid-template-columns: 1fr; }
   .timeline-heading { flex-direction: column; gap: 3px; }
   .timeline-event[open] > .json-block { margin-left: 18px; }
+  .placeholder-panel { min-height: 260px; padding: 27px 23px; flex-direction: column; }
 }

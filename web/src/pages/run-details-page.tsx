@@ -41,7 +41,7 @@ export function RunDetailsPage() {
 
   return (
     <div className="page run-detail-page">
-      <Link className="back-link" to="/runs"><ArrowLeft size={15} /> All runs</Link>
+      <Link className="back-link" to="/admin/runs"><ArrowLeft size={15} /> All runs</Link>
       <header className="run-header">
         <div>
           <div className="run-title-line"><h1>{run.agent_id}</h1><StatusBadge status={run.execution_status} /></div>
