@@ -40,6 +40,7 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
+from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
 from blix_agent_worker.tools.web_search import WebSearchV1Tool
@@ -87,16 +88,8 @@ class AgentWorker:
         self._runway = runway
         self._worker_id = worker_id
         self._model = model
+        self._tavily = tavily
         self._sentinel = sentinel
-        registry = ToolRegistry(
-            [
-                CurrentTimeV1Tool(),
-                SentinelImpersonateV1Tool(sentinel),
-                WebExtractV1Tool(tavily),
-                WebSearchV1Tool(tavily),
-            ]
-        )
-        self._tool_runner = ToolRunner(registry)
 
     async def handle(self, dispatch: DispatchMessage) -> None:
         try:
@@ -316,9 +309,20 @@ class AgentWorker:
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
         resume_result: AgentResult | None,
     ) -> AgentRunOutcome:
+        tool_runner = ToolRunner(
+            ToolRegistry(
+                [
+                    CurrentTimeV1Tool(),
+                    SentinelApiV1Tool(self._sentinel, caller_user.id),
+                    SentinelImpersonateV1Tool(self._sentinel, caller_user.id),
+                    WebExtractV1Tool(self._tavily),
+                    WebSearchV1Tool(self._tavily),
+                ]
+            )
+        )
         deep_research = DeepResearchV1Agent(
             model=self._model,
-            tool_runner=self._tool_runner,
+            tool_runner=tool_runner,
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
         )
@@ -359,7 +363,7 @@ class AgentWorker:
         agent_input = GeneralConversationV1Input(messages=messages)
         agent = GeneralConversationV1Agent(
             model=self._model,
-            tool_runner=self._tool_runner,
+            tool_runner=tool_runner,
             agent_runner=AgentRunner(agent_registry),
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,

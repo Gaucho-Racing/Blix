@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
+from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, model_validator
 
 from blix_agent_worker.models.common import EntityID, ExecutionID, RunID, ServiceAccountID, UserID
 from blix_agent_worker.models.context import EntityType
@@ -28,6 +29,13 @@ class _ImpersonationResponse(BaseModel):
     token_type: Literal["Bearer"]
     expires_in: int = Field(gt=0)
     scope: str = Field(min_length=1)
+
+
+class _ApplicationResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(min_length=1)
+    client_id: str = Field(min_length=1)
 
 
 class SentinelUser(BaseModel):
@@ -102,6 +110,7 @@ class SentinelClient:
             timeout=30,
         )
         self._credentials: dict[str, SentinelCredential] = {}
+        self._application_ids: dict[tuple[str, str], str] = {}
 
     async def __aenter__(self) -> Self:
         return self
@@ -111,6 +120,7 @@ class SentinelClient:
 
     async def aclose(self) -> None:
         self._credentials.clear()
+        self._application_ids.clear()
         await self._client.aclose()
 
     async def get_entity(
@@ -193,6 +203,77 @@ class SentinelClient:
         self._credentials[credential.token_id] = credential
         return credential
 
+    async def credential_for(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        user_id: str,
+        application_client_id: str,
+        run_id: RunID,
+        execution_id: ExecutionID,
+    ) -> SentinelCredential:
+        application_id = await self._application_id_for_client(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            client_id=application_client_id,
+        )
+        self._remove_expired_credentials()
+        credential = next(
+            (
+                candidate
+                for candidate in self._credentials.values()
+                if candidate.user_id == user_id
+                and candidate.application_id == application_id
+                and candidate.run_id == run_id
+                and candidate.execution_id == execution_id
+            ),
+            None,
+        )
+        if credential is not None:
+            return credential
+        return await self.impersonate(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            user_id=user_id,
+            application_id=application_id,
+            run_id=run_id,
+            execution_id=execution_id,
+        )
+
+    async def get_api(
+        self,
+        *,
+        sentinel_url: str,
+        credential: SentinelCredential,
+        path: str,
+        query: dict[str, str | int | float | bool | tuple[str | int | float | bool, ...]],
+    ) -> tuple[int, JsonValue]:
+        try:
+            response = await self._client.get(
+                f"{sentinel_url.rstrip('/')}{path}",
+                headers={"Authorization": f"Bearer {credential.access_token}"},
+                params=query,
+            )
+        except httpx.RequestError as error:
+            raise SentinelClientError(
+                "sentinel_api_unavailable",
+                "Sentinel is unavailable.",
+                retryable=True,
+            ) from error
+
+        if response.is_error:
+            raise self._api_response_error(response)
+        if not response.content:
+            return response.status_code, None
+        try:
+            return response.status_code, response.json()
+        except ValueError as error:
+            raise SentinelClientError(
+                "invalid_sentinel_response",
+                "Sentinel returned a non-JSON API response.",
+            ) from error
+
     def get_credential(self, token_id: str, *, run_id: RunID, execution_id: ExecutionID) -> SentinelCredential:
         credential = self._credentials.get(token_id)
         if credential is None:
@@ -203,6 +284,45 @@ class SentinelClient:
         if credential.run_id != run_id or credential.execution_id != execution_id:
             raise SentinelCredentialNotFoundError(token_id)
         return credential
+
+    async def _application_id_for_client(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        client_id: str,
+    ) -> str:
+        cache_key = (sentinel_url.rstrip("/"), client_id)
+        application_id = self._application_ids.get(cache_key)
+        if application_id is not None:
+            return application_id
+        try:
+            response = await self._client.get(
+                f"{cache_key[0]}/api/applications/client/{quote(client_id, safe='')}",
+                headers={"Authorization": f"Bearer {service_account_token}"},
+            )
+        except httpx.RequestError as error:
+            raise SentinelClientError(
+                "sentinel_unavailable",
+                "Sentinel is unavailable while resolving the target application.",
+                retryable=True,
+            ) from error
+        if response.is_error:
+            raise self._application_response_error(response)
+        try:
+            application = _ApplicationResponse.model_validate(response.json())
+        except ValueError as error:
+            raise SentinelClientError(
+                "invalid_sentinel_response",
+                "Sentinel returned an invalid application response.",
+            ) from error
+        if application.client_id != client_id:
+            raise SentinelClientError(
+                "invalid_sentinel_response",
+                "Sentinel returned a mismatched application.",
+            )
+        self._application_ids[cache_key] = application.id
+        return application.id
 
     def _remove_expired_credentials(self) -> None:
         now = datetime.now(UTC)
@@ -239,6 +359,40 @@ class SentinelClient:
             message,
             retryable=response.status_code == 429 or response.status_code >= 500,
         )
+
+    @classmethod
+    def _application_response_error(cls, response: httpx.Response) -> SentinelClientError:
+        message = cls._error_message(response)
+        if response.status_code == 401:
+            return SentinelClientError("sentinel_authentication_failed", message)
+        if response.status_code == 403:
+            return SentinelClientError("sentinel_application_read_denied", message)
+        if response.status_code == 404:
+            return SentinelClientError("sentinel_application_not_found", message)
+        return SentinelClientError(
+            "sentinel_application_request_failed",
+            message,
+            retryable=response.status_code == 429 or response.status_code >= 500,
+        )
+
+    @classmethod
+    def _api_response_error(cls, response: httpx.Response) -> SentinelClientError:
+        message = cls._error_message(response)
+        if response.status_code == 400:
+            return SentinelClientError("sentinel_api_invalid_request", message)
+        if response.status_code == 401:
+            return SentinelClientError("sentinel_api_authentication_failed", message)
+        if response.status_code == 403:
+            return SentinelClientError("sentinel_api_access_denied", message)
+        if response.status_code == 404:
+            return SentinelClientError("sentinel_api_resource_not_found", message)
+        if response.status_code == 409:
+            return SentinelClientError("sentinel_api_conflict", message)
+        if response.status_code == 429:
+            return SentinelClientError("sentinel_api_rate_limited", message, retryable=True)
+        if response.status_code >= 500:
+            return SentinelClientError("sentinel_api_unavailable", message, retryable=True)
+        return SentinelClientError("sentinel_api_request_failed", message)
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:

@@ -10,6 +10,7 @@ from blix_agent_worker.models.common import (
     ContractModel,
     JsonObject,
     NonEmptyText,
+    UserID,
     validation_error_details,
 )
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, ToolResult, ToolResultStatus
@@ -19,7 +20,7 @@ DEFAULT_SENTINEL_URL = "https://sso.gauchoracing.com"
 
 
 class SentinelImpersonateV1Input(ContractModel):
-    user_id: NonEmptyText
+    user_id: UserID | None = None
     application_id: NonEmptyText
 
 
@@ -36,7 +37,7 @@ class SentinelImpersonateV1Tool:
     definition = ToolDefinition(
         id="sentinel_impersonate_v1",
         description=(
-            "Create a short-lived Sentinel credential that acts as a user for a target application. "
+            "Create a short-lived Sentinel credential that acts as the current caller for a target application. "
             "The access token remains private; this returns its non-secret reference and metadata."
         ),
         input_schema=SentinelImpersonateV1Input.model_json_schema(mode="validation"),
@@ -44,8 +45,9 @@ class SentinelImpersonateV1Tool:
         impact=ToolImpact.MUTATING,
     )
 
-    def __init__(self, client: SentinelClient) -> None:
+    def __init__(self, client: SentinelClient, caller_user_id: UserID) -> None:
         self._client = client
+        self._caller_user_id = caller_user_id
 
     async def execute(self, call: ToolCall) -> ToolResult:
         try:
@@ -56,6 +58,12 @@ class SentinelImpersonateV1Tool:
                 "invalid_arguments",
                 "The Sentinel impersonation arguments are invalid.",
                 details=validation_error_details(error),
+            )
+        if tool_input.user_id is not None and tool_input.user_id != self._caller_user_id:
+            return self._failure(
+                call,
+                "impersonation_user_mismatch",
+                "A Sentinel credential can only be created for the current caller.",
             )
 
         sentinel_url = os.environ.get("SENTINEL_URL", "").strip() or DEFAULT_SENTINEL_URL
@@ -89,7 +97,7 @@ class SentinelImpersonateV1Tool:
             credential = await self._client.impersonate(
                 sentinel_url=sentinel_url,
                 service_account_token=service_account_token,
-                user_id=tool_input.user_id,
+                user_id=self._caller_user_id,
                 application_id=tool_input.application_id,
                 run_id=call.run_id,
                 execution_id=call.parent_execution_id,
@@ -106,7 +114,7 @@ class SentinelImpersonateV1Tool:
 
         output = SentinelImpersonateV1Output(
             token_id=credential.token_id,
-            user_id=credential.user_id,
+            user_id=self._caller_user_id,
             application_id=credential.application_id,
             token_type=credential.token_type,
             scope=credential.scope,

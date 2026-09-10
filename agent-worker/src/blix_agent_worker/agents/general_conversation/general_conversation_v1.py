@@ -68,7 +68,13 @@ class GeneralConversationV1Agent:
         input_schema=GeneralConversationV1Input.model_json_schema(mode="validation"),
         output_schema=GeneralConversationV1Output.model_json_schema(mode="serialization"),
         model_profile="general_reasoning",
-        tool_ids=("current_time_v1", "sentinel_impersonate_v1", "web_extract_v1", "web_search_v1"),
+        tool_ids=(
+            "current_time_v1",
+            "sentinel_api_v1",
+            "sentinel_impersonate_v1",
+            "web_extract_v1",
+            "web_search_v1",
+        ),
         subagent_ids=("deep_research_v1",),
     )
 
