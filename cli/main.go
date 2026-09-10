@@ -419,7 +419,7 @@ func (s *turnStatus) render() {
 		return
 	}
 	frame := pinkStyle.Render(s.frames[s.frame])
-	fmt.Print("\r\x1b[2K   " + frame + mutedStyle.Render("Blix is thinking…"))
+	fmt.Print("\r\x1b[2K   " + frame + mutedStyle.Render("Blix is thinking"))
 }
 
 func (s *turnStatus) clear() {
