@@ -35,7 +35,7 @@ const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <Navigate replace to="/chat" /> },
-      { path: "chat", element: <ChatPage /> },
+      { path: "chat/:runID?", element: <ChatPage /> },
       { path: "knowledge", element: <KnowledgePage /> },
       { path: "automations", element: <AutomationsPage /> },
       {

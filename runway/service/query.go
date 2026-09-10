@@ -15,6 +15,7 @@ import (
 
 type RunSummary struct {
 	RunID             string                                  `json:"run_id"`
+	Title             string                                  `json:"title"`
 	CallerEntityID    string                                  `json:"caller_entity_id"`
 	CallerContext     datatypes.JSONType[model.CallerContext] `json:"caller_context"`
 	Kind              string                                  `json:"kind"`
@@ -58,14 +59,29 @@ type ExecutionDetails struct {
 	HasProviderContinuation bool             `json:"has_provider_continuation"`
 }
 
-func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummary, error) {
-	if limit < 1 || limit > 100 {
+func (s *ExecutionService) ListRuns(
+	ctx context.Context,
+	limit int,
+	callerEntityID string,
+	includeAll bool,
+) ([]RunSummary, error) {
+	if limit < 1 || limit > 100 || !identifier.IsValid(callerEntityID, identifier.Entity) {
 		return nil, ErrInvalid
+	}
+	whereClause := "WHERE r.caller_entity_id = ?"
+	arguments := []any{callerEntityID, limit}
+	if includeAll {
+		whereClause = ""
+		arguments = []any{limit}
 	}
 	var runs []RunSummary
 	err := s.database.WithContext(ctx).Raw(`
 		SELECT
 			r.id AS run_id,
+			COALESCE(
+				(SELECT LEFT(message.content, 160) FROM runway_message message WHERE message.run_id = r.id AND message.role = 'user' ORDER BY message.event_position ASC LIMIT 1),
+				'New conversation'
+			) AS title,
 			r.caller_entity_id,
 			r.caller_context,
 			r.kind,
@@ -83,9 +99,10 @@ func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummar
 			) AS last_activity_at
 		FROM runway_run r
 		JOIN runway_agent_execution root ON root.id = r.root_execution_id
+		`+whereClause+`
 		ORDER BY last_activity_at DESC, r.id DESC
 		LIMIT ?
-	`, limit).Scan(&runs).Error
+	`, arguments...).Scan(&runs).Error
 	return runs, err
 }
 
@@ -137,9 +154,21 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 	if rootExecution == nil {
 		return RunDetails{}, ErrConflict
 	}
+	title := "New conversation"
+	var firstMessage model.Message
+	err = s.database.WithContext(ctx).
+		Where("run_id = ? AND role = ?", run.ID, model.MessageRoleUser).
+		Order("event_position ASC").
+		First(&firstMessage).Error
+	if err == nil {
+		title = truncateRunTitle(firstMessage.Content)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return RunDetails{}, err
+	}
 	return RunDetails{
 		Run: RunSummary{
 			RunID:             run.ID,
+			Title:             title,
 			CallerEntityID:    run.CallerEntityID,
 			CallerContext:     run.CallerContext,
 			Kind:              run.Kind,
@@ -155,6 +184,14 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 		},
 		Executions: executionSummaries,
 	}, nil
+}
+
+func truncateRunTitle(value string) string {
+	characters := []rune(strings.TrimSpace(value))
+	if len(characters) <= 160 {
+		return string(characters)
+	}
+	return string(characters[:159]) + "…"
 }
 
 func (s *ExecutionService) GetExecution(ctx context.Context, executionID string) (ExecutionDetails, error) {

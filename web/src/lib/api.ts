@@ -5,6 +5,8 @@ import type {
   ExecutionDetails,
   ExecutionEvent,
   IdentitySummary,
+  AppendedMessage,
+  CreatedRun,
   RunDetails,
   RunSummary,
   WorkerSummary,
@@ -80,6 +82,25 @@ export async function listRuns(): Promise<RunSummary[]> {
     params: { limit: 100 },
   })
   return data.runs
+}
+
+export async function listMyRuns(): Promise<RunSummary[]> {
+  const { data } = await api.get<{ runs: RunSummary[] }>("/v1/runs", {
+    params: { limit: 50, owner: "me" },
+  })
+  return data.runs
+}
+
+export async function createRun(): Promise<CreatedRun> {
+  const { data } = await api.post<CreatedRun>("/v1/runs", {
+    agent_id: "general_conversation_v1",
+  })
+  return data
+}
+
+export async function appendRunMessage(runID: string, content: string): Promise<AppendedMessage> {
+  const { data } = await api.post<AppendedMessage>(`/v1/runs/${runID}/messages`, { content })
+  return data
 }
 
 export async function listWorkers(): Promise<WorkerSummary[]> {

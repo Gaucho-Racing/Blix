@@ -53,6 +53,7 @@ export interface CallerVerifiedPayload {
 
 export interface RunSummary {
   run_id: string
+  title: string
   caller_entity_id: string
   caller_context: CallerContext
   kind: string
@@ -65,6 +66,34 @@ export interface RunSummary {
   last_event_position: number
   created_at: string
   last_activity_at: string
+}
+
+export interface CreatedRun {
+  run: {
+    run_id: string
+    caller_entity_id: string
+    caller_context: CallerContext
+    kind: string
+    root_execution_id: string
+    status: string
+    created_at: string
+    updated_at: string
+  }
+  execution: ExecutionSummary
+}
+
+export interface AppendedMessage {
+  message: {
+    message_id: string
+    run_id: string
+    parent_execution_id: string
+    event_position: number
+    role: string
+    content: string
+    created_at: string
+  }
+  event_position: number
+  version: number
 }
 
 export interface ExecutionSummary {

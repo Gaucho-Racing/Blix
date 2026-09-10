@@ -946,7 +946,7 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 			EntityID:    message.ID,
 			Payload:     encoded,
 		}
-		if err := tx.Create(&event).Error; err != nil {
+		if err := s.persistEvent(tx, &event); err != nil {
 			return err
 		}
 		message.EventPosition = event.Position
@@ -1012,7 +1012,7 @@ func (s *ExecutionService) CompleteAgentExecution(
 			EntityID:    execution.ID,
 			Payload:     datatypes.JSON(completion.Result),
 		}
-		if err := tx.Create(&event).Error; err != nil {
+		if err := s.persistEvent(tx, &event); err != nil {
 			return err
 		}
 		now := time.Now().UTC()
@@ -1086,7 +1086,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 			execution.Status = model.ExecutionStatusFailed
 			execution.CompletedAt = &now
 		}
-		if err := tx.Create(&event).Error; err != nil {
+		if err := s.persistEvent(tx, &event); err != nil {
 			return err
 		}
 		execution.Version++

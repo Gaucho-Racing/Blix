@@ -98,7 +98,7 @@ func InitializeRoutes(
 	router.GET("/v1/events/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamAllEvents)
 	router.GET("/v1/workers", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListWorkers)
 	router.GET("/v1/workers/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamWorkers)
-	router.GET("/v1/runs", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListRuns)
+	router.GET("/v1/runs", RequireAuthentication(auth), handler.ListRuns)
 	router.POST("/v1/runs", RequireAuthentication(auth), handler.CreateRun)
 	router.GET("/v1/runs/:runID", RequireAuthentication(auth), handler.GetRun)
 	router.POST("/v1/runs/:runID/messages", RequireAuthentication(auth), handler.AppendMessage)

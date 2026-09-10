@@ -109,6 +109,7 @@ export function RunEventStream({ runID, initialCursor }: RunEventStreamProps) {
         refreshTimer = window.setTimeout(() => {
           refreshTimer = undefined
           void queryClient.invalidateQueries({ queryKey: ["run", stream.runID] })
+          void queryClient.invalidateQueries({ queryKey: ["my-runs"] })
           for (const executionID of pendingExecutionIDs) {
             void queryClient.invalidateQueries({ queryKey: ["execution", executionID] })
           }

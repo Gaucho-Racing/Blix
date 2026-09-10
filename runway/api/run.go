@@ -17,12 +17,23 @@ type appendMessageRequest struct {
 }
 
 func (h *Handler) ListRuns(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	runs, err := h.executions.ListRuns(c.Request.Context(), limit)
+	owner := c.Query("owner")
+	if owner != "" && owner != "me" {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	includeAll := owner == "" && callerHasGroup(caller, adminGroup)
+	runs, err := h.executions.ListRuns(c.Request.Context(), limit, caller.EntityID, includeAll)
 	if err != nil {
 		respondError(c, err)
 		return
