@@ -32,25 +32,6 @@ services:
     environment:
       WEB_RUNWAY_URL: http://runway:9999
 
-  cli:
-    profiles:
-      - manual
-    build:
-      context: ./cli
-      dockerfile: Dockerfile.dev
-    working_dir: /app
-    stdin_open: true
-    tty: true
-    volumes:
-      - ./cli:/app
-      - cli_gopath:/go
-      - cli_build_cache:/root/.cache/go-build
-      - cli_config:/root/.config/blix
-    ports:
-      - "127.0.0.1:14565:14565"
-    environment:
-      RUNWAY_URL: ${CLI_RUNWAY_URL:-http://host.docker.internal:10400}
-
   runway:
     container_name: blix-runway
     build:
@@ -87,7 +68,6 @@ services:
       SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
       SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID:-}
       SENTINEL_CLIENT_SECRET: ${SENTINEL_CLIENT_SECRET:-}
-      SENTINEL_REDIRECT_URI: ${SENTINEL_REDIRECT_URI:-http://localhost:14565/callback}
       SENTINEL_SCOPES: ${SENTINEL_SCOPES:-user:read groups:read}
 
   agent-worker-1:
@@ -197,9 +177,6 @@ volumes:
   agent_worker_1_venv:
   agent_worker_2_venv:
   agent_worker_3_venv:
-  cli_build_cache:
-  cli_gopath:
-  cli_config:
   pgdata:
   runway_gopath:
   web_node_modules:

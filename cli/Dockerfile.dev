@@ -1,7 +1,0 @@
-FROM golang:1.26-alpine
-
-RUN apk add --no-cache ca-certificates git
-
-WORKDIR /app
-
-CMD ["go", "run", "."]

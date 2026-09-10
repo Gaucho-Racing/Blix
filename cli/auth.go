@@ -15,13 +15,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
+const callbackPath = "/blix-cli/callback"
+
 type authConfiguration struct {
 	AuthorizationURL string `json:"authorization_url"`
-	RedirectURI      string `json:"redirect_uri"`
 }
 
 type tokenSession struct {
@@ -30,6 +30,11 @@ type tokenSession struct {
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	Scope        string `json:"scope"`
+}
+
+type storedCredentials struct {
+	BlixURL string       `json:"blix_url"`
+	Session tokenSession `json:"session"`
 }
 
 type callerContext struct {
@@ -49,17 +54,25 @@ func (c *client) login(ctx context.Context) (callerContext, error) {
 	if err != nil {
 		return callerContext{}, err
 	}
+	listener, redirectURI, err := listenForAuthorizationCallback()
+	if err != nil {
+		return callerContext{}, err
+	}
+	defer listener.Close()
+	query := url.Values{}
+	query.Set("state", state)
+	query.Set("redirect_uri", redirectURI)
 	var configuration authConfiguration
 	if err := c.requestWithoutAuth(
 		ctx,
 		http.MethodGet,
-		"/v1/auth/config?state="+url.QueryEscape(state),
+		"/api/v1/auth/config?"+query.Encode(),
 		nil,
 		&configuration,
 	); err != nil {
 		return callerContext{}, err
 	}
-	code, err := receiveAuthorizationCode(ctx, configuration, state)
+	code, err := receiveAuthorizationCode(ctx, listener, configuration.AuthorizationURL, state)
 	if err != nil {
 		return callerContext{}, err
 	}
@@ -67,8 +80,8 @@ func (c *client) login(ctx context.Context) (callerContext, error) {
 	if err := c.requestWithoutAuth(
 		ctx,
 		http.MethodPost,
-		"/v1/auth/login",
-		map[string]string{"code": code},
+		"/api/v1/auth/login",
+		map[string]string{"code": code, "redirect_uri": redirectURI},
 		&session,
 	); err != nil {
 		return callerContext{}, err
@@ -80,17 +93,17 @@ func (c *client) login(ctx context.Context) (callerContext, error) {
 		return callerContext{}, err
 	}
 	c.caller = &caller
-	if err := saveSession(session); err != nil {
+	if err := saveCredentials(c.baseURL, session); err != nil {
 		c.session = nil
 		c.caller = nil
-		return callerContext{}, fmt.Errorf("save CLI session: %w", err)
+		return callerContext{}, fmt.Errorf("save CLI credentials: %w", err)
 	}
 	return caller, nil
 }
 
 func (c *client) getSession(ctx context.Context) (callerContext, error) {
 	var caller callerContext
-	if err := c.request(ctx, http.MethodGet, "/v1/auth/session", nil, &caller); err != nil {
+	if err := c.request(ctx, http.MethodGet, "/api/v1/auth/session", nil, &caller); err != nil {
 		return callerContext{}, err
 	}
 	return caller, nil
@@ -104,39 +117,29 @@ func (c *client) refreshSession(ctx context.Context) error {
 	if err := c.requestWithoutAuth(
 		ctx,
 		http.MethodPost,
-		"/v1/auth/refresh",
+		"/api/v1/auth/refresh",
 		map[string]string{"refresh_token": c.session.RefreshToken},
 		&refreshed,
 	); err != nil {
 		return err
 	}
 	c.session = &refreshed
-	return saveSession(refreshed)
+	return saveCredentials(c.baseURL, refreshed)
 }
 
 func (c *client) logout(ctx context.Context) {
-	_ = c.requestWithoutAuth(ctx, http.MethodPost, "/v1/auth/logout", nil, nil)
+	_ = c.requestWithoutAuth(ctx, http.MethodPost, "/api/v1/auth/logout", nil, nil)
 	c.session = nil
 	c.caller = nil
-	_ = removeSession()
+	_ = removeCredentials()
 }
 
-func receiveAuthorizationCode(ctx context.Context, configuration authConfiguration, expectedState string) (string, error) {
-	redirect, err := url.Parse(configuration.RedirectURI)
-	if err != nil {
-		return "", fmt.Errorf("parse OAuth redirect URI: %w", err)
-	}
-	if redirect.Scheme != "http" || !isLoopbackHost(redirect.Hostname()) || redirect.Port() == "" {
-		return "", errors.New("Sentinel redirect URI must be an HTTP loopback URL with an explicit port")
-	}
-	callbackPath := redirect.Path
-	if callbackPath == "" {
-		callbackPath = "/"
-	}
-	listener, err := net.Listen("tcp", "0.0.0.0:"+redirect.Port())
-	if err != nil {
-		return "", fmt.Errorf("listen for Sentinel callback: %w", err)
-	}
+func receiveAuthorizationCode(
+	ctx context.Context,
+	listener net.Listener,
+	authorizationURL string,
+	expectedState string,
+) (string, error) {
 	results := make(chan callbackResult, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc(callbackPath, func(writer http.ResponseWriter, request *http.Request) {
@@ -177,8 +180,8 @@ func receiveAuthorizationCode(ctx context.Context, configuration authConfigurati
 	fmt.Println()
 	fmt.Println(pinkStyle.Render("Sentinel login"))
 	fmt.Println(mutedStyle.Render("Open this URL to continue:"))
-	fmt.Println(configuration.AuthorizationURL)
-	_ = openBrowser(configuration.AuthorizationURL)
+	fmt.Println(authorizationURL)
+	_ = openBrowser(authorizationURL)
 
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -200,6 +203,19 @@ func receiveAuthorizationCode(ctx context.Context, configuration authConfigurati
 	}
 }
 
+func listenForAuthorizationCallback() (net.Listener, string, error) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", fmt.Errorf("listen for Sentinel callback: %w", err)
+	}
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || address.Port == 0 {
+		listener.Close()
+		return nil, "", errors.New("resolve Sentinel callback port")
+	}
+	return listener, fmt.Sprintf("http://localhost:%d%s", address.Port, callbackPath), nil
+}
+
 func writeCallbackPage(writer http.ResponseWriter, title string, message string, success bool) {
 	color := "#E105A3"
 	if !success {
@@ -217,14 +233,6 @@ func randomState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(value), nil
 }
 
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	address := net.ParseIP(host)
-	return address != nil && address.IsLoopback()
-}
-
 func openBrowser(target string) error {
 	var command *exec.Cmd
 	switch runtime.GOOS {
@@ -238,8 +246,8 @@ func openBrowser(target string) error {
 	return command.Start()
 }
 
-func loadSession() (*tokenSession, error) {
-	path, err := sessionPath()
+func loadCredentials(blixURL string) (*tokenSession, error) {
+	path, err := credentialsPath()
 	if err != nil {
 		return nil, err
 	}
@@ -250,31 +258,50 @@ func loadSession() (*tokenSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	var session tokenSession
-	if err := json.Unmarshal(contents, &session); err != nil || session.AccessToken == "" {
+	var credentials storedCredentials
+	if err := json.Unmarshal(contents, &credentials); err != nil || credentials.Session.AccessToken == "" {
 		_ = os.Remove(path)
 		return nil, nil
 	}
-	return &session, nil
+	if credentials.BlixURL != blixURL {
+		return nil, nil
+	}
+	return &credentials.Session, nil
 }
 
-func saveSession(session tokenSession) error {
-	path, err := sessionPath()
+func saveCredentials(blixURL string, session tokenSession) error {
+	path, err := credentialsPath()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
-	contents, err := json.Marshal(session)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		return err
+	}
+	contents, err := json.Marshal(storedCredentials{BlixURL: blixURL, Session: session})
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, contents, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(contents); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
-func removeSession() error {
-	path, err := sessionPath()
+func removeCredentials() error {
+	path, err := credentialsPath()
 	if err != nil {
 		return err
 	}
@@ -284,10 +311,10 @@ func removeSession() error {
 	return nil
 }
 
-func sessionPath() (string, error) {
-	directory, err := os.UserConfigDir()
+func credentialsPath() (string, error) {
+	directory, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(directory, "blix", "session.json"), nil
+	return filepath.Join(directory, ".blix", "credentials"), nil
 }

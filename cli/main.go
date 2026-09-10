@@ -139,17 +139,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	runwayURL := strings.TrimRight(strings.TrimSpace(os.Getenv("RUNWAY_URL")), "/")
-	if runwayURL == "" {
-		runwayURL = "http://localhost:10400"
+	blixURL := strings.TrimRight(strings.TrimSpace(os.Getenv("BLIX_URL")), "/")
+	if blixURL == "" {
+		blixURL = "http://localhost:10310"
 	}
 	api := &client{
-		baseURL: runwayURL,
+		baseURL: blixURL,
 		http:    &http.Client{Timeout: 15 * time.Second},
 	}
-	stored, err := loadSession()
+	stored, err := loadCredentials(blixURL)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, errorPanel("Could not load the saved session: "+err.Error()))
+		fmt.Fprintln(os.Stderr, errorPanel("Could not load the saved credentials: "+err.Error()))
 	} else {
 		api.session = stored
 	}
@@ -326,7 +326,7 @@ func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 		case <-time.After(time.Second):
 		}
 	}
-	return createdRun{}, fmt.Errorf("runway did not become ready: %w", lastErr)
+	return createdRun{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
 }
 
 func runTurn(ctx context.Context, api *client, runID string, after uint64) (string, error) {
@@ -355,7 +355,7 @@ func runTurn(ctx context.Context, api *client, runID string, after uint64) (stri
 				if ctx.Err() != nil {
 					return "", ctx.Err()
 				}
-				return "", errors.New("runway event stream closed unexpectedly")
+				return "", errors.New("Blix event stream closed unexpectedly")
 			}
 			if message.err != nil {
 				return "", message.err
@@ -449,7 +449,7 @@ func applyEvent(event executionEvent, toolIDs map[string]string) (string, string
 	case "message.assistant_v1":
 		var payload assistantPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {
-			return "", "", true, errors.New("runway returned an invalid assistant message event")
+			return "", "", true, errors.New("Blix returned an invalid assistant message event")
 		}
 		return payload.Content, "", true, nil
 	case "execution.failed_v1":
@@ -503,7 +503,7 @@ func watchEvents(
 
 func (c *client) createRun(ctx context.Context) (createdRun, error) {
 	var created createdRun
-	err := c.request(ctx, http.MethodPost, "/v1/runs", map[string]string{"agent_id": agentID}, &created)
+	err := c.request(ctx, http.MethodPost, "/api/v1/runs", map[string]string{"agent_id": agentID}, &created)
 	return created, err
 }
 
@@ -512,7 +512,7 @@ func (c *client) appendMessage(ctx context.Context, runID string, content string
 	err := c.request(
 		ctx,
 		http.MethodPost,
-		"/v1/runs/"+runID+"/messages",
+		"/api/v1/runs/"+runID+"/messages",
 		map[string]string{"content": content},
 		&appended,
 	)
@@ -521,7 +521,7 @@ func (c *client) appendMessage(ctx context.Context, runID string, content string
 
 func (c *client) listEvents(ctx context.Context, runID string, after uint64) ([]executionEvent, error) {
 	var response eventsResponse
-	path := fmt.Sprintf("/v1/runs/%s/events?after=%d", runID, after)
+	path := fmt.Sprintf("/api/v1/runs/%s/events?after=%d", runID, after)
 	if err := c.request(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 	if refreshErr := c.refreshSession(ctx); refreshErr != nil {
 		c.session = nil
 		c.caller = nil
-		_ = removeSession()
+		_ = removeCredentials()
 		return err
 	}
 	return c.doRequest(ctx, method, path, payload, destination, true)
@@ -576,7 +576,7 @@ func (c *client) doRequest(
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("runway request failed: %w", err)
+		return fmt.Errorf("Blix request failed: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusBadRequest {
@@ -584,13 +584,13 @@ func (c *client) doRequest(
 		if json.NewDecoder(response.Body).Decode(&apiErr) == nil && apiErr.Error != "" {
 			return &httpStatusError{status: response.StatusCode, message: apiErr.Error}
 		}
-		return &httpStatusError{status: response.StatusCode, message: fmt.Sprintf("runway returned HTTP %d", response.StatusCode)}
+		return &httpStatusError{status: response.StatusCode, message: fmt.Sprintf("Blix returned HTTP %d", response.StatusCode)}
 	}
 	if destination == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
 	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
-		return fmt.Errorf("decode runway response: %w", err)
+		return fmt.Errorf("decode Blix response: %w", err)
 	}
 	return nil
 }

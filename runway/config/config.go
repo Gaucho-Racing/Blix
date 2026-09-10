@@ -29,7 +29,6 @@ type Config struct {
 	SentinelURL             string
 	SentinelClientID        string
 	SentinelClientSecret    string
-	SentinelRedirectURI     string
 	SentinelScopes          string
 }
 
@@ -78,7 +77,6 @@ func Load() (Config, error) {
 		SentinelURL:             strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
 		SentinelClientID:        value("SENTINEL_CLIENT_ID", ""),
 		SentinelClientSecret:    value("SENTINEL_CLIENT_SECRET", ""),
-		SentinelRedirectURI:     value("SENTINEL_REDIRECT_URI", "http://localhost:14565/callback"),
 		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
@@ -89,9 +87,6 @@ func Load() (Config, error) {
 	}
 	if err := validateHTTPURL(configuration.SentinelURL); err != nil {
 		return Config{}, fmt.Errorf("SENTINEL_URL %w", err)
-	}
-	if err := validateHTTPURL(configuration.SentinelRedirectURI); err != nil {
-		return Config{}, fmt.Errorf("SENTINEL_REDIRECT_URI %w", err)
 	}
 	if (configuration.SentinelClientID == "") != (configuration.SentinelClientSecret == "") {
 		return Config{}, fmt.Errorf("SENTINEL_CLIENT_ID and SENTINEL_CLIENT_SECRET must be configured together")

@@ -29,7 +29,6 @@ type Client struct {
 	baseURL      string
 	clientID     string
 	clientSecret string
-	redirectURI  string
 	http         *http.Client
 	keyMu        sync.RWMutex
 	keys         map[string]*rsa.PublicKey
@@ -66,36 +65,31 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("sentinel returned HTTP %d: %s", e.Status, e.Message)
 }
 
-func NewClient(baseURL string, clientID string, clientSecret string, redirectURI string) *Client {
+func NewClient(baseURL string, clientID string, clientSecret string) *Client {
 	return &Client{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		clientID:     strings.TrimSpace(clientID),
 		clientSecret: strings.TrimSpace(clientSecret),
-		redirectURI:  strings.TrimSpace(redirectURI),
 		http:         &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (c *Client) Configured() bool {
-	return c.baseURL != "" && c.clientID != "" && c.clientSecret != "" && c.redirectURI != ""
+	return c.baseURL != "" && c.clientID != "" && c.clientSecret != ""
 }
 
 func (c *Client) ClientID() string {
 	return c.clientID
 }
 
-func (c *Client) RedirectURI() string {
-	return c.redirectURI
-}
-
-func (c *Client) AuthorizationURL(state string, scope string) (string, error) {
+func (c *Client) AuthorizationURL(state string, scope string, redirectURI string) (string, error) {
 	if !c.Configured() {
 		return "", fmt.Errorf("sentinel OAuth is not configured")
 	}
 	values := url.Values{}
 	values.Set("client_id", c.clientID)
 	values.Set("response_type", "code")
-	values.Set("redirect_uri", c.redirectURI)
+	values.Set("redirect_uri", redirectURI)
 	values.Set("scope", scope)
 	values.Set("state", state)
 	values.Set("prompt", "none")
@@ -106,11 +100,11 @@ func (c *Client) InitializeSigningKeys(ctx context.Context) error {
 	return c.refreshSigningKeys(ctx, true)
 }
 
-func (c *Client) ExchangeAuthorizationCode(ctx context.Context, code string) (TokenResponse, error) {
+func (c *Client) ExchangeAuthorizationCode(ctx context.Context, code string, redirectURI string) (TokenResponse, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
-	form.Set("redirect_uri", c.redirectURI)
+	form.Set("redirect_uri", redirectURI)
 	return c.exchange(ctx, form)
 }
 

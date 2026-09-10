@@ -54,7 +54,6 @@ func run(configuration config.Config) error {
 		configuration.SentinelURL,
 		configuration.SentinelClientID,
 		configuration.SentinelClientSecret,
-		configuration.SentinelRedirectURI,
 	)
 	if sentinelClient.Configured() {
 		if err := sentinelClient.InitializeSigningKeys(ctx); err != nil {

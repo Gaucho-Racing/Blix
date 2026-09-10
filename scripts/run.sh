@@ -2,5 +2,7 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cd "$script_dir/.."
-exec docker compose run --rm --no-deps --service-ports cli
+cli_dir="$script_dir/../cli"
+cd "$cli_dir"
+go build -o cli .
+exec ./cli

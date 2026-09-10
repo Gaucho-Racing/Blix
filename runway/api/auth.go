@@ -11,7 +11,8 @@ import (
 const callerContextKey = "caller"
 
 type authorizationCodeRequest struct {
-	Code string `json:"code" binding:"required"`
+	Code        string `json:"code" binding:"required"`
+	RedirectURI string `json:"redirect_uri" binding:"required"`
 }
 
 type refreshTokenRequest struct {
@@ -38,14 +39,13 @@ func RequireAuthentication(auth *service.AuthService) gin.HandlerFunc {
 }
 
 func (h *Handler) GetAuthConfiguration(c *gin.Context) {
-	authorizationURL, err := h.auth.AuthorizationURL(c.Query("state"))
+	authorizationURL, err := h.auth.AuthorizationURL(c.Query("state"), c.Query("redirect_uri"))
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"authorization_url": authorizationURL,
-		"redirect_uri":      h.auth.RedirectURI(),
 	})
 }
 
@@ -55,7 +55,7 @@ func (h *Handler) LoginWithSentinel(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	token, err := h.auth.ExchangeAuthorizationCode(c.Request.Context(), request.Code)
+	token, err := h.auth.ExchangeAuthorizationCode(c.Request.Context(), request.Code, request.RedirectURI)
 	if err != nil {
 		respondError(c, err)
 		return

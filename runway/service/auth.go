@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gaucho-racing/blix/runway/pkg/identifier"
 	"github.com/gaucho-racing/blix/runway/pkg/sentinel"
 )
+
+const cliCallbackPath = "/blix-cli/callback"
 
 type AuthService struct {
 	sentinel *sentinel.Client
@@ -27,30 +31,51 @@ func NewAuthService(client *sentinel.Client, scopes string) *AuthService {
 	return &AuthService{sentinel: client, scopes: strings.TrimSpace(scopes)}
 }
 
-func (s *AuthService) AuthorizationURL(state string) (string, error) {
+func (s *AuthService) AuthorizationURL(state string, redirectURI string) (string, error) {
 	if strings.TrimSpace(state) == "" {
 		return "", fmt.Errorf("%w: state is required", ErrInvalid)
 	}
-	value, err := s.sentinel.AuthorizationURL(state, s.scopes)
+	if err := validateCLIRedirectURI(redirectURI); err != nil {
+		return "", err
+	}
+	value, err := s.sentinel.AuthorizationURL(state, s.scopes, redirectURI)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	return value, nil
 }
 
-func (s *AuthService) RedirectURI() string {
-	return s.sentinel.RedirectURI()
-}
-
-func (s *AuthService) ExchangeAuthorizationCode(ctx context.Context, code string) (sentinel.TokenResponse, error) {
+func (s *AuthService) ExchangeAuthorizationCode(
+	ctx context.Context,
+	code string,
+	redirectURI string,
+) (sentinel.TokenResponse, error) {
 	if strings.TrimSpace(code) == "" {
 		return sentinel.TokenResponse{}, fmt.Errorf("%w: code is required", ErrInvalid)
 	}
-	token, err := s.sentinel.ExchangeAuthorizationCode(ctx, code)
+	if err := validateCLIRedirectURI(redirectURI); err != nil {
+		return sentinel.TokenResponse{}, err
+	}
+	token, err := s.sentinel.ExchangeAuthorizationCode(ctx, code, redirectURI)
 	if err != nil {
 		return sentinel.TokenResponse{}, mapSentinelAuthError(err)
 	}
 	return token, nil
+}
+
+func validateCLIRedirectURI(raw string) error {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "http" || !strings.EqualFold(parsed.Hostname(), "localhost") {
+		return fmt.Errorf("%w: redirect_uri must be an HTTP localhost URL", ErrInvalid)
+	}
+	port, err := strconv.ParseUint(parsed.Port(), 10, 16)
+	if err != nil || port == 0 {
+		return fmt.Errorf("%w: redirect_uri must include a valid port", ErrInvalid)
+	}
+	if parsed.User != nil || parsed.EscapedPath() != cliCallbackPath || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%w: redirect_uri must use %s", ErrInvalid, cliCallbackPath)
+	}
+	return nil
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (sentinel.TokenResponse, error) {
