@@ -48,18 +48,19 @@ type AppendedMessage struct {
 }
 
 type ExecutionContext struct {
-	RunID                string          `json:"run_id"`
-	CallerEntityID       string          `json:"caller_entity_id"`
-	ExecutionID          string          `json:"execution_id"`
-	ParentExecutionID    *string         `json:"parent_execution_id"`
-	AgentID              string          `json:"agent_id"`
-	Version              uint64          `json:"version"`
-	Task                 json.RawMessage `json:"task,omitempty"`
-	State                json.RawMessage `json:"state,omitempty"`
-	WaitingOnExecutionID *string         `json:"waiting_on_execution_id,omitempty"`
-	LeaseExpiresAt       *time.Time      `json:"lease_expires_at"`
-	LeaseRenewAfterMS    uint64          `json:"lease_renew_after_ms"`
-	Messages             []model.Message `json:"messages"`
+	RunID                string              `json:"run_id"`
+	CallerEntityID       string              `json:"caller_entity_id"`
+	CallerContext        model.CallerContext `json:"caller_context"`
+	ExecutionID          string              `json:"execution_id"`
+	ParentExecutionID    *string             `json:"parent_execution_id"`
+	AgentID              string              `json:"agent_id"`
+	Version              uint64              `json:"version"`
+	Task                 json.RawMessage     `json:"task,omitempty"`
+	State                json.RawMessage     `json:"state,omitempty"`
+	WaitingOnExecutionID *string             `json:"waiting_on_execution_id,omitempty"`
+	LeaseExpiresAt       *time.Time          `json:"lease_expires_at"`
+	LeaseRenewAfterMS    uint64              `json:"lease_renew_after_ms"`
+	Messages             []model.Message     `json:"messages"`
 }
 
 type Heartbeat struct {
@@ -189,18 +190,18 @@ func NewExecutionService(database *gorm.DB, workers *WorkerService, configuratio
 	}
 }
 
-func (s *ExecutionService) CreateRun(ctx context.Context, agentID string, callerEntityID string) (CreatedRun, error) {
+func (s *ExecutionService) CreateRun(ctx context.Context, agentID string, callerContext model.CallerContext) (CreatedRun, error) {
 	agentID = strings.TrimSpace(agentID)
 	if !versionedIdentifierPattern.MatchString(agentID) {
 		return CreatedRun{}, fmt.Errorf("%w: agent_id must be a versioned identifier", ErrInvalid)
 	}
-	callerEntityID = strings.TrimSpace(callerEntityID)
-	if !identifier.IsValid(callerEntityID, identifier.Entity) {
-		return CreatedRun{}, fmt.Errorf("%w: caller entity_id is invalid", ErrInvalid)
+	if err := validateRunCallerContext(callerContext); err != nil {
+		return CreatedRun{}, err
 	}
 	run := model.Run{
 		ID:             identifier.New(identifier.Run),
-		CallerEntityID: callerEntityID,
+		CallerEntityID: callerContext.EntityID,
+		CallerContext:  datatypes.NewJSONType(callerContext),
 		Kind:           model.RunKindConversation,
 		Status:         model.RunStatusActive,
 	}
@@ -224,6 +225,7 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string, caller
 			"root_execution_id": execution.ID,
 			"agent_id":          execution.AgentID,
 			"caller_entity_id":  run.CallerEntityID,
+			"caller_context":    callerContext,
 		})
 		if err != nil {
 			return err
@@ -234,6 +236,25 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string, caller
 		return CreatedRun{}, fmt.Errorf("create run: %w", err)
 	}
 	return CreatedRun{Run: run, Execution: execution}, nil
+}
+
+func validateRunCallerContext(caller model.CallerContext) error {
+	if !identifier.IsValid(caller.EntityID, identifier.Entity) {
+		return fmt.Errorf("%w: caller context entity_id is invalid", ErrInvalid)
+	}
+	switch caller.EntityType {
+	case model.EntityTypeUser:
+		if !identifier.IsValid(caller.UserID, identifier.User) || caller.ServiceAccountID != "" {
+			return fmt.Errorf("%w: caller context user identity is invalid", ErrInvalid)
+		}
+	case model.EntityTypeServiceAccount:
+		if !identifier.IsValid(caller.ServiceAccountID, identifier.ServiceAccount) || caller.UserID != "" {
+			return fmt.Errorf("%w: caller context service-account identity is invalid", ErrInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: caller context entity_type is invalid", ErrInvalid)
+	}
+	return nil
 }
 
 func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, callerEntityID string, content string) (AppendedMessage, error) {
@@ -377,12 +398,13 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			return err
 		}
 		var run model.Run
-		if err := tx.Select("caller_entity_id").First(&run, "id = ?", execution.RunID).Error; err != nil {
+		if err := tx.Select("caller_entity_id", "caller_context").First(&run, "id = ?", execution.RunID).Error; err != nil {
 			return mapDatabaseError(err)
 		}
 		claimed = ExecutionContext{
 			RunID:                execution.RunID,
 			CallerEntityID:       run.CallerEntityID,
+			CallerContext:        run.CallerContext.Data(),
 			ExecutionID:          execution.ID,
 			ParentExecutionID:    execution.ParentExecutionID,
 			AgentID:              execution.AgentID,

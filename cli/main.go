@@ -25,6 +25,8 @@ import (
 
 const agentID = "general_conversation_v1"
 
+const blixUsersGroup = "BlixUsers"
+
 var (
 	pink        = lipgloss.Color("#E105A3")
 	muted       = lipgloss.Color("#9893A3")
@@ -40,6 +42,7 @@ type client struct {
 	http    *http.Client
 	session *tokenSession
 	caller  *callerContext
+	user    *currentUser
 }
 
 type run struct {
@@ -161,20 +164,32 @@ func main() {
 
 func runSession(ctx context.Context, api *client) error {
 	var current *createdRun
+	var startupError error
 	if api.session != nil {
 		caller, err := api.getSession(ctx)
 		if err == nil {
 			api.caller = &caller
-			created, createErr := createRunWithRetry(ctx, api)
-			if createErr != nil {
-				return createErr
+			user, userErr := api.getCurrentUser(ctx)
+			if userErr != nil {
+				startupError = fmt.Errorf("could not refresh your Sentinel profile: %w", userErr)
+			} else {
+				api.user = &user
+				if api.canUseBlix() {
+					created, createErr := createRunWithRetry(ctx, api)
+					if createErr != nil {
+						return createErr
+					}
+					current = &created
+				} else {
+					startupError = fmt.Errorf("your Sentinel user is not a member of %s", blixUsersGroup)
+				}
 			}
-			current = &created
 		} else {
 			api.logout(ctx)
 		}
 	}
 	printBanner(current, api.caller)
+	printWelcome(api, startupError)
 
 	terminalInput, err := newSessionInput()
 	if err != nil {
@@ -212,6 +227,12 @@ func runSession(ctx context.Context, api *client) error {
 				fmt.Println(errorPanel(err.Error()))
 				continue
 			}
+			if !api.canUseBlix() {
+				current = nil
+				printBanner(current, api.caller)
+				printWelcome(api, fmt.Errorf("your Sentinel user is not a member of %s", blixUsersGroup))
+				continue
+			}
 			created, err := createRunWithRetry(ctx, api)
 			if err != nil {
 				fmt.Println(errorPanel(err.Error()))
@@ -220,16 +241,18 @@ func runSession(ctx context.Context, api *client) error {
 			current = &created
 			fmt.Println(mutedStyle.Render("Signed in as " + caller.EntityID + "."))
 			printBanner(current, api.caller)
+			printWelcome(api, nil)
 			continue
 		case "/logout":
 			api.logout(ctx)
 			current = nil
 			fmt.Println(mutedStyle.Render("Signed out."))
 			printBanner(current, nil)
+			printWelcome(api, nil)
 			continue
 		case "/reset":
-			if api.caller == nil {
-				fmt.Println(errorPanel("Sign in with /login before starting a run."))
+			if !api.canUseBlix() {
+				fmt.Println(errorPanel(api.accessMessage()))
 				continue
 			}
 			created, err := api.createRun(ctx)
@@ -247,7 +270,7 @@ func runSession(ctx context.Context, api *client) error {
 			continue
 		}
 		if current == nil {
-			fmt.Println(errorPanel("Sign in with /login before sending a message."))
+			fmt.Println(errorPanel(api.accessMessage()))
 			continue
 		}
 
@@ -537,10 +560,36 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 	if refreshErr := c.refreshSession(ctx); refreshErr != nil {
 		c.session = nil
 		c.caller = nil
+		c.user = nil
 		_ = removeCredentials()
 		return err
 	}
 	return c.doRequest(ctx, method, path, payload, destination, true)
+}
+
+func (c *client) canUseBlix() bool {
+	if c.caller == nil || c.user == nil {
+		return false
+	}
+	if c.caller.EntityType != "USER" || c.caller.UserID != c.user.ID || c.caller.EntityID != c.user.EntityID {
+		return false
+	}
+	for _, group := range c.user.Groups {
+		if group == blixUsersGroup {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *client) accessMessage() string {
+	if c.caller == nil {
+		return "Sign in with /login before starting a run."
+	}
+	if c.user == nil {
+		return "Your Sentinel profile could not be verified. Sign in again with /login."
+	}
+	return "Your Sentinel user must be a member of " + blixUsersGroup + " to use Blix."
 }
 
 func (c *client) requestWithoutAuth(ctx context.Context, method string, path string, payload any, destination any) error {
@@ -621,6 +670,63 @@ func printBanner(current *createdRun, caller *callerContext) {
 	title := pinkStyle.Render(" BLIX ")
 	fmt.Println("\n" + title)
 	fmt.Println(panel)
+}
+
+func printWelcome(api *client, startupError error) {
+	width := terminalWidth() - 8
+	if width < 50 {
+		width = 50
+	}
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(muted).
+		Padding(1, 2).
+		Width(width)
+	if api.caller == nil {
+		content := strings.Join([]string{
+			pinkStyle.Render("Welcome to Blix"),
+			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
+			"Run " + pinkStyle.Render("/login") + " to continue.",
+		}, "\n")
+		fmt.Println(style.Render(content))
+		return
+	}
+	if api.user == nil {
+		message := "Your Sentinel profile could not be refreshed."
+		if startupError != nil {
+			message = startupError.Error()
+		}
+		content := strings.Join([]string{
+			pinkStyle.Render("Signed in"),
+			mutedStyle.Render(api.caller.EntityID),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(message),
+		}, "\n")
+		fmt.Println(style.Render(content))
+		return
+	}
+	name := strings.TrimSpace(api.user.FirstName + " " + api.user.LastName)
+	if name == "" {
+		name = api.user.Username
+	}
+	if name == "" {
+		name = api.user.Email
+	}
+	access := lipgloss.NewStyle().Foreground(lipgloss.Color("#25855A")).Render("● BlixUsers access verified")
+	if !api.canUseBlix() {
+		access = lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render("● BlixUsers membership required")
+	}
+	identity := strings.TrimSpace(api.user.Email)
+	if api.user.Username != "" {
+		if identity != "" {
+			identity += "  ·  "
+		}
+		identity += "@" + api.user.Username
+	}
+	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity), access}
+	if startupError != nil && api.canUseBlix() {
+		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(startupError.Error()))
+	}
+	fmt.Println(style.Render(strings.Join(content, "\n")))
 }
 
 func printHelp() {

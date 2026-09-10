@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from blix_agent_worker.models.common import ExecutionID, RunID
+from blix_agent_worker.models.common import EntityID, ExecutionID, RunID, ServiceAccountID, UserID
+from blix_agent_worker.models.context import EntityType
 
 
 class SentinelClientError(Exception):
@@ -27,6 +28,58 @@ class _ImpersonationResponse(BaseModel):
     token_type: Literal["Bearer"]
     expires_in: int = Field(gt=0)
     scope: str = Field(min_length=1)
+
+
+class SentinelUser(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    id: UserID
+    entity_id: EntityID
+    username: str
+    first_name: str
+    last_name: str
+    email: str
+    phone_number: str
+    gender: str
+    birthday: datetime
+    graduate_level: str
+    graduation_year: int
+    major: str
+    shirt_size: str
+    jacket_size: str
+    sae_registration_number: str
+    occupation_title: str
+    occupation_company: str
+    avatar_url: str
+    initial_role: str
+    groups: tuple[str, ...]
+    updated_at: datetime
+    created_at: datetime
+
+
+class _SentinelServiceAccount(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: ServiceAccountID
+    entity_id: EntityID
+
+
+class SentinelEntity(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: EntityID
+    type: EntityType
+    user: SentinelUser | None = None
+    service_account: _SentinelServiceAccount | None = None
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> Self:
+        if self.type is EntityType.USER:
+            if self.user is None or self.service_account is not None or self.user.entity_id != self.id:
+                raise ValueError("Sentinel returned an invalid user entity")
+        elif self.service_account is None or self.user is not None or self.service_account.entity_id != self.id:
+            raise ValueError("Sentinel returned an invalid service-account entity")
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +112,36 @@ class SentinelClient:
     async def aclose(self) -> None:
         self._credentials.clear()
         await self._client.aclose()
+
+    async def get_entity(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        entity_id: EntityID,
+    ) -> SentinelEntity:
+        try:
+            response = await self._client.get(
+                f"{sentinel_url.rstrip('/')}/api/core/entity/{entity_id}",
+                headers={"Authorization": f"Bearer {service_account_token}"},
+            )
+        except httpx.RequestError as error:
+            raise SentinelClientError(
+                "sentinel_unavailable",
+                "Sentinel is unavailable while resolving the caller.",
+                retryable=True,
+            ) from error
+
+        if response.is_error:
+            raise self._entity_response_error(response)
+
+        try:
+            return SentinelEntity.model_validate(response.json())
+        except ValueError as error:
+            raise SentinelClientError(
+                "invalid_sentinel_response",
+                "Sentinel returned an invalid caller entity.",
+            ) from error
 
     async def impersonate(
         self,
@@ -138,6 +221,21 @@ class SentinelClient:
             return SentinelClientError("sentinel_resource_not_found", message)
         return SentinelClientError(
             "sentinel_request_failed",
+            message,
+            retryable=response.status_code == 429 or response.status_code >= 500,
+        )
+
+    @classmethod
+    def _entity_response_error(cls, response: httpx.Response) -> SentinelClientError:
+        message = cls._error_message(response)
+        if response.status_code == 401:
+            return SentinelClientError("sentinel_authentication_failed", message)
+        if response.status_code == 403:
+            return SentinelClientError("sentinel_entity_read_denied", message)
+        if response.status_code == 404:
+            return SentinelClientError("caller_entity_not_found", message)
+        return SentinelClientError(
+            "sentinel_entity_request_failed",
             message,
             retryable=response.status_code == 429 or response.status_code >= 500,
         )

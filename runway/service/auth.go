@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gaucho-racing/blix/runway/model"
 	"github.com/gaucho-racing/blix/runway/pkg/identifier"
 	"github.com/gaucho-racing/blix/runway/pkg/sentinel"
 )
@@ -21,10 +22,21 @@ type AuthService struct {
 }
 
 type CallerContext struct {
-	EntityID string   `json:"entity_id"`
-	UserID   string   `json:"user_id,omitempty"`
-	Scope    string   `json:"scope"`
-	Groups   []string `json:"groups"`
+	EntityID         string   `json:"entity_id"`
+	EntityType       string   `json:"entity_type"`
+	UserID           string   `json:"user_id,omitempty"`
+	ServiceAccountID string   `json:"service_account_id,omitempty"`
+	Scope            string   `json:"scope"`
+	Groups           []string `json:"groups"`
+}
+
+func (c CallerContext) RunContext() model.CallerContext {
+	return model.CallerContext{
+		EntityID:         c.EntityID,
+		EntityType:       c.EntityType,
+		UserID:           c.UserID,
+		ServiceAccountID: c.ServiceAccountID,
+	}
 }
 
 func NewAuthService(client *sentinel.Client, scopes string) *AuthService {
@@ -89,6 +101,24 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (se
 	return token, nil
 }
 
+func (s *AuthService) GetCurrentUser(
+	ctx context.Context,
+	accessToken string,
+	caller CallerContext,
+) (sentinel.User, error) {
+	if caller.EntityType != model.EntityTypeUser || !identifier.IsValid(caller.UserID, identifier.User) {
+		return sentinel.User{}, fmt.Errorf("%w: current caller is not a user", ErrForbidden)
+	}
+	user, err := s.sentinel.GetUser(ctx, accessToken, caller.UserID)
+	if err != nil {
+		return sentinel.User{}, mapSentinelResourceError(err)
+	}
+	if user.ID != caller.UserID || user.EntityID != caller.EntityID {
+		return sentinel.User{}, fmt.Errorf("%w: Sentinel returned a mismatched current user", ErrUnavailable)
+	}
+	return user, nil
+}
+
 func (s *AuthService) Authenticate(ctx context.Context, token string) (CallerContext, error) {
 	if strings.TrimSpace(token) == "" {
 		return CallerContext{}, ErrUnauthorized
@@ -106,12 +136,33 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (CallerCon
 	if !identifier.IsValid(claims.EntityID, identifier.Entity) {
 		return CallerContext{}, fmt.Errorf("%w: token subject is invalid", ErrUnauthorized)
 	}
+	if err := validateCallerIdentityClaims(claims); err != nil {
+		return CallerContext{}, err
+	}
 	return CallerContext{
-		EntityID: claims.EntityID,
-		UserID:   claims.UserID,
-		Scope:    claims.Scope,
-		Groups:   claims.Groups,
+		EntityID:         claims.EntityID,
+		EntityType:       claims.EntityType,
+		UserID:           claims.UserID,
+		ServiceAccountID: claims.ServiceAccountID,
+		Scope:            claims.Scope,
+		Groups:           claims.Groups,
 	}, nil
+}
+
+func validateCallerIdentityClaims(claims sentinel.Claims) error {
+	switch claims.EntityType {
+	case model.EntityTypeUser:
+		if !identifier.IsValid(claims.UserID, identifier.User) || claims.ServiceAccountID != "" {
+			return fmt.Errorf("%w: token user identity claims are invalid", ErrUnauthorized)
+		}
+	case model.EntityTypeServiceAccount:
+		if !identifier.IsValid(claims.ServiceAccountID, identifier.ServiceAccount) || claims.UserID != "" {
+			return fmt.Errorf("%w: token service-account identity claims are invalid", ErrUnauthorized)
+		}
+	default:
+		return fmt.Errorf("%w: token entity_type is invalid", ErrUnauthorized)
+	}
+	return nil
 }
 
 func mapSentinelAuthError(err error) error {
@@ -129,6 +180,28 @@ func mapSentinelAuthError(err error) error {
 	}
 	if strings.Contains(err.Error(), "not configured") {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return fmt.Errorf("%w: %v", ErrUnavailable, err)
+}
+
+func mapSentinelResourceError(err error) error {
+	var sentinelError *sentinel.Error
+	if errors.As(err, &sentinelError) {
+		switch sentinelError.Status {
+		case http.StatusBadRequest:
+			return fmt.Errorf("%w: %s", ErrInvalid, sentinelError.Message)
+		case http.StatusUnauthorized:
+			return fmt.Errorf("%w: %s", ErrUnauthorized, sentinelError.Message)
+		case http.StatusForbidden:
+			return fmt.Errorf("%w: %s", ErrForbidden, sentinelError.Message)
+		case http.StatusNotFound:
+			return fmt.Errorf("%w: %s", ErrNotFound, sentinelError.Message)
+		case http.StatusTooManyRequests:
+			return fmt.Errorf("%w: %s", ErrUnavailable, sentinelError.Message)
+		}
+		if sentinelError.Status >= http.StatusInternalServerError {
+			return fmt.Errorf("%w: %s", ErrUnavailable, sentinelError.Message)
+		}
 	}
 	return fmt.Errorf("%w: %v", ErrUnavailable, err)
 }

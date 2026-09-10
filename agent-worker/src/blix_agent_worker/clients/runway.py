@@ -14,6 +14,7 @@ from blix_agent_worker.models.common import (
     RunID,
     WorkerID,
 )
+from blix_agent_worker.models.context import CallerContext
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -38,6 +39,7 @@ class RunwayMessage(ContractModel):
 class ExecutionContext(ContractModel):
     run_id: RunID
     caller_entity_id: EntityID
+    caller_context: CallerContext
     execution_id: ExecutionID
     parent_execution_id: ExecutionID | None = None
     agent_id: str

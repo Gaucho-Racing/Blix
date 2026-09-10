@@ -40,10 +40,37 @@ type storedCredentials struct {
 }
 
 type callerContext struct {
-	EntityID string   `json:"entity_id"`
-	UserID   string   `json:"user_id"`
-	Scope    string   `json:"scope"`
-	Groups   []string `json:"groups"`
+	EntityID         string   `json:"entity_id"`
+	EntityType       string   `json:"entity_type"`
+	UserID           string   `json:"user_id"`
+	ServiceAccountID string   `json:"service_account_id"`
+	Scope            string   `json:"scope"`
+	Groups           []string `json:"groups"`
+}
+
+type currentUser struct {
+	ID                    string   `json:"id"`
+	EntityID              string   `json:"entity_id"`
+	Username              string   `json:"username"`
+	FirstName             string   `json:"first_name"`
+	LastName              string   `json:"last_name"`
+	Email                 string   `json:"email"`
+	PhoneNumber           string   `json:"phone_number"`
+	Gender                string   `json:"gender"`
+	Birthday              string   `json:"birthday"`
+	GraduateLevel         string   `json:"graduate_level"`
+	GraduationYear        int      `json:"graduation_year"`
+	Major                 string   `json:"major"`
+	ShirtSize             string   `json:"shirt_size"`
+	JacketSize            string   `json:"jacket_size"`
+	SAERegistrationNumber string   `json:"sae_registration_number"`
+	OccupationTitle       string   `json:"occupation_title"`
+	OccupationCompany     string   `json:"occupation_company"`
+	AvatarURL             string   `json:"avatar_url"`
+	InitialRole           string   `json:"initial_role"`
+	Groups                []string `json:"groups"`
+	UpdatedAt             string   `json:"updated_at"`
+	CreatedAt             string   `json:"created_at"`
 }
 
 type callbackResult struct {
@@ -95,9 +122,17 @@ func (c *client) login(ctx context.Context) (callerContext, error) {
 		return callerContext{}, err
 	}
 	c.caller = &caller
+	user, err := c.getCurrentUser(ctx)
+	if err != nil {
+		c.session = nil
+		c.caller = nil
+		return callerContext{}, err
+	}
+	c.user = &user
 	if err := saveCredentials(c.baseURL, session); err != nil {
 		c.session = nil
 		c.caller = nil
+		c.user = nil
 		return callerContext{}, fmt.Errorf("save CLI credentials: %w", err)
 	}
 	return caller, nil
@@ -109,6 +144,14 @@ func (c *client) getSession(ctx context.Context) (callerContext, error) {
 		return callerContext{}, err
 	}
 	return caller, nil
+}
+
+func (c *client) getCurrentUser(ctx context.Context) (currentUser, error) {
+	var user currentUser
+	if err := c.request(ctx, http.MethodGet, "/api/auth/users/@me", nil, &user); err != nil {
+		return currentUser{}, err
+	}
+	return user, nil
 }
 
 func (c *client) refreshSession(ctx context.Context) error {
@@ -133,6 +176,7 @@ func (c *client) logout(ctx context.Context) {
 	_ = c.requestWithoutAuth(ctx, http.MethodPost, "/api/v1/auth/logout", nil, nil)
 	c.session = nil
 	c.caller = nil
+	c.user = nil
 	_ = removeCredentials()
 }
 

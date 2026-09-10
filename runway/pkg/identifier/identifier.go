@@ -5,16 +5,18 @@ import ulid "github.com/gaucho-racing/ulid-go"
 type Prefix string
 
 const (
-	Run       Prefix = "run"
-	Execution Prefix = "execution"
-	Event     Prefix = "event"
-	Message   Prefix = "message"
-	Call      Prefix = "call"
-	ModelCall Prefix = "modelcall"
-	Worker    Prefix = "worker"
-	Outbox    Prefix = "outbox"
-	Job       Prefix = "job"
-	Entity    Prefix = "ent"
+	Run            Prefix = "run"
+	Execution      Prefix = "execution"
+	Event          Prefix = "event"
+	Message        Prefix = "message"
+	Call           Prefix = "call"
+	ModelCall      Prefix = "modelcall"
+	Worker         Prefix = "worker"
+	Outbox         Prefix = "outbox"
+	Job            Prefix = "job"
+	Entity         Prefix = "ent"
+	User           Prefix = "usr"
+	ServiceAccount Prefix = "sa"
 )
 
 func New(prefix Prefix) string {

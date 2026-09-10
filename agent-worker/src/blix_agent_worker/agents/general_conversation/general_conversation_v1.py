@@ -5,7 +5,10 @@ from typing import Annotated, Self
 from pydantic import Field, ValidationError, model_validator
 
 from blix_agent_worker.agents.callables import CallableCatalog, CallableCatalogError, CallableNotFoundError
-from blix_agent_worker.agents.general_conversation.prompt import GENERAL_CONVERSATION_V1_SYSTEM_PROMPT
+from blix_agent_worker.agents.general_conversation.prompt import (
+    GENERAL_CONVERSATION_V1_CONTEXT_SECTION,
+    GENERAL_CONVERSATION_V1_SYSTEM_PROMPT,
+)
 from blix_agent_worker.agents.runner import AgentRunner
 from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
@@ -117,9 +120,14 @@ class GeneralConversationV1Agent:
         except CallableCatalogError as error:
             return self._failure(task, "agent_configuration_error", str(error))
 
+        system_prompt = self.definition.instructions
+        if task.context:
+            system_prompt += GENERAL_CONVERSATION_V1_CONTEXT_SECTION.format(
+                context=json.dumps(task.context, ensure_ascii=False, separators=(",", ":"))
+            )
         if state is None:
             messages = [
-                ModelMessage(role=ModelMessageRole.SYSTEM, content=self.definition.instructions),
+                ModelMessage(role=ModelMessageRole.SYSTEM, content=system_prompt),
                 *(
                     ModelMessage(
                         role=(
@@ -140,6 +148,9 @@ class GeneralConversationV1Agent:
             if state.agent_id != task.agent_id:
                 return self._failure(task, "invalid_execution_state", "The execution state belongs to another agent.")
             messages = list(state.messages)
+            if not messages or messages[0].role is not ModelMessageRole.SYSTEM:
+                return self._failure(task, "invalid_execution_state", "The execution state has no system message.")
+            messages[0] = ModelMessage(role=ModelMessageRole.SYSTEM, content=system_prompt)
             phase = state.phase
             continuation = state.continuation
             usage = state.usage

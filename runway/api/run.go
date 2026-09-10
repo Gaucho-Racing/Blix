@@ -50,7 +50,7 @@ func (h *Handler) CreateRun(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	created, err := h.executions.CreateRun(c.Request.Context(), request.AgentID, caller.EntityID)
+	created, err := h.executions.CreateRun(c.Request.Context(), request.AgentID, caller.RunContext())
 	if err != nil {
 		respondError(c, err)
 		return

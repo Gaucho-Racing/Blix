@@ -79,6 +79,7 @@ func InitializeRoutes(
 	router.GET("/v1/auth/config", handler.GetAuthConfiguration)
 	router.POST("/v1/auth/login", handler.LoginWithSentinel)
 	router.GET("/v1/auth/session", RequireAuthentication(auth), handler.GetSession)
+	router.GET("/auth/users/@me", RequireAuthentication(auth), handler.GetCurrentUser)
 	router.POST("/v1/auth/refresh", handler.RefreshSession)
 	router.POST("/v1/auth/logout", handler.Logout)
 	router.GET("/v1/events/stream", handler.StreamAllEvents)

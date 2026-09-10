@@ -17,9 +17,12 @@ from blix_agent_worker.models.common import (
     ModelCallID,
     OutboxID,
     RunID,
+    ServiceAccountID,
+    UserID,
     WorkerID,
     new_ulid,
 )
+from blix_agent_worker.models.context import CallerContext, EntityType
 from blix_agent_worker.models.llm import (
     ModelCallableDefinition,
     ModelCallableKind,
@@ -50,8 +53,10 @@ __all__ = [
     "AgentTask",
     "AgentUsage",
     "CallID",
+    "CallerContext",
     "ContractError",
     "EntityID",
+    "EntityType",
     "ConversationMessage",
     "ConversationMessageRole",
     "EventID",
@@ -71,12 +76,14 @@ __all__ = [
     "ModelUsage",
     "OutboxID",
     "RunID",
+    "ServiceAccountID",
     "ToolCall",
     "ToolDefinition",
     "ToolExecutionMode",
     "ToolImpact",
     "ToolResult",
     "ToolResultStatus",
+    "UserID",
     "WorkerID",
     "new_ulid",
 ]

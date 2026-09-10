@@ -15,6 +15,8 @@ IdentifierPrefix = Literal[
     "outbox",
     "job",
     "ent",
+    "usr",
+    "sa",
 ]
 
 
@@ -52,6 +54,8 @@ WorkerID = _prefixed_ulid("worker")
 OutboxID = _prefixed_ulid("outbox")
 JobID = _prefixed_ulid("job")
 EntityID = _prefixed_ulid("ent")
+UserID = _prefixed_ulid("usr")
+ServiceAccountID = _prefixed_ulid("sa")
 
 
 def new_ulid(prefix: IdentifierPrefix) -> str:

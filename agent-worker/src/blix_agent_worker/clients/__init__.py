@@ -4,6 +4,8 @@ from blix_agent_worker.clients.sentinel import (
     SentinelClientError,
     SentinelCredential,
     SentinelCredentialNotFoundError,
+    SentinelEntity,
+    SentinelUser,
 )
 from blix_agent_worker.clients.tavily import TavilyClient, TavilyClientError
 
@@ -15,6 +17,8 @@ __all__ = [
     "SentinelClientError",
     "SentinelCredential",
     "SentinelCredentialNotFoundError",
+    "SentinelEntity",
+    "SentinelUser",
     "TavilyClient",
     "TavilyClientError",
     "WorkerRegistration",

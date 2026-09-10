@@ -8,7 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const callerContextKey = "caller"
+const (
+	callerContextKey = "caller"
+	accessTokenKey   = "access_token"
+)
 
 type authorizationCodeRequest struct {
 	Code        string `json:"code" binding:"required"`
@@ -27,13 +30,15 @@ func RequireAuthentication(auth *service.AuthService) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		caller, err := auth.Authenticate(c.Request.Context(), strings.TrimPrefix(authorization, "Bearer "))
+		accessToken := strings.TrimPrefix(authorization, "Bearer ")
+		caller, err := auth.Authenticate(c.Request.Context(), accessToken)
 		if err != nil {
 			respondError(c, err)
 			c.Abort()
 			return
 		}
 		c.Set(callerContextKey, caller)
+		c.Set(accessTokenKey, accessToken)
 		c.Next()
 	}
 }
@@ -89,6 +94,26 @@ func (h *Handler) GetSession(c *gin.Context) {
 	c.JSON(http.StatusOK, caller)
 }
 
+func (h *Handler) GetCurrentUser(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	accessToken, err := getAccessToken(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	user, err := h.auth.GetCurrentUser(c.Request.Context(), accessToken, caller)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, user)
+}
+
 func (h *Handler) Logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
@@ -103,4 +128,16 @@ func getCaller(c *gin.Context) (service.CallerContext, error) {
 		return service.CallerContext{}, service.ErrUnauthorized
 	}
 	return caller, nil
+}
+
+func getAccessToken(c *gin.Context) (string, error) {
+	value, exists := c.Get(accessTokenKey)
+	if !exists {
+		return "", service.ErrUnauthorized
+	}
+	accessToken, ok := value.(string)
+	if !ok || strings.TrimSpace(accessToken) == "" {
+		return "", service.ErrUnauthorized
+	}
+	return accessToken, nil
 }

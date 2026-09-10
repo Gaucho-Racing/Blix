@@ -45,12 +45,39 @@ type TokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
+type User struct {
+	ID                    string    `json:"id"`
+	EntityID              string    `json:"entity_id"`
+	Username              string    `json:"username"`
+	FirstName             string    `json:"first_name"`
+	LastName              string    `json:"last_name"`
+	Email                 string    `json:"email"`
+	PhoneNumber           string    `json:"phone_number"`
+	Gender                string    `json:"gender"`
+	Birthday              time.Time `json:"birthday"`
+	GraduateLevel         string    `json:"graduate_level"`
+	GraduationYear        int       `json:"graduation_year"`
+	Major                 string    `json:"major"`
+	ShirtSize             string    `json:"shirt_size"`
+	JacketSize            string    `json:"jacket_size"`
+	SAERegistrationNumber string    `json:"sae_registration_number"`
+	OccupationTitle       string    `json:"occupation_title"`
+	OccupationCompany     string    `json:"occupation_company"`
+	AvatarURL             string    `json:"avatar_url"`
+	InitialRole           string    `json:"initial_role"`
+	Groups                []string  `json:"groups"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	CreatedAt             time.Time `json:"created_at"`
+}
+
 type Claims struct {
-	EntityID string
-	UserID   string
-	Audience []string
-	Scope    string
-	Groups   []string
+	EntityID         string
+	EntityType       string
+	UserID           string
+	ServiceAccountID string
+	Audience         []string
+	Scope            string
+	Groups           []string
 }
 
 type Error struct {
@@ -115,6 +142,35 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (TokenRe
 	return c.exchange(ctx, form)
 }
 
+func (c *Client) GetUser(ctx context.Context, accessToken string, userID string) (User, error) {
+	if strings.TrimSpace(accessToken) == "" {
+		return User{}, errors.New("access token is required")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return User{}, errors.New("user id is required")
+	}
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.baseURL+"/api/users/"+url.PathEscape(userID),
+		nil,
+	)
+	if err != nil {
+		return User{}, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	responseBody, err := c.do(request)
+	if err != nil {
+		return User{}, err
+	}
+	var user User
+	if err := json.Unmarshal(responseBody, &user); err != nil {
+		return User{}, fmt.Errorf("decode Sentinel user response: %w", err)
+	}
+	return user, nil
+}
+
 func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error) {
 	tokenClaims := jwt.MapClaims{}
 	parsed, err := jwt.ParseWithClaims(
@@ -139,11 +195,16 @@ func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error
 	}
 	raw := map[string]any(tokenClaims)
 	claims := Claims{
-		EntityID: stringClaim(raw, "sub"),
-		UserID:   stringClaim(raw, "user_id"),
-		Audience: stringSliceClaim(raw, "aud"),
-		Scope:    stringClaim(raw, "scope"),
-		Groups:   stringSliceClaim(raw, "groups"),
+		EntityID:         stringClaim(raw, "sub"),
+		EntityType:       stringClaim(raw, "entity_type"),
+		UserID:           stringClaim(raw, "user_id"),
+		ServiceAccountID: stringClaim(raw, "service_account_id"),
+		Audience:         stringSliceClaim(raw, "aud"),
+		Scope:            stringClaim(raw, "scope"),
+		Groups:           stringSliceClaim(raw, "groups"),
+	}
+	if claims.EntityType == "" && stringClaim(raw, "type") == "service_account" {
+		claims.EntityType = "SERVICE_ACCOUNT"
 	}
 	if claims.EntityID == "" {
 		return Claims{}, fmt.Errorf("%w: token subject is missing", ErrInvalidToken)

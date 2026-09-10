@@ -19,6 +19,8 @@ from blix_agent_worker.clients import (
     RunwayClient,
     RunwayClientError,
     SentinelClient,
+    SentinelClientError,
+    SentinelUser,
     TavilyClient,
     WorkerRegistration,
 )
@@ -32,6 +34,7 @@ from blix_agent_worker.models.agent import (
     AgentTask,
 )
 from blix_agent_worker.models.common import ContractError, EventID, ExecutionID, RunID, new_ulid
+from blix_agent_worker.models.context import EntityType
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -47,6 +50,15 @@ MODEL = "openai/gpt-5.6-luna"
 logger = logging.getLogger("blix_agent_worker")
 
 DEFAULT_AGENT_WORKER_CONCURRENCY = 4
+DEFAULT_SENTINEL_URL = "https://sso.gauchoracing.com"
+REQUIRED_BLIX_GROUP = "BlixUsers"
+
+
+class CallerVerificationError(Exception):
+    def __init__(self, code: str, message: str, *, retryable: bool = False) -> None:
+        self.code = code
+        self.retryable = retryable
+        super().__init__(message)
 
 
 class DispatchMessage(BaseModel):
@@ -75,6 +87,7 @@ class AgentWorker:
         self._runway = runway
         self._worker_id = worker_id
         self._model = model
+        self._sentinel = sentinel
         registry = ToolRegistry(
             [
                 CurrentTimeV1Tool(),
@@ -142,6 +155,7 @@ class AgentWorker:
             )
 
         try:
+            caller_user = await self._resolve_caller(execution)
             resume_result: AgentResult | None = None
             if execution.waiting_on_execution_id is not None:
                 execution_result = await self._runway.get_execution_result(
@@ -153,7 +167,13 @@ class AgentWorker:
                     raise RuntimeError("resumed execution has no completed child result")
                 resume_result = execution_result.result
 
-            outcome = await self._run_execution(execution, checkpoint, checkpoint_model, resume_result)
+            outcome = await self._run_execution(
+                execution,
+                caller_user,
+                checkpoint,
+                checkpoint_model,
+                resume_result,
+            )
             if isinstance(outcome, AgentSuspension):
                 relinquishing_lease.set()
                 await self._runway.delegate_execution(
@@ -193,6 +213,18 @@ class AgentWorker:
                 state.version,
                 error,
             )
+        except CallerVerificationError as error:
+            logger.warning("caller verification failed for execution %s: %s", execution.execution_id, error)
+            try:
+                relinquishing_lease.set()
+                await self._runway.fail_execution(
+                    execution.execution_id,
+                    self._worker_id,
+                    state.version,
+                    ContractError(code=error.code, message=str(error), retryable=error.retryable),
+                )
+            except RunwayClientError:
+                logger.exception("failed to persist caller verification failure for %s", execution.execution_id)
         except Exception as error:
             logger.exception("execution %s failed", execution.execution_id)
             try:
@@ -205,6 +237,46 @@ class AgentWorker:
                 )
             except RunwayClientError:
                 logger.exception("failed to persist failure for execution %s", execution.execution_id)
+
+    async def _resolve_caller(self, execution: ExecutionContext) -> SentinelUser:
+        sentinel_url = os.environ.get("SENTINEL_URL", "").strip() or DEFAULT_SENTINEL_URL
+        service_account_token = os.environ.get("SENTINEL_SERVICE_ACCOUNT_TOKEN", "").strip()
+        if not service_account_token:
+            raise CallerVerificationError(
+                "sentinel_not_configured",
+                "SENTINEL_SERVICE_ACCOUNT_TOKEN is required to verify the caller.",
+            )
+        try:
+            entity = await self._sentinel.get_entity(
+                sentinel_url=sentinel_url,
+                service_account_token=service_account_token,
+                entity_id=execution.caller_context.entity_id,
+            )
+        except SentinelClientError as error:
+            raise CallerVerificationError(error.code, str(error), retryable=error.retryable) from error
+
+        caller = execution.caller_context
+        if entity.id != caller.entity_id or entity.type is not caller.entity_type:
+            raise CallerVerificationError(
+                "caller_identity_mismatch",
+                "The current Sentinel entity does not match the authenticated run caller.",
+            )
+        if caller.entity_type is not EntityType.USER or caller.user_id is None or entity.user is None:
+            raise CallerVerificationError(
+                "caller_not_user",
+                "Only Sentinel user identities can start Blix agent executions.",
+            )
+        if entity.user.id != caller.user_id:
+            raise CallerVerificationError(
+                "caller_identity_mismatch",
+                "The current Sentinel user does not match the authenticated run caller.",
+            )
+        if REQUIRED_BLIX_GROUP not in entity.user.groups:
+            raise CallerVerificationError(
+                "caller_not_blix_user",
+                f"The Sentinel user must be an active member of {REQUIRED_BLIX_GROUP}.",
+            )
+        return entity.user
 
     async def _maintain_lease(
         self,
@@ -233,6 +305,7 @@ class AgentWorker:
     async def _run_execution(
         self,
         execution: ExecutionContext,
+        caller_user: SentinelUser,
         checkpoint: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]],
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
         resume_result: AgentResult | None,
@@ -244,6 +317,12 @@ class AgentWorker:
             on_model_response=checkpoint_model,
         )
         agent_registry = AgentRegistry([deep_research])
+        trusted_context = {
+            "caller": {
+                **execution.caller_context.model_dump(mode="json"),
+                "user": caller_user.model_dump(mode="json"),
+            }
+        }
         if execution.parent_execution_id is not None:
             if execution.task is None:
                 return self._agent_failure(execution, "missing_agent_task", "The delegated execution has no task.")
@@ -255,7 +334,10 @@ class AgentWorker:
                     "agent_not_registered",
                     f"Agent {execution.agent_id!r} is not registered on this worker.",
                 )
-            return await agent.run(execution.task, state=execution.state, resume_result=resume_result)
+            task_context = dict(execution.task.context)
+            task_context.update(trusted_context)
+            task = execution.task.model_copy(update={"context": task_context})
+            return await agent.run(task, state=execution.state, resume_result=resume_result)
 
         messages = tuple(
             ConversationMessage(
@@ -283,6 +365,7 @@ class AgentWorker:
             agent_id=execution.agent_id,
             objective="Respond to the latest user message.",
             input=agent_input.model_dump(mode="json"),
+            context=trusted_context,
         )
         return await agent.run(task, state=execution.state, resume_result=resume_result)
 
