@@ -14,7 +14,10 @@ import (
 	"github.com/gaucho-racing/blix/runway/pkg/sentinel"
 )
 
-const cliCallbackPath = "/blix-cli/callback"
+const (
+	cliCallbackPath = "/blix-cli/callback"
+	webCallbackPath = "/auth/login"
+)
 
 type AuthService struct {
 	sentinel *sentinel.Client
@@ -47,7 +50,7 @@ func (s *AuthService) AuthorizationURL(state string, redirectURI string) (string
 	if strings.TrimSpace(state) == "" {
 		return "", fmt.Errorf("%w: state is required", ErrInvalid)
 	}
-	if err := validateCLIRedirectURI(redirectURI); err != nil {
+	if err := validateOAuthRedirectURI(redirectURI); err != nil {
 		return "", err
 	}
 	value, err := s.sentinel.AuthorizationURL(state, s.scopes, redirectURI)
@@ -65,7 +68,7 @@ func (s *AuthService) ExchangeAuthorizationCode(
 	if strings.TrimSpace(code) == "" {
 		return sentinel.TokenResponse{}, fmt.Errorf("%w: code is required", ErrInvalid)
 	}
-	if err := validateCLIRedirectURI(redirectURI); err != nil {
+	if err := validateOAuthRedirectURI(redirectURI); err != nil {
 		return sentinel.TokenResponse{}, err
 	}
 	token, err := s.sentinel.ExchangeAuthorizationCode(ctx, code, redirectURI)
@@ -75,17 +78,27 @@ func (s *AuthService) ExchangeAuthorizationCode(
 	return token, nil
 }
 
-func validateCLIRedirectURI(raw string) error {
+func validateOAuthRedirectURI(raw string) error {
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "http" || !strings.EqualFold(parsed.Hostname(), "localhost") {
-		return fmt.Errorf("%w: redirect_uri must be an HTTP localhost URL", ErrInvalid)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%w: redirect_uri is invalid", ErrInvalid)
 	}
-	port, err := strconv.ParseUint(parsed.Port(), 10, 16)
-	if err != nil || port == 0 {
-		return fmt.Errorf("%w: redirect_uri must include a valid port", ErrInvalid)
-	}
-	if parsed.User != nil || parsed.EscapedPath() != cliCallbackPath || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("%w: redirect_uri must use %s", ErrInvalid, cliCallbackPath)
+	switch parsed.EscapedPath() {
+	case cliCallbackPath:
+		if parsed.Scheme != "http" || !strings.EqualFold(parsed.Hostname(), "localhost") {
+			return fmt.Errorf("%w: CLI redirect_uri must be an HTTP localhost URL", ErrInvalid)
+		}
+		port, err := strconv.ParseUint(parsed.Port(), 10, 16)
+		if err != nil || port == 0 {
+			return fmt.Errorf("%w: CLI redirect_uri must include a valid port", ErrInvalid)
+		}
+	case webCallbackPath:
+		isLoopback := strings.EqualFold(parsed.Hostname(), "localhost") || parsed.Hostname() == "127.0.0.1"
+		if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopback) {
+			return fmt.Errorf("%w: web redirect_uri must use HTTPS or an HTTP loopback URL", ErrInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: redirect_uri callback path is invalid", ErrInvalid)
 	}
 	return nil
 }

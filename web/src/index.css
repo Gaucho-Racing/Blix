@@ -60,6 +60,9 @@ h1, h2, h3, p { margin-top: 0; }
 .nav-item:hover { color: var(--text); background: var(--surface-hover); transform: translateX(1px); }
 .nav-item.active { color: var(--pink-strong); background: var(--pink-soft); }
 .nav-item.active svg { color: var(--pink); }
+.nav-item.locked { color: #aaa4ac; }
+.nav-item.locked:hover { color: var(--muted); }
+.nav-lock { margin-left: auto; }
 .sidebar-spacer { flex: 1; }
 .runtime-status { margin: 0 10px 12px; display: flex; align-items: center; gap: 8px; color: var(--dim); font: 11px "Geist Mono Variable"; }
 .healthy-dot { width: 7px; height: 7px; flex: 0 0 auto; display: inline-block; border-radius: 50%; background: #35a46f; box-shadow: 0 0 0 3px rgba(53, 164, 111, .11); }
@@ -67,6 +70,7 @@ h1, h2, h3, p { margin-top: 0; }
 .workspace-switcher:hover { border-color: var(--border-strong); }
 .workspace-switcher > svg { color: var(--dim); }
 .workspace-avatar { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; color: var(--pink-strong); background: var(--pink-soft); font: 700 11px "Geist Mono Variable"; }
+.workspace-avatar-image { object-fit: cover; }
 .workspace-copy { min-width: 0; flex: 1; }
 .workspace-copy strong, .workspace-copy small { overflow: hidden; display: block; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-copy strong { font-size: 12px; }
@@ -192,6 +196,19 @@ h1, h2, h3, p { margin-top: 0; }
 
 .page { width: min(1440px, 100%); min-height: 100vh; margin: 0 auto; padding: 44px 46px 64px; }
 .page.centered { display: grid; place-items: center; }
+.login-page { min-height: 100svh; padding: 30px; display: grid; place-items: center; background: radial-gradient(circle at 50% 12%, rgba(210, 10, 140, .09), transparent 33%), var(--surface); }
+.login-card { width: min(420px, 100%); padding: 42px 40px 32px; display: grid; justify-items: center; border: 1px solid var(--border); border-radius: 20px; background: var(--surface-raised); box-shadow: var(--shadow-md); text-align: center; }
+.login-mark { width: 52px; height: 52px; margin-bottom: 25px; display: grid; place-items: center; border-radius: 15px; color: #fff; background: linear-gradient(145deg, #ef32ae, #c70884); font: 800 24px "Geist Mono Variable"; box-shadow: 0 13px 28px rgba(210, 10, 140, .2); }
+.login-card h1 { margin: 1px 0 10px; color: var(--text); font-size: 29px; letter-spacing: -.045em; }
+.login-card > p { margin: 0 0 25px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.login-progress { min-height: 42px; padding: 0 15px; display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--border); border-radius: 10px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; }
+.login-progress svg { color: var(--pink); }
+.login-trust { width: 100%; margin-top: 30px; padding-top: 18px; display: flex; align-items: center; justify-content: center; gap: 7px; border-top: 1px solid var(--border); color: var(--dim); font: 10px "Geist Mono Variable"; }
+.admin-access-page { display: grid; place-items: center; }
+.admin-access-card { width: min(510px, 100%); padding: 42px; display: grid; justify-items: start; background: linear-gradient(135deg, var(--pink-faint), transparent 48%), var(--surface-raised); }
+.admin-access-icon { width: 48px; height: 48px; margin-bottom: 24px; display: grid; place-items: center; border: 1px solid #f2c9e4; border-radius: 13px; color: var(--pink); background: var(--pink-soft); }
+.admin-access-card h1 { margin: 1px 0 9px; font-size: 25px; letter-spacing: -.035em; }
+.admin-access-card p { max-width: 390px; margin: 0 0 25px; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .page-header { margin-bottom: 28px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
 .page-header p { max-width: 660px; margin: 7px 0 0; color: var(--muted); font-size: 14px; }
 .live-indicator { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: var(--dim); font: 650 10px "Geist Mono Variable"; letter-spacing: .08em; }
@@ -376,6 +393,7 @@ h1, h2, h3, p { margin-top: 0; }
   .brand { justify-content: center; padding-inline: 0; }
   .brand > span:last-child, .nav-label, .runtime-status, .workspace-copy, .workspace-switcher > svg { display: none; }
   .nav-item { justify-content: center; padding: 0; font-size: 0; }
+  .nav-lock { display: none; }
   .workspace-switcher { justify-content: center; padding: 8px; }
   .sidebar-nav { gap: 18px; }
   .admin-navigation { padding-top: 18px; }
@@ -434,6 +452,9 @@ h1, h2, h3, p { margin-top: 0; }
   .timeline-heading { flex-direction: column; gap: 3px; }
   .timeline-event[open] > .json-block { margin-left: 18px; }
   .placeholder-panel { min-height: 260px; padding: 27px 23px; flex-direction: column; }
+  .login-page { padding: 17px; }
+  .login-card { padding: 34px 25px 27px; }
+  .admin-access-card { padding: 30px 25px; }
 }
 
 @media (max-width: 420px) {

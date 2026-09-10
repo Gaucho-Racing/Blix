@@ -17,6 +17,10 @@ func (h *Handler) GetExecution(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	if err := h.authorizeRunAccess(c, execution.Execution.RunID); err != nil {
+		respondError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, execution)
 }
 

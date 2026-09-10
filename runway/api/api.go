@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const adminGroup = "BlixAdmins"
+
 type Handler struct {
 	auth          *service.AuthService
 	identities    *service.IdentityService
@@ -90,19 +92,19 @@ func InitializeRoutes(
 	router.POST("/v1/auth/login", handler.LoginWithSentinel)
 	router.GET("/v1/auth/session", RequireAuthentication(auth), handler.GetSession)
 	router.GET("/auth/users/@me", RequireAuthentication(auth), handler.GetCurrentUser)
-	router.POST("/identities/resolve", handler.ResolveIdentities)
+	router.POST("/identities/resolve", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ResolveIdentities)
 	router.POST("/v1/auth/refresh", handler.RefreshSession)
 	router.POST("/v1/auth/logout", handler.Logout)
-	router.GET("/v1/events/stream", handler.StreamAllEvents)
-	router.GET("/v1/workers", handler.ListWorkers)
-	router.GET("/v1/workers/stream", handler.StreamWorkers)
-	router.GET("/v1/runs", handler.ListRuns)
+	router.GET("/v1/events/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamAllEvents)
+	router.GET("/v1/workers", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListWorkers)
+	router.GET("/v1/workers/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamWorkers)
+	router.GET("/v1/runs", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListRuns)
 	router.POST("/v1/runs", RequireAuthentication(auth), handler.CreateRun)
-	router.GET("/v1/runs/:runID", handler.GetRun)
+	router.GET("/v1/runs/:runID", RequireAuthentication(auth), handler.GetRun)
 	router.POST("/v1/runs/:runID/messages", RequireAuthentication(auth), handler.AppendMessage)
-	router.GET("/v1/runs/:runID/events", handler.ListEvents)
-	router.GET("/v1/runs/:runID/events/stream", handler.StreamRunEvents)
-	router.GET("/v1/executions/:executionID", handler.GetExecution)
+	router.GET("/v1/runs/:runID/events", RequireAuthentication(auth), handler.ListEvents)
+	router.GET("/v1/runs/:runID/events/stream", RequireStreamAuthentication(auth), handler.StreamRunEvents)
+	router.GET("/v1/executions/:executionID", RequireAuthentication(auth), handler.GetExecution)
 	router.POST("/internal/v1/workers/register", handler.RegisterWorker)
 	router.POST("/internal/v1/workers/:workerID/heartbeat", handler.HeartbeatWorker)
 	router.POST("/internal/v1/executions/:executionID/claim", handler.ClaimExecution)

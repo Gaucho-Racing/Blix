@@ -23,6 +23,10 @@ func (h *Handler) StreamAllEvents(c *gin.Context) {
 
 func (h *Handler) StreamRunEvents(c *gin.Context) {
 	runID := c.Param("runID")
+	if err := h.authorizeRunAccess(c, runID); err != nil {
+		respondError(c, err)
+		return
+	}
 	h.streamEvents(c, runID, func(ctx context.Context, after uint64) ([]model.ExecutionEvent, error) {
 		return h.executions.ListEvents(ctx, runID, after)
 	})

@@ -178,6 +178,20 @@ func (s *ExecutionService) GetExecution(ctx context.Context, executionID string)
 	}, nil
 }
 
+func (s *ExecutionService) AuthorizeRunAccess(ctx context.Context, runID string, callerEntityID string, isAdmin bool) error {
+	if !identifier.IsValid(runID, identifier.Run) || !identifier.IsValid(callerEntityID, identifier.Entity) {
+		return ErrInvalid
+	}
+	var run model.Run
+	if err := s.database.WithContext(ctx).Select("caller_entity_id").First(&run, "id = ?", runID).Error; err != nil {
+		return mapDatabaseError(err)
+	}
+	if !isAdmin && run.CallerEntityID != callerEntityID {
+		return ErrForbidden
+	}
+	return nil
+}
+
 func summarizeExecution(execution model.AgentExecution) ExecutionSummary {
 	return ExecutionSummary{
 		ExecutionID:          execution.ID,

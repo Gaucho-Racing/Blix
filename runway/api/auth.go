@@ -23,14 +23,27 @@ type refreshTokenRequest struct {
 }
 
 func RequireAuthentication(auth *service.AuthService) gin.HandlerFunc {
+	return requireAuthentication(auth, false)
+}
+
+func RequireStreamAuthentication(auth *service.AuthService) gin.HandlerFunc {
+	return requireAuthentication(auth, true)
+}
+
+func requireAuthentication(auth *service.AuthService, allowQueryToken bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authorization := c.GetHeader("Authorization")
-		if !strings.HasPrefix(authorization, "Bearer ") {
+		accessToken := ""
+		if strings.HasPrefix(authorization, "Bearer ") {
+			accessToken = strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		} else if allowQueryToken {
+			accessToken = strings.TrimSpace(c.Query("access_token"))
+		}
+		if accessToken == "" {
 			respondError(c, service.ErrUnauthorized)
 			c.Abort()
 			return
 		}
-		accessToken := strings.TrimPrefix(authorization, "Bearer ")
 		caller, err := auth.Authenticate(c.Request.Context(), accessToken)
 		if err != nil {
 			respondError(c, err)
@@ -40,6 +53,25 @@ func RequireAuthentication(auth *service.AuthService) gin.HandlerFunc {
 		c.Set(callerContextKey, caller)
 		c.Set(accessTokenKey, accessToken)
 		c.Next()
+	}
+}
+
+func RequireGroup(group string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		caller, err := getCaller(c)
+		if err != nil {
+			respondError(c, err)
+			c.Abort()
+			return
+		}
+		for _, callerGroup := range caller.Groups {
+			if callerGroup == group {
+				c.Next()
+				return
+			}
+		}
+		respondError(c, service.ErrForbidden)
+		c.Abort()
 	}
 }
 

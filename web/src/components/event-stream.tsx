@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
+import { api } from "@/lib/api"
+import { loadSession } from "@/lib/session"
 import type { ExecutionEvent, WorkerSummary } from "@/lib/types"
 
 type StreamStatus = "connecting" | "live" | "reconnecting"
@@ -13,22 +15,46 @@ function StreamIndicator({ status }: StreamIndicatorProps) {
   return <span className={`live-indicator stream-${status}`}><i /> {status.toUpperCase()}</span>
 }
 
-function openEventStream(
+function openEventStream<T>(
   path: string,
-  onEvent: (event: ExecutionEvent) => void,
+  onEvent: (event: T) => void,
   setStatus: (status: StreamStatus) => void,
 ): () => void {
-  const source = new EventSource(path)
-  source.onopen = () => setStatus("live")
-  source.onerror = () => setStatus("reconnecting")
-  source.onmessage = (message) => {
-    try {
-      onEvent(JSON.parse(message.data) as ExecutionEvent)
-    } catch {
-      return
+  let closed = false
+  let source: EventSource | undefined
+  let reconnectTimer: number | undefined
+
+  const connect = () => {
+    if (closed) return
+    const session = loadSession()
+    if (!session) return
+    const url = new URL(path, window.location.origin)
+    url.searchParams.set("access_token", session.accessToken)
+    source = new EventSource(url)
+    source.onopen = () => setStatus("live")
+    source.onmessage = (message) => {
+      try {
+        onEvent(JSON.parse(message.data) as T)
+      } catch {
+        return
+      }
+    }
+    source.onerror = () => {
+      source?.close()
+      if (closed) return
+      setStatus("reconnecting")
+      void api.get("/v1/auth/session").finally(() => {
+        if (closed) return
+        reconnectTimer = window.setTimeout(connect, 1_000)
+      })
     }
   }
-  return () => source.close()
+  connect()
+  return () => {
+    closed = true
+    source?.close()
+    if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+  }
 }
 
 interface RunListEventStreamProps {
@@ -42,7 +68,7 @@ export function RunListEventStream({ initialCursor }: RunListEventStreamProps) {
 
   useEffect(() => {
     let refreshTimer: number | undefined
-    const close = openEventStream(`/api/v1/events/stream?after=${cursor}`, () => {
+    const close = openEventStream<ExecutionEvent>(`/api/v1/events/stream?after=${cursor}`, () => {
       if (refreshTimer !== undefined) return
       refreshTimer = window.setTimeout(() => {
         refreshTimer = undefined
@@ -71,7 +97,7 @@ export function RunEventStream({ runID, initialCursor }: RunEventStreamProps) {
   useEffect(() => {
     let refreshTimer: number | undefined
     const pendingExecutionIDs = new Set<string>()
-    const close = openEventStream(
+    const close = openEventStream<ExecutionEvent>(
       `/api/v1/runs/${stream.runID}/events/stream?after=${stream.cursor}`,
       (event) => {
         pendingExecutionIDs.add(event.execution_id)
@@ -105,23 +131,19 @@ export function WorkerListEventStream() {
   const [status, setStatus] = useState<StreamStatus>("connecting")
 
   useEffect(() => {
-    const source = new EventSource("/api/v1/workers/stream")
-    source.onopen = () => setStatus("live")
-    source.onerror = () => setStatus("reconnecting")
-    source.onmessage = (message) => {
-      try {
-        const worker = JSON.parse(message.data) as WorkerSummary
+    const close = openEventStream<WorkerSummary>(
+      "/api/v1/workers/stream",
+      (worker) => {
         queryClient.setQueryData<WorkerSummary[]>(["workers"], (current = []) => {
           const remaining = current.filter((candidate) => candidate.worker_id !== worker.worker_id)
           return [worker, ...remaining].sort(
             (left, right) => new Date(right.last_seen_at).getTime() - new Date(left.last_seen_at).getTime(),
           )
         })
-      } catch {
-        return
-      }
-    }
-    return () => source.close()
+      },
+      setStatus,
+    )
+    return close
   }, [queryClient])
 
   return <StreamIndicator status={status} />

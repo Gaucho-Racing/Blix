@@ -1,9 +1,24 @@
-import { Bot, BookOpen, CalendarClock, ChevronUp, Gauge, MessageSquare, ServerCog, Workflow, Wrench } from "lucide-react"
-import { Link, NavLink, Outlet } from "react-router-dom"
+import { Bot, BookOpen, CalendarClock, Gauge, LockKeyhole, LogIn, LogOut, MessageSquare, ServerCog, Workflow, Wrench } from "lucide-react"
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
+
+import { useAuth } from "@/lib/auth"
 
 const navClassName = ({ isActive }: { isActive: boolean }) => `nav-item${isActive ? " active" : ""}`
 
 export function AppShell() {
+  const auth = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const displayName = auth.user ? `${auth.user.first_name} ${auth.user.last_name}`.trim() || auth.user.username : "Sign in"
+  const initials = auth.user ? `${auth.user.first_name?.[0] ?? ""}${auth.user.last_name?.[0] ?? ""}` || "GR" : "GR"
+  const accountAction = () => {
+    if (auth.user) {
+      auth.logout()
+      return
+    }
+    navigate("/auth/login", { state: { from: location } })
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -37,25 +52,30 @@ export function AppShell() {
           <section className="nav-section admin-navigation">
             <div className="nav-label">Admin</div>
             <div className="nav-list">
-              <NavLink className={navClassName} end to="/admin">
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} end to="/admin">
                 <Gauge size={17} />
                 Overview
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
-              <NavLink className={navClassName} to="/admin/runs">
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/runs">
                 <Workflow size={17} />
                 Runs
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
-              <NavLink className={navClassName} to="/admin/workers">
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/workers">
                 <ServerCog size={17} />
                 Workers
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
-              <NavLink className={navClassName} to="/admin/agents">
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/agents">
                 <Bot size={17} />
                 Agents
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
-              <NavLink className={navClassName} to="/admin/tools">
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/tools">
                 <Wrench size={17} />
                 Tools
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
             </div>
           </section>
@@ -65,13 +85,13 @@ export function AppShell() {
         <div className="runtime-status">
           <span className="healthy-dot" /> Runway connected
         </div>
-        <button className="workspace-switcher" type="button">
-          <span className="workspace-avatar">GR</span>
+        <button className="workspace-switcher" onClick={accountAction} type="button">
+          {auth.user?.avatar_url ? <img alt="" className="workspace-avatar workspace-avatar-image" src={auth.user.avatar_url} /> : <span className="workspace-avatar">{initials.toUpperCase()}</span>}
           <span className="workspace-copy">
-            <strong>Gaucho Racing</strong>
-            <small>Local workspace</small>
+            <strong>{displayName}</strong>
+            <small>{auth.user ? auth.user.email : "Continue with Sentinel"}</small>
           </span>
-          <ChevronUp size={15} />
+          {auth.user ? <LogOut size={15} /> : <LogIn size={15} />}
         </button>
       </aside>
       <main className="main-content"><Outlet /></main>
