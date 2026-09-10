@@ -1,3 +1,7 @@
+import type { RunSummary } from "@/lib/types"
+
+const staleRunThresholdMilliseconds = 2 * 60 * 60 * 1000
+
 export function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -17,6 +21,19 @@ export function formatRelative(value: string): string {
   const hours = Math.round(minutes / 60)
   if (Math.abs(hours) < 24) return relative.format(hours, "hour")
   return relative.format(Math.round(hours / 24), "day")
+}
+
+export function runDisplayStatus(
+  run: Pick<RunSummary, "execution_status" | "last_activity_at">,
+  now = Date.now(),
+): string {
+  if (
+    run.execution_status === "idle" &&
+    now - new Date(run.last_activity_at).getTime() >= staleRunThresholdMilliseconds
+  ) {
+    return "stale"
+  }
+  return run.execution_status
 }
 
 export function formatDuration(milliseconds: number): string {

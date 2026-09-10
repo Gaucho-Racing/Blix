@@ -7,14 +7,16 @@ import { StatusBadge } from "@/components/status-badge"
 import { IdentityDisplay } from "@/components/identity-display"
 import { RunListEventStream } from "@/components/event-stream"
 import { listRuns } from "@/lib/api"
-import { formatRelative, formatTimestamp } from "@/lib/format"
+import { formatRelative, formatTimestamp, runDisplayStatus } from "@/lib/format"
 import { useIdentities } from "@/lib/identity"
 import type { RunSummary } from "@/lib/types"
+import { useNow } from "@/lib/use-now"
 
 const noRuns: RunSummary[] = []
 
 export function RunsPage() {
   const [search, setSearch] = useState("")
+  const now = useNow()
   const query = useQuery({
     queryKey: ["runs"],
     queryFn: listRuns,
@@ -38,7 +40,7 @@ export function RunsPage() {
         run.caller_context?.service_account_id,
         run.agent_id,
         run.kind,
-        run.execution_status,
+        runDisplayStatus(run, now),
         identity?.name,
         identity?.username,
         identity?.type,
@@ -46,7 +48,7 @@ export function RunsPage() {
         .filter((value): value is string => Boolean(value))
         .some((value) => value.toLowerCase().includes(needle))
     })
-  }, [identitiesByID, runs, search])
+  }, [identitiesByID, now, runs, search])
 
   const active = runs.filter((run) => ["queued", "running", "waiting"].includes(run.execution_status)).length
   const failures = runs.filter((run) => run.execution_status === "failed").length
@@ -108,7 +110,7 @@ export function RunsPage() {
                         identity={identitiesByID.get(run.caller_entity_id)}
                       />
                     </td>
-                    <td><StatusBadge status={run.execution_status} /></td>
+                    <td><StatusBadge status={runDisplayStatus(run, now)} /></td>
                     <td>{run.execution_count}</td>
                     <td>{run.event_count}</td>
                     <td title={formatTimestamp(run.last_activity_at)}>{formatRelative(run.last_activity_at)}</td>

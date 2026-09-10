@@ -4,13 +4,15 @@ import {
   Clock3,
   Database,
   GitFork,
+  ListTree,
   LoaderCircle,
+  Network,
   Radio,
   ShieldAlert,
   ShieldCheck,
   ShieldEllipsis,
 } from "lucide-react"
-import { useState } from "react"
+import { lazy, Suspense, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
 import { EventTimeline } from "@/components/event-timeline"
@@ -20,9 +22,12 @@ import { ExecutionList } from "@/components/execution-list"
 import { IdentityDisplay } from "@/components/identity-display"
 import { StatusBadge } from "@/components/status-badge"
 import { getRun, getRunEvents } from "@/lib/api"
-import { formatTimestamp } from "@/lib/format"
+import { formatTimestamp, runDisplayStatus } from "@/lib/format"
 import { useIdentities } from "@/lib/identity"
 import type { CallerVerifiedPayload, ExecutionEvent } from "@/lib/types"
+import { useNow } from "@/lib/use-now"
+
+const RunDag = lazy(() => import("@/components/run-dag").then((module) => ({ default: module.RunDag })))
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -39,6 +44,8 @@ function callerVerificationFailure(events: ExecutionEvent[]) {
 export function RunDetailsPage() {
   const { runID = "" } = useParams()
   const [selectedExecutionID, setSelectedExecutionID] = useState("")
+  const [viewMode, setViewMode] = useState<"timeline" | "graph">("timeline")
+  const now = useNow()
   const runQuery = useQuery({
     queryKey: ["run", runID],
     queryFn: () => getRun(runID),
@@ -78,7 +85,7 @@ export function RunDetailsPage() {
       <Link className="back-link" to="/admin/runs"><ArrowLeft size={15} /> All runs</Link>
       <header className="run-header">
         <div>
-          <div className="run-title-line"><h1>{run.agent_id}</h1><StatusBadge status={run.execution_status} /></div>
+          <div className="run-title-line"><h1>{run.agent_id}</h1><StatusBadge status={runDisplayStatus(run, now)} /></div>
           <code>{run.run_id}</code>
         </div>
         <div className="run-header-meta">
@@ -117,61 +124,80 @@ export function RunDetailsPage() {
             <div><dt>Entity ID</dt><dd><code>{run.caller_entity_id || "—"}</code></dd></div>
             <div><dt>Verified by</dt><dd><code>{verification?.worker_id || "—"}</code></dd></div>
           </dl>
-          {verification?.user ? (
-            <div className="caller-verification-snapshot">
-              <div className="snapshot-heading">
-                <div><span className="caller-label">Verified at execution</span><strong>{verification.user.first_name} {verification.user.last_name}</strong></div>
-                {verificationEvent && <time>{formatTimestamp(verificationEvent.created_at)}</time>}
-              </div>
-              <div className="snapshot-fields">
-                <span>{verification.user.email || "No email"}</span>
-                <span>{verification.user.initial_role || "No role"}</span>
-                <span>{verification.user.major || "No major"}{verification.user.graduation_year ? ` · ${verification.user.graduation_year}` : ""}</span>
-              </div>
-              <div className="group-list">
-                {(verification.user.groups ?? []).map((group) => <span className="group-chip" key={group}>{group}</span>)}
-              </div>
-            </div>
-          ) : failure ? (
+          {failure && (
             <div className="caller-verification-error">
               <strong>{typeof failure.code === "string" ? failure.code : "verification_failed"}</strong>
               <span>{typeof failure.message === "string" ? failure.message : "Caller verification failed."}</span>
             </div>
-          ) : (
-            <div className="caller-verification-empty">This run predates caller verification or has not been claimed yet.</div>
           )}
         </div>
       </section>
 
-      <div className="detail-grid">
-        <section className="panel execution-panel">
-          <div className="section-heading">
-            <div><span className="section-kicker">RUN GRAPH</span><h2>Executions</h2></div>
-            <span className="count-pill">{executions.length}</span>
-          </div>
-          <ExecutionList executions={executions} onSelect={setSelectedExecutionID} selectedID={selected?.execution_id ?? ""} />
-        </section>
+      {viewMode === "timeline" ? (
+        <div className="detail-grid">
+          <section className="panel execution-panel">
+            <div className="section-heading">
+              <div><span className="section-kicker">RUN GRAPH</span><h2>Executions</h2></div>
+              <div className="section-actions">
+                <span className="count-pill">{executions.length}</span>
+                <button className="view-switch-button" onClick={() => setViewMode("graph")} type="button">
+                  <Network size={13} /> Graph
+                </button>
+              </div>
+            </div>
+            <ExecutionList executions={executions} onSelect={setSelectedExecutionID} selectedID={selected?.execution_id ?? ""} />
+          </section>
 
-        <section className="panel inspector-panel">
-          <div className="section-heading">
-            <div><span className="section-kicker">CHECKPOINT</span><h2>{selected?.agent_id ?? "Execution"}</h2></div>
-            {selected && <StatusBadge status={selected.status} />}
-          </div>
-          {selected && <ExecutionInspector executionID={selected.execution_id} />}
-        </section>
+          <section className="panel inspector-panel">
+            <div className="section-heading">
+              <div><span className="section-kicker">CHECKPOINT</span><h2>{selected?.agent_id ?? "Execution"}</h2></div>
+              {selected && <StatusBadge status={selected.status} />}
+            </div>
+            {selected && <ExecutionInspector executionID={selected.execution_id} />}
+          </section>
 
-        <section className="panel timeline-panel">
+          <section className="panel timeline-panel">
+            <div className="section-heading">
+              <div><span className="section-kicker">EVENT STREAM</span><h2>Timeline</h2></div>
+              <div className="section-actions">
+                <span className="stream-state"><Radio size={13} /> {selectedEvents.length} persisted</span>
+                <button className="view-switch-button" onClick={() => setViewMode("graph")} type="button">
+                  <Network size={13} /> Graph
+                </button>
+              </div>
+            </div>
+            {eventsQuery.isError ? (
+              <div className="error-state compact">Events could not be loaded.</div>
+            ) : (
+              <EventTimeline events={selectedEvents} />
+            )}
+          </section>
+        </div>
+      ) : (
+        <section className="panel run-dag-panel">
           <div className="section-heading">
-            <div><span className="section-kicker">EVENT STREAM</span><h2>Timeline</h2></div>
-            <span className="stream-state"><Radio size={13} /> {selectedEvents.length} persisted</span>
+            <div><span className="section-kicker">RUN DAG</span><h2>Full execution graph</h2></div>
+            <div className="section-actions">
+              <span className="stream-state">{executions.length} executions · {events.length} events</span>
+              <button className="view-switch-button active" onClick={() => setViewMode("timeline")} type="button">
+                <ListTree size={13} /> Timeline
+              </button>
+            </div>
           </div>
           {eventsQuery.isError ? (
-            <div className="error-state compact">Events could not be loaded.</div>
+            <div className="error-state">Events could not be loaded.</div>
           ) : (
-            <EventTimeline events={selectedEvents} />
+            <Suspense fallback={<div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading graph</div>}>
+              <RunDag
+                events={events}
+                executions={executions}
+                onSelectExecution={setSelectedExecutionID}
+                selectedExecutionID={selected?.execution_id ?? ""}
+              />
+            </Suspense>
           )}
         </section>
-      </div>
+      )}
     </div>
   )
 }
