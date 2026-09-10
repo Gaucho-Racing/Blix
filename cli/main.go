@@ -197,8 +197,7 @@ func runSession(ctx context.Context, api *client) error {
 			api.logout(ctx)
 		}
 	}
-	printWelcome(api, startupError)
-	printRuntimePanel(current, api.caller)
+	printSessionPanel(current, api, startupError)
 
 	terminalInput, err := newSessionInput()
 	if err != nil {
@@ -238,8 +237,7 @@ func runSession(ctx context.Context, api *client) error {
 			}
 			if !api.canUseBlix() {
 				current = nil
-				printWelcome(api, errors.New(nonmemberAccessMessage))
-				printRuntimePanel(current, api.caller)
+				printSessionPanel(current, api, errors.New(nonmemberAccessMessage))
 				continue
 			}
 			created, err := createRunWithRetry(ctx, api)
@@ -248,14 +246,12 @@ func runSession(ctx context.Context, api *client) error {
 				continue
 			}
 			current = &created
-			printWelcome(api, nil)
-			printRuntimePanel(current, api.caller)
+			printSessionPanel(current, api, nil)
 			continue
 		case "/logout":
 			api.logout(ctx)
 			current = nil
-			printWelcome(api, nil)
-			printRuntimePanel(current, nil)
+			printSessionPanel(current, api, nil)
 			continue
 		case "/reset":
 			if !api.canUseBlix() {
@@ -269,7 +265,7 @@ func runSession(ctx context.Context, api *client) error {
 			}
 			current = &created
 			fmt.Println(mutedStyle.Render("Run reset."))
-			printRuntimePanel(current, api.caller)
+			printSessionPanel(current, api, nil)
 			continue
 		}
 		if strings.HasPrefix(command, "/") {
@@ -651,7 +647,23 @@ func (c *client) doRequest(
 	return nil
 }
 
-func printRuntimePanel(current *createdRun, caller *callerContext) {
+func printSessionPanel(current *createdRun, api *client, startupError error) {
+	width := terminalWidth() - 8
+	if width < 60 {
+		width = 60
+	}
+	content := []string{pinkStyle.Render(blixBanner), ""}
+	content = append(content, welcomeLines(api, startupError)...)
+	content = append(content, "", sessionMetadata(current, api.caller))
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(pink).
+		Padding(1, 2).
+		Width(width)
+	fmt.Println(style.Render(strings.Join(content, "\n")))
+}
+
+func sessionMetadata(current *createdRun, caller *callerContext) string {
 	runID := "—"
 	executionID := "—"
 	callerID := "not authenticated"
@@ -662,56 +674,46 @@ func printRuntimePanel(current *createdRun, caller *callerContext) {
 	if caller != nil {
 		callerID = caller.EntityID
 	}
-	lines := []string{
-		mutedStyle.Render("AGENT      ") + mutedStyle.Render(agentID),
-		mutedStyle.Render("CALLER     ") + mutedStyle.Render(callerID),
-		mutedStyle.Render("RUN        ") + mutedStyle.Render(runID),
-		mutedStyle.Render("EXECUTION  ") + mutedStyle.Render(executionID),
-		mutedStyle.Render("COMMANDS   ") + mutedStyle.Render("/login  /logout  /help  /reset  /quit"),
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(white).Width(12)
+	rows := []struct {
+		label string
+		value string
+	}{
+		{label: "AGENT", value: agentID},
+		{label: "CALLER", value: callerID},
+		{label: "RUN", value: runID},
+		{label: "EXECUTION", value: executionID},
+		{label: "COMMANDS", value: "/login  /logout  /help  /reset  /quit"},
 	}
-	width := terminalWidth() - 2
-	if width < 60 {
-		width = 60
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			labelStyle.Render(row.label),
+			mutedStyle.Render(row.value),
+		))
 	}
-	panel := borderStyle.Width(width - 6).Render(strings.Join(lines, "\n"))
-	fmt.Println("\n" + panel)
+	return strings.Join(lines, "\n")
 }
 
-func printWelcome(api *client, startupError error) {
-	width := terminalWidth() - 8
-	if width < 50 {
-		width = 50
-	}
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(muted).
-		Padding(1, 2).
-		Width(width)
+func welcomeLines(api *client, startupError error) []string {
 	if api.caller == nil {
-		content := strings.Join([]string{
-			pinkStyle.Render(blixBanner),
-			"",
+		return []string{
 			pinkStyle.Render("Welcome to Blix"),
 			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
 			"Run " + pinkStyle.Render("/login") + " to continue.",
-		}, "\n")
-		fmt.Println(style.Render(content))
-		return
+		}
 	}
 	if api.user == nil {
 		message := "Your Sentinel profile could not be refreshed."
 		if startupError != nil {
 			message = startupError.Error()
 		}
-		content := strings.Join([]string{
-			pinkStyle.Render(blixBanner),
-			"",
+		return []string{
 			pinkStyle.Render("Signed in"),
 			mutedStyle.Render(api.caller.EntityID),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(message),
-		}, "\n")
-		fmt.Println(style.Render(content))
-		return
+		}
 	}
 	name := strings.TrimSpace(api.user.FirstName + " " + api.user.LastName)
 	if name == "" {
@@ -727,14 +729,14 @@ func printWelcome(api *client, startupError error) {
 		}
 		identity += "@" + api.user.Username
 	}
-	content := []string{pinkStyle.Render(blixBanner), "", pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
+	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
 	if !api.canUseBlix() {
 		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(nonmemberAccessMessage))
 	}
 	if startupError != nil && api.canUseBlix() {
 		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(startupError.Error()))
 	}
-	fmt.Println(style.Render(strings.Join(content, "\n")))
+	return content
 }
 
 func printHelp() {
