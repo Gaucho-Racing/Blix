@@ -104,6 +104,12 @@ function requestErrorMessage(error: unknown): string {
   return responseMessage || "Blix could not send that message. Please try again."
 }
 
+function enteringRunFromLocationState(value: unknown): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return ""
+  const enteringRunID = (value as Record<string, unknown>).enteringRunID
+  return typeof enteringRunID === "string" ? enteringRunID : ""
+}
+
 export function ChatPage() {
   const { runID = "" } = useParams()
   const auth = useAuth()
@@ -113,6 +119,7 @@ export function ChatPage() {
   const now = useNow()
   const [draft, setDraft] = useState("")
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null)
+  const [enteringRunID, setEnteringRunID] = useState(() => enteringRunFromLocationState(location.state))
   const conversationEnd = useRef<HTMLDivElement>(null)
   const hasBlixAccess = auth.user?.groups.includes("BlixUsers") ?? false
   const canChat = auth.isAuthenticated && hasBlixAccess
@@ -172,23 +179,41 @@ export function ChatPage() {
     return () => window.cancelAnimationFrame(frame)
   }, [events.length, optimisticSubmission, turns.length])
 
+  useEffect(() => {
+    if (!enteringRunID) return
+    const timer = window.setTimeout(() => {
+      setEnteringRunID("")
+      if (enteringRunFromLocationState(location.state) === enteringRunID) {
+        navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+      }
+    }, 1_400)
+    return () => window.clearTimeout(timer)
+  }, [enteringRunID, location.pathname, location.search, location.state, navigate])
+
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
       let targetRunID = runID
       let targetRootExecutionID = run?.root_execution_id
+      const createdNewRun = !targetRunID
       if (!targetRunID) {
         const created = await createRun()
         targetRunID = created.run.run_id
         targetRootExecutionID = created.run.root_execution_id
       }
       const appended = await appendRunMessage(targetRunID, content)
-      return { runID: targetRunID, rootExecutionID: targetRootExecutionID, appended }
+      return { runID: targetRunID, rootExecutionID: targetRootExecutionID, appended, createdNewRun }
     },
     scope: { id: "chat-send" },
     onMutate: (content) => setPendingSubmission({ content, runID: runID || undefined, rootExecutionID: run?.root_execution_id }),
-    onSuccess: ({ runID: targetRunID, rootExecutionID, appended }, content) => {
+    onSuccess: ({ runID: targetRunID, rootExecutionID, appended, createdNewRun }, content) => {
       setPendingSubmission({ content, runID: targetRunID, rootExecutionID, eventPosition: appended.event_position })
-      if (runID !== targetRunID) navigate(`/chat/${targetRunID}`, { replace: true })
+      if (createdNewRun) setEnteringRunID(targetRunID)
+      if (runID !== targetRunID) {
+        navigate(`/chat/${targetRunID}`, {
+          replace: true,
+          state: createdNewRun ? { enteringRunID: targetRunID } : null,
+        })
+      }
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["run", targetRunID] }),
         queryClient.invalidateQueries({ queryKey: ["run-events", targetRunID] }),
@@ -358,7 +383,11 @@ export function ChatPage() {
           ) : (
             <div className="recent-thread-list">
               {recentRuns.map((recentRun) => (
-                <Link className={`recent-thread${recentRun.run_id === runID ? " active" : ""}`} key={recentRun.run_id} to={`/chat/${recentRun.run_id}`}>
+                <Link
+                  className={`recent-thread${recentRun.run_id === runID ? " active" : ""}${recentRun.run_id === enteringRunID ? " entering" : ""}`}
+                  key={recentRun.run_id}
+                  to={`/chat/${recentRun.run_id}`}
+                >
                   <span>{recentRun.title}</span>
                   <small>{formatRelative(recentRun.last_activity_at)} · {recentRun.event_count} events</small>
                   <StatusBadge status={runDisplayStatus(recentRun, now)} />
