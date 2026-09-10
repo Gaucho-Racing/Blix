@@ -90,6 +90,12 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (CallerCon
 }
 
 func mapSentinelAuthError(err error) error {
+	if errors.Is(err, sentinel.ErrInvalidToken) {
+		return fmt.Errorf("%w: %v", ErrUnauthorized, err)
+	}
+	if errors.Is(err, sentinel.ErrSigningKeysUnavailable) {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
 	var sentinelError *sentinel.Error
 	if errors.As(err, &sentinelError) {
 		if sentinelError.Status == http.StatusBadRequest || sentinelError.Status == http.StatusUnauthorized || sentinelError.Status == http.StatusForbidden {

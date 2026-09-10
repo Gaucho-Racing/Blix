@@ -56,6 +56,11 @@ func run(configuration config.Config) error {
 		configuration.SentinelClientSecret,
 		configuration.SentinelRedirectURI,
 	)
+	if sentinelClient.Configured() {
+		if err := sentinelClient.InitializeSigningKeys(ctx); err != nil {
+			logger.SugarLogger.Warnf("initialize Sentinel signing keys: %v", err)
+		}
+	}
 	auth := service.NewAuthService(sentinelClient, configuration.SentinelScopes)
 	executions := service.NewExecutionService(db, workers, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)

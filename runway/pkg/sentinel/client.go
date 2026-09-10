@@ -1,16 +1,29 @@
 package sentinel
 
 import (
-	"bytes"
 	"context"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+var (
+	ErrInvalidToken           = errors.New("invalid sentinel token")
+	ErrSigningKeysUnavailable = errors.New("sentinel signing keys unavailable")
+)
+
+const signingKeyRefetchFloor = time.Minute
 
 type Client struct {
 	baseURL      string
@@ -18,6 +31,11 @@ type Client struct {
 	clientSecret string
 	redirectURI  string
 	http         *http.Client
+	keyMu        sync.RWMutex
+	keys         map[string]*rsa.PublicKey
+	lastKeyFetch time.Time
+	keyFetchErr  error
+	keyFetchMu   sync.Mutex
 }
 
 type TokenResponse struct {
@@ -84,6 +102,10 @@ func (c *Client) AuthorizationURL(state string, scope string) (string, error) {
 	return c.baseURL + "/oauth/authorize?" + values.Encode(), nil
 }
 
+func (c *Client) InitializeSigningKeys(ctx context.Context) error {
+	return c.refreshSigningKeys(ctx, true)
+}
+
 func (c *Client) ExchangeAuthorizationCode(ctx context.Context, code string) (TokenResponse, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
@@ -100,29 +122,28 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (TokenRe
 }
 
 func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error) {
-	body, err := json.Marshal(map[string]string{"token": token})
-	if err != nil {
-		return Claims{}, err
-	}
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		c.baseURL+"/api/core/token/validate",
-		bytes.NewReader(body),
+	tokenClaims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(
+		token,
+		tokenClaims,
+		func(token *jwt.Token) (any, error) {
+			kid, _ := token.Header["kid"].(string)
+			return c.signingKey(ctx, kid)
+		},
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithExpirationRequired(),
+		jwt.WithAudience(c.clientID),
 	)
 	if err != nil {
-		return Claims{}, err
+		if errors.Is(err, ErrSigningKeysUnavailable) {
+			return Claims{}, err
+		}
+		return Claims{}, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
-	responseBody, err := c.do(request)
-	if err != nil {
-		return Claims{}, err
+	if !parsed.Valid {
+		return Claims{}, ErrInvalidToken
 	}
-	var raw map[string]any
-	if err := json.Unmarshal(responseBody, &raw); err != nil {
-		return Claims{}, fmt.Errorf("decode Sentinel token claims: %w", err)
-	}
+	raw := map[string]any(tokenClaims)
 	claims := Claims{
 		EntityID: stringClaim(raw, "sub"),
 		UserID:   stringClaim(raw, "user_id"),
@@ -131,9 +152,117 @@ func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error
 		Groups:   stringSliceClaim(raw, "groups"),
 	}
 	if claims.EntityID == "" {
-		return Claims{}, fmt.Errorf("sentinel token subject is missing")
+		return Claims{}, fmt.Errorf("%w: token subject is missing", ErrInvalidToken)
 	}
 	return claims, nil
+}
+
+func (c *Client) signingKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+	if kid == "" {
+		return nil, fmt.Errorf("%w: token key id is missing", ErrInvalidToken)
+	}
+	if key := c.cachedSigningKey(kid); key != nil {
+		return key, nil
+	}
+	if err := c.refreshSigningKeys(ctx, false); err != nil {
+		return nil, err
+	}
+	if key := c.cachedSigningKey(kid); key != nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("%w: no signing key matches kid %q", ErrInvalidToken, kid)
+}
+
+func (c *Client) cachedSigningKey(kid string) *rsa.PublicKey {
+	c.keyMu.RLock()
+	defer c.keyMu.RUnlock()
+	return c.keys[kid]
+}
+
+func (c *Client) refreshSigningKeys(ctx context.Context, force bool) error {
+	c.keyFetchMu.Lock()
+	defer c.keyFetchMu.Unlock()
+
+	c.keyMu.RLock()
+	lastFetch := c.lastKeyFetch
+	lastError := c.keyFetchErr
+	c.keyMu.RUnlock()
+	if !force && !lastFetch.IsZero() && time.Since(lastFetch) < signingKeyRefetchFloor {
+		return lastError
+	}
+
+	keys, fetchErr := c.fetchSigningKeys(ctx)
+	var err error
+	if fetchErr != nil {
+		err = fmt.Errorf("%w: %v", ErrSigningKeysUnavailable, fetchErr)
+	}
+	c.keyMu.Lock()
+	c.lastKeyFetch = time.Now()
+	c.keyFetchErr = err
+	if err == nil {
+		c.keys = keys
+	}
+	c.keyMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) fetchSigningKeys(ctx context.Context) (map[string]*rsa.PublicKey, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/core/keys", nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	body, err := c.do(request)
+	if err != nil {
+		return nil, err
+	}
+	var document struct {
+		Keys []struct {
+			KeyType   string `json:"kty"`
+			Use       string `json:"use"`
+			Algorithm string `json:"alg"`
+			ID        string `json:"kid"`
+			Modulus   string `json:"n"`
+			Exponent  string `json:"e"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("decode Sentinel JWKS: %w", err)
+	}
+	keys := make(map[string]*rsa.PublicKey, len(document.Keys))
+	for _, encoded := range document.Keys {
+		if encoded.KeyType != "RSA" || encoded.Algorithm != "RS256" || encoded.Use != "sig" || encoded.ID == "" {
+			continue
+		}
+		key, err := decodeRSAKey(encoded.Modulus, encoded.Exponent)
+		if err != nil {
+			return nil, fmt.Errorf("decode Sentinel signing key %q: %w", encoded.ID, err)
+		}
+		keys[encoded.ID] = key
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("Sentinel JWKS contains no RS256 signing keys")
+	}
+	return keys, nil
+}
+
+func decodeRSAKey(modulus string, exponent string) (*rsa.PublicKey, error) {
+	n, err := base64.RawURLEncoding.DecodeString(modulus)
+	if err != nil || len(n) == 0 {
+		return nil, errors.New("invalid RSA modulus")
+	}
+	e, err := base64.RawURLEncoding.DecodeString(exponent)
+	if err != nil || len(e) == 0 || len(e) > 4 {
+		return nil, errors.New("invalid RSA exponent")
+	}
+	exponentValue := new(big.Int).SetBytes(e)
+	if !exponentValue.IsInt64() || exponentValue.Int64() < 2 {
+		return nil, errors.New("invalid RSA exponent")
+	}
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(exponentValue.Int64())}, nil
 }
 
 func (c *Client) exchange(ctx context.Context, form url.Values) (TokenResponse, error) {

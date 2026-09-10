@@ -6,6 +6,7 @@ require (
 	github.com/eclipse/paho.golang v0.23.0
 	github.com/gaucho-racing/ulid-go v1.1.0
 	github.com/gin-gonic/gin v1.12.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	go.uber.org/zap v1.28.0
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.6.0
