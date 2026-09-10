@@ -1,18 +1,17 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.26-alpine
 
-WORKDIR /src
+RUN apk --no-cache add ca-certificates git
+RUN go install github.com/air-verse/air@v1.67.4
+
+WORKDIR /app
 
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY *.go ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/blix-cli .
+COPY . .
+RUN go build -o /usr/local/bin/blix-dev-supervisor ./dev/supervisor && \
+    chmod -R a+rwX /go/pkg/mod
 
-FROM alpine:3.23
+ENV GOCACHE=/tmp/blix-go-build
 
-RUN apk --no-cache add ca-certificates
-
-COPY --from=build /out/blix-cli /usr/local/bin/blix-cli
-
-ENTRYPOINT ["blix-cli"]
-
+ENTRYPOINT ["blix-dev-supervisor"]
