@@ -15,6 +15,7 @@ from blix_agent_worker.models.common import (
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, ToolResult, ToolResultStatus
 
 _HTTP_URL_VALIDATOR = TypeAdapter(HttpUrl)
+DEFAULT_SENTINEL_URL = "https://sso.gauchoracing.com"
 
 
 class SentinelImpersonateV1Input(ContractModel):
@@ -57,12 +58,11 @@ class SentinelImpersonateV1Tool:
                 details=validation_error_details(error),
             )
 
-        sentinel_url = os.environ.get("SENTINEL_URL", "").strip()
+        sentinel_url = os.environ.get("SENTINEL_URL", "").strip() or DEFAULT_SENTINEL_URL
         service_account_token = os.environ.get("SENTINEL_SERVICE_ACCOUNT_TOKEN", "").strip()
         missing = [
             name
             for name, value in {
-                "SENTINEL_URL": sentinel_url,
                 "SENTINEL_SERVICE_ACCOUNT_TOKEN": service_account_token,
             }.items()
             if not value
