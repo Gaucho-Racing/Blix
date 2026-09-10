@@ -1,5 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Clock3, Database, GitFork, LoaderCircle, Radio, UserRound } from "lucide-react"
+import {
+  ArrowLeft,
+  Clock3,
+  Database,
+  GitFork,
+  LoaderCircle,
+  Radio,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldEllipsis,
+} from "lucide-react"
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
@@ -7,9 +17,24 @@ import { EventTimeline } from "@/components/event-timeline"
 import { RunEventStream } from "@/components/event-stream"
 import { ExecutionInspector } from "@/components/execution-inspector"
 import { ExecutionList } from "@/components/execution-list"
+import { IdentityDisplay } from "@/components/identity-display"
 import { StatusBadge } from "@/components/status-badge"
 import { getRun, getRunEvents } from "@/lib/api"
 import { formatTimestamp } from "@/lib/format"
+import { useIdentities } from "@/lib/identity"
+import type { CallerVerifiedPayload, ExecutionEvent } from "@/lib/types"
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function callerVerificationFailure(events: ExecutionEvent[]) {
+  return [...events].reverse().find((event) => {
+    if (event.type !== "execution.failed_v1" || !isRecord(event.payload.error)) return false
+    const code = event.payload.error.code
+    return typeof code === "string" && (code.startsWith("caller_") || code.startsWith("sentinel_"))
+  })
+}
 
 export function RunDetailsPage() {
   const { runID = "" } = useParams()
@@ -24,6 +49,8 @@ export function RunDetailsPage() {
     queryFn: () => getRunEvents(runID),
     enabled: Boolean(runID),
   })
+  const callerEntityID = runQuery.data?.run.caller_entity_id ?? ""
+  const identityQuery = useIdentities([callerEntityID])
 
   if (runQuery.isPending) {
     return <div className="page centered"><div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading run</div></div>
@@ -37,7 +64,14 @@ export function RunDetailsPage() {
     ? selectedExecutionID
     : run.root_execution_id
   const selected = executions.find((execution) => execution.execution_id === effectiveExecutionID) ?? executions[0]
-  const selectedEvents = (eventsQuery.data ?? []).filter((event) => event.execution_id === effectiveExecutionID)
+  const events = eventsQuery.data ?? []
+  const selectedEvents = events.filter((event) => event.execution_id === effectiveExecutionID)
+  const callerIdentity = identityQuery.identities.find((identity) => identity.id === run.caller_entity_id)
+  const verificationEvent = [...events].reverse().find((event) => event.type === "caller.verified_v1")
+  const verification = verificationEvent?.payload as unknown as CallerVerifiedPayload | undefined
+  const verificationFailure = callerVerificationFailure(events)
+  const failure = isRecord(verificationFailure?.payload.error) ? verificationFailure.payload.error : undefined
+  const identityID = run.caller_context?.user_id || run.caller_context?.service_account_id
 
   return (
     <div className="page run-detail-page">
@@ -48,7 +82,6 @@ export function RunDetailsPage() {
           <code>{run.run_id}</code>
         </div>
         <div className="run-header-meta">
-          <span><UserRound size={14} /> {run.caller_entity_id || "Unknown caller"}</span>
           <span><GitFork size={14} /> {run.execution_count} executions</span>
           <span><Database size={14} /> {run.event_count} events</span>
           <span><Clock3 size={14} /> {formatTimestamp(run.created_at)}</span>
@@ -61,6 +94,54 @@ export function RunDetailsPage() {
           )}
         </div>
       </header>
+
+      <section className="panel caller-panel">
+        <div className="section-heading">
+          <div><span className="section-kicker">CALLER CONTEXT</span><h2>Authenticated identity</h2></div>
+          {verificationEvent ? (
+            <span className="verification-badge verified"><ShieldCheck size={13} /> Verified</span>
+          ) : verificationFailure ? (
+            <span className="verification-badge denied"><ShieldAlert size={13} /> Denied</span>
+          ) : (
+            <span className="verification-badge pending"><ShieldEllipsis size={13} /> Not checkpointed</span>
+          )}
+        </div>
+        <div className="caller-panel-body">
+          <div className="caller-current-identity">
+            <span className="caller-label">Current Sentinel identity</span>
+            <IdentityDisplay entityID={run.caller_entity_id} identity={callerIdentity} />
+          </div>
+          <dl className="caller-context-grid">
+            <div><dt>Entity type</dt><dd>{run.caller_context?.entity_type || callerIdentity?.type || "Unknown"}</dd></div>
+            <div><dt>Identity ID</dt><dd><code>{identityID || "—"}</code></dd></div>
+            <div><dt>Entity ID</dt><dd><code>{run.caller_entity_id || "—"}</code></dd></div>
+            <div><dt>Verified by</dt><dd><code>{verification?.worker_id || "—"}</code></dd></div>
+          </dl>
+          {verification?.user ? (
+            <div className="caller-verification-snapshot">
+              <div className="snapshot-heading">
+                <div><span className="caller-label">Verified at execution</span><strong>{verification.user.first_name} {verification.user.last_name}</strong></div>
+                {verificationEvent && <time>{formatTimestamp(verificationEvent.created_at)}</time>}
+              </div>
+              <div className="snapshot-fields">
+                <span>{verification.user.email || "No email"}</span>
+                <span>{verification.user.initial_role || "No role"}</span>
+                <span>{verification.user.major || "No major"}{verification.user.graduation_year ? ` · ${verification.user.graduation_year}` : ""}</span>
+              </div>
+              <div className="group-list">
+                {(verification.user.groups ?? []).map((group) => <span className="group-chip" key={group}>{group}</span>)}
+              </div>
+            </div>
+          ) : failure ? (
+            <div className="caller-verification-error">
+              <strong>{typeof failure.code === "string" ? failure.code : "verification_failed"}</strong>
+              <span>{typeof failure.message === "string" ? failure.message : "Caller verification failed."}</span>
+            </div>
+          ) : (
+            <div className="caller-verification-empty">This run predates caller verification or has not been claimed yet.</div>
+          )}
+        </div>
+      </section>
 
       <div className="detail-grid">
         <section className="panel execution-panel">

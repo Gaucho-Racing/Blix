@@ -61,11 +61,22 @@ func run(configuration config.Config) error {
 		}
 	}
 	auth := service.NewAuthService(sentinelClient, configuration.SentinelScopes)
+	identities := service.NewIdentityService(sentinelClient, configuration.SentinelServiceToken)
 	executions := service.NewExecutionService(db, workers, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
 	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)
 	go outbox.Run(ctx)
 	go leaseReaper.Run(ctx)
 
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), auth, executions, workers, eventHub, workerHub)
+	return api.Run(
+		ctx,
+		configuration.Port,
+		configuration.IsProduction(),
+		auth,
+		identities,
+		executions,
+		workers,
+		eventHub,
+		workerHub,
+	)
 }

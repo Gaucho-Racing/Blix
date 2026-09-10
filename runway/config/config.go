@@ -30,6 +30,7 @@ type Config struct {
 	SentinelClientID        string
 	SentinelClientSecret    string
 	SentinelScopes          string
+	SentinelServiceToken    string
 }
 
 func Load() (Config, error) {
@@ -78,6 +79,7 @@ func Load() (Config, error) {
 		SentinelClientID:        value("SENTINEL_CLIENT_ID", ""),
 		SentinelClientSecret:    value("SENTINEL_CLIENT_SECRET", ""),
 		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
+		SentinelServiceToken:    value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")

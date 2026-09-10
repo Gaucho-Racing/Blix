@@ -3,6 +3,7 @@ import axios from "axios"
 import type {
   ExecutionDetails,
   ExecutionEvent,
+  IdentitySummary,
   RunDetails,
   RunSummary,
   WorkerSummary,
@@ -51,4 +52,10 @@ export async function getRunEvents(runID: string): Promise<ExecutionEvent[]> {
     }
     after = data.events[data.events.length - 1].position
   }
+}
+
+export async function resolveIdentities(entityIDs: string[]): Promise<IdentitySummary[]> {
+  if (entityIDs.length === 0) return []
+  const { data } = await axios.post<IdentitySummary[]>("/api/identities/resolve", { ids: entityIDs })
+  return data
 }

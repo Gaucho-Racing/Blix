@@ -4,9 +4,11 @@ import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
 import { StatusBadge } from "@/components/status-badge"
+import { IdentityDisplay } from "@/components/identity-display"
 import { RunListEventStream } from "@/components/event-stream"
 import { listRuns } from "@/lib/api"
 import { formatRelative, formatTimestamp } from "@/lib/format"
+import { useIdentities } from "@/lib/identity"
 import type { RunSummary } from "@/lib/types"
 
 const noRuns: RunSummary[] = []
@@ -18,14 +20,33 @@ export function RunsPage() {
     queryFn: listRuns,
   })
   const runs = query.data ?? noRuns
+  const identityQuery = useIdentities(runs.map((run) => run.caller_entity_id))
+  const identitiesByID = useMemo(
+    () => new Map(identityQuery.identities.map((identity) => [identity.id, identity])),
+    [identityQuery.identities],
+  )
   const filteredRuns = useMemo(() => {
     const needle = search.trim().toLowerCase()
     if (!needle) return runs
-    return runs.filter((run) =>
-      [run.run_id, run.caller_entity_id, run.agent_id, run.kind, run.execution_status]
-        .some((value) => value.toLowerCase().includes(needle)),
-    )
-  }, [runs, search])
+    return runs.filter((run) => {
+      const identity = identitiesByID.get(run.caller_entity_id)
+      return [
+        run.run_id,
+        run.caller_entity_id,
+        run.caller_context?.entity_type,
+        run.caller_context?.user_id,
+        run.caller_context?.service_account_id,
+        run.agent_id,
+        run.kind,
+        run.execution_status,
+        identity?.name,
+        identity?.username,
+        identity?.type,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(needle))
+    })
+  }, [identitiesByID, runs, search])
 
   const active = runs.filter((run) => ["queued", "running", "waiting"].includes(run.execution_status)).length
   const failures = runs.filter((run) => run.execution_status === "failed").length
@@ -58,7 +79,7 @@ export function RunsPage() {
           </div>
           <label className="search-box">
             <Search size={15} />
-            <input onChange={(event) => setSearch(event.target.value)} placeholder="Search run or agent" value={search} />
+            <input onChange={(event) => setSearch(event.target.value)} placeholder="Search run, agent, or caller" value={search} />
           </label>
         </div>
 
@@ -81,7 +102,12 @@ export function RunsPage() {
                         <code>{run.run_id}</code>
                       </Link>
                     </td>
-                    <td><code>{run.caller_entity_id || "—"}</code></td>
+                    <td>
+                      <IdentityDisplay
+                        entityID={run.caller_entity_id}
+                        identity={identitiesByID.get(run.caller_entity_id)}
+                      />
+                    </td>
                     <td><StatusBadge status={run.execution_status} /></td>
                     <td>{run.execution_count}</td>
                     <td>{run.event_count}</td>

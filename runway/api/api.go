@@ -14,6 +14,7 @@ import (
 
 type Handler struct {
 	auth          *service.AuthService
+	identities    *service.IdentityService
 	executions    *service.ExecutionService
 	workers       *service.WorkerService
 	events        *service.EventHub
@@ -25,13 +26,14 @@ func Run(
 	port string,
 	production bool,
 	auth *service.AuthService,
+	identities *service.IdentityService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) error {
 	api := InitializeRouter(production)
-	InitializeRoutes(api, auth, executions, workers, events, workerUpdates)
+	InitializeRoutes(api, auth, identities, executions, workers, events, workerUpdates)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api,
@@ -69,17 +71,26 @@ func InitializeRouter(production bool) *gin.Engine {
 func InitializeRoutes(
 	router *gin.Engine,
 	auth *service.AuthService,
+	identities *service.IdentityService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) {
-	handler := &Handler{auth: auth, executions: executions, workers: workers, events: events, workerUpdates: workerUpdates}
+	handler := &Handler{
+		auth:          auth,
+		identities:    identities,
+		executions:    executions,
+		workers:       workers,
+		events:        events,
+		workerUpdates: workerUpdates,
+	}
 	router.GET("/ping", Ping)
 	router.GET("/v1/auth/config", handler.GetAuthConfiguration)
 	router.POST("/v1/auth/login", handler.LoginWithSentinel)
 	router.GET("/v1/auth/session", RequireAuthentication(auth), handler.GetSession)
 	router.GET("/auth/users/@me", RequireAuthentication(auth), handler.GetCurrentUser)
+	router.POST("/identities/resolve", handler.ResolveIdentities)
 	router.POST("/v1/auth/refresh", handler.RefreshSession)
 	router.POST("/v1/auth/logout", handler.Logout)
 	router.GET("/v1/events/stream", handler.StreamAllEvents)
@@ -96,6 +107,7 @@ func InitializeRoutes(
 	router.POST("/internal/v1/workers/:workerID/heartbeat", handler.HeartbeatWorker)
 	router.POST("/internal/v1/executions/:executionID/claim", handler.ClaimExecution)
 	router.POST("/internal/v1/executions/:executionID/heartbeat", handler.HeartbeatExecution)
+	router.POST("/internal/v1/executions/:executionID/caller-checkpoints", handler.CheckpointCaller)
 	router.POST("/internal/v1/executions/:executionID/delegations", handler.DelegateExecution)
 	router.GET("/internal/v1/executions/:executionID/result", handler.GetExecutionResult)
 	router.POST("/internal/v1/executions/:executionID/model-checkpoints", handler.CheckpointModel)

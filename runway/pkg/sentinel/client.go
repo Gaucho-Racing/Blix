@@ -1,6 +1,7 @@
 package sentinel
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
@@ -68,6 +69,22 @@ type User struct {
 	Groups                []string  `json:"groups"`
 	UpdatedAt             time.Time `json:"updated_at"`
 	CreatedAt             time.Time `json:"created_at"`
+}
+
+type IdentityApplicationSummary struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	ClientID string `json:"client_id"`
+	IconURL  string `json:"icon_url"`
+}
+
+type IdentitySummary struct {
+	ID          string                      `json:"id"`
+	Type        string                      `json:"type"`
+	Name        string                      `json:"name"`
+	Username    string                      `json:"username,omitempty"`
+	AvatarURL   string                      `json:"avatar_url,omitempty"`
+	Application *IdentityApplicationSummary `json:"application,omitempty"`
 }
 
 type Claims struct {
@@ -169,6 +186,41 @@ func (c *Client) GetUser(ctx context.Context, accessToken string, userID string)
 		return User{}, fmt.Errorf("decode Sentinel user response: %w", err)
 	}
 	return user, nil
+}
+
+func (c *Client) ResolveIdentities(
+	ctx context.Context,
+	accessToken string,
+	entityIDs []string,
+) ([]IdentitySummary, error) {
+	if strings.TrimSpace(accessToken) == "" {
+		return nil, errors.New("access token is required")
+	}
+	requestBody, err := json.Marshal(map[string][]string{"ids": entityIDs})
+	if err != nil {
+		return nil, fmt.Errorf("encode Sentinel identity request: %w", err)
+	}
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		c.baseURL+"/api/entities/resolve",
+		bytes.NewReader(requestBody),
+	)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request.Header.Set("Content-Type", "application/json")
+	responseBody, err := c.do(request)
+	if err != nil {
+		return nil, err
+	}
+	identities := []IdentitySummary{}
+	if err := json.Unmarshal(responseBody, &identities); err != nil {
+		return nil, fmt.Errorf("decode Sentinel identity response: %w", err)
+	}
+	return identities, nil
 }
 
 func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error) {

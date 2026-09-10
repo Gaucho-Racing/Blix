@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   Pause,
   Play,
+  ShieldCheck,
   UserRound,
   Wrench,
 } from "lucide-react"
@@ -36,6 +37,7 @@ const icons: Record<string, ComponentType<{ size?: number }>> = {
   "execution.resumed_v1": Play,
   "execution.lease_expired_v1": Clock3,
   "execution.failed_v1": CircleAlert,
+  "caller.verified_v1": ShieldCheck,
 }
 
 function eventSummary(event: ExecutionEvent): string {
@@ -47,6 +49,20 @@ function eventSummary(event: ExecutionEvent): string {
     const input = readNumber(event.payload, "input_tokens") ?? 0
     const output = readNumber(event.payload, "output_tokens") ?? 0
     return `${model} · ${input.toLocaleString()} in / ${output.toLocaleString()} out`
+  }
+
+  if (event.type === "caller.verified_v1") {
+    return `${readString(event.payload, "required_group") ?? "required group"} membership confirmed`
+  }
+
+  if (event.type === "execution.failed_v1") {
+    const error = event.payload.error
+    if (error !== null && typeof error === "object" && !Array.isArray(error)) {
+      const code = readString(error as Record<string, unknown>, "code")
+      const message = readString(error as Record<string, unknown>, "message")
+      if (code && message) return `${code} · ${message}`
+      if (message) return message
+    }
   }
 
   const identity = ["tool_id", "agent_id", "worker_id", "status"]

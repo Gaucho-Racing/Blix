@@ -48,6 +48,20 @@ func (h *Handler) HeartbeatExecution(c *gin.Context) {
 	c.JSON(http.StatusOK, heartbeat)
 }
 
+func (h *Handler) CheckpointCaller(c *gin.Context) {
+	var request service.CallerCheckpoint
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	version, err := h.executions.CheckpointCaller(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"version": version})
+}
+
 func (h *Handler) DelegateExecution(c *gin.Context) {
 	var request service.Delegation
 	if err := c.ShouldBindJSON(&request); err != nil {

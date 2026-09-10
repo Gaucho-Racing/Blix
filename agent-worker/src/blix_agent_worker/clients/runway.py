@@ -118,6 +118,23 @@ class RunwayClient:
         )
         return LeaseHeartbeat.model_validate(body)
 
+    async def checkpoint_caller(
+        self,
+        execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        user: dict[str, object],
+    ) -> int:
+        body = await self._post(
+            f"internal/v1/executions/{execution_id}/caller-checkpoints",
+            {
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "user": user,
+            },
+        )
+        return VersionResponse.model_validate(body).version
+
     async def checkpoint_tool(
         self,
         execution_id: str,

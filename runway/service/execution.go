@@ -71,6 +71,18 @@ type LeaseHeartbeat struct {
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
+type CallerCheckpoint struct {
+	WorkerID        string          `json:"worker_id"`
+	ExpectedVersion uint64          `json:"expected_version"`
+	User            json.RawMessage `json:"user"`
+}
+
+type verifiedCallerUser struct {
+	ID       string   `json:"id"`
+	EntityID string   `json:"entity_id"`
+	Groups   []string `json:"groups"`
+}
+
 type Delegation struct {
 	WorkerID        string          `json:"worker_id"`
 	ExpectedVersion uint64          `json:"expected_version"`
@@ -459,6 +471,81 @@ func (s *ExecutionService) HeartbeatExecution(
 		return LeaseHeartbeat{}, ErrConflict
 	}
 	return LeaseHeartbeat{LeaseExpiresAt: leaseExpiresAt}, nil
+}
+
+func (s *ExecutionService) CheckpointCaller(
+	ctx context.Context,
+	executionID string,
+	checkpoint CallerCheckpoint,
+) (uint64, error) {
+	checkpoint.WorkerID = strings.TrimSpace(checkpoint.WorkerID)
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(checkpoint.WorkerID, identifier.Worker) {
+		return 0, fmt.Errorf("%w: execution_id or worker_id is invalid", ErrInvalid)
+	}
+	var user verifiedCallerUser
+	if err := json.Unmarshal(checkpoint.User, &user); err != nil {
+		return 0, fmt.Errorf("%w: user is invalid", ErrInvalid)
+	}
+	if !identifier.IsValid(user.ID, identifier.User) || !identifier.IsValid(user.EntityID, identifier.Entity) {
+		return 0, fmt.Errorf("%w: verified user identity is invalid", ErrInvalid)
+	}
+	if !contains(user.Groups, "BlixUsers") {
+		return 0, fmt.Errorf("%w: verified user is not a BlixUsers member", ErrInvalid)
+	}
+
+	var version uint64
+	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var execution model.AgentExecution
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if execution.Status != model.ExecutionStatusRunning ||
+			execution.ClaimedBy != checkpoint.WorkerID ||
+			!hasActiveLease(execution, time.Now().UTC()) ||
+			execution.Version != checkpoint.ExpectedVersion {
+			return ErrConflict
+		}
+		var run model.Run
+		if err := tx.Select("caller_entity_id", "caller_context").First(&run, "id = ?", execution.RunID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		caller := run.CallerContext.Data()
+		if caller.EntityType != model.EntityTypeUser ||
+			caller.EntityID != user.EntityID ||
+			caller.UserID != user.ID ||
+			run.CallerEntityID != user.EntityID {
+			return ErrConflict
+		}
+		payload, err := json.Marshal(map[string]any{
+			"caller_context": caller,
+			"required_group": "BlixUsers",
+			"user":           checkpoint.User,
+			"worker_id":      checkpoint.WorkerID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(
+			tx,
+			execution.RunID,
+			execution.ID,
+			model.EventTypeCallerVerified,
+			caller.EntityID,
+			payload,
+		); err != nil {
+			return err
+		}
+		leaseExpiresAt := time.Now().UTC().Add(s.leaseDuration)
+		execution.LeaseExpiresAt = &leaseExpiresAt
+		execution.Version++
+		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		version = execution.Version
+		return nil
+	})
+	return version, err
 }
 
 func (s *ExecutionService) DelegateExecution(

@@ -9,22 +9,24 @@ import (
 
 	"github.com/gaucho-racing/blix/runway/model"
 	"github.com/gaucho-racing/blix/runway/pkg/identifier"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 type RunSummary struct {
-	RunID             string    `json:"run_id"`
-	CallerEntityID    string    `json:"caller_entity_id"`
-	Kind              string    `json:"kind"`
-	Status            string    `json:"status"`
-	RootExecutionID   string    `json:"root_execution_id"`
-	AgentID           string    `json:"agent_id"`
-	ExecutionStatus   string    `json:"execution_status"`
-	ExecutionCount    int64     `json:"execution_count"`
-	EventCount        int64     `json:"event_count"`
-	LastEventPosition uint64    `json:"last_event_position"`
-	CreatedAt         time.Time `json:"created_at"`
-	LastActivityAt    time.Time `json:"last_activity_at"`
+	RunID             string                                  `json:"run_id"`
+	CallerEntityID    string                                  `json:"caller_entity_id"`
+	CallerContext     datatypes.JSONType[model.CallerContext] `json:"caller_context"`
+	Kind              string                                  `json:"kind"`
+	Status            string                                  `json:"status"`
+	RootExecutionID   string                                  `json:"root_execution_id"`
+	AgentID           string                                  `json:"agent_id"`
+	ExecutionStatus   string                                  `json:"execution_status"`
+	ExecutionCount    int64                                   `json:"execution_count"`
+	EventCount        int64                                   `json:"event_count"`
+	LastEventPosition uint64                                  `json:"last_event_position"`
+	CreatedAt         time.Time                               `json:"created_at"`
+	LastActivityAt    time.Time                               `json:"last_activity_at"`
 }
 
 type ExecutionSummary struct {
@@ -65,6 +67,7 @@ func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummar
 		SELECT
 			r.id AS run_id,
 			r.caller_entity_id,
+			r.caller_context,
 			r.kind,
 			r.status,
 			r.root_execution_id,
@@ -138,6 +141,7 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 		Run: RunSummary{
 			RunID:             run.ID,
 			CallerEntityID:    run.CallerEntityID,
+			CallerContext:     run.CallerContext,
 			Kind:              run.Kind,
 			Status:            run.Status,
 			RootExecutionID:   run.RootExecutionID,

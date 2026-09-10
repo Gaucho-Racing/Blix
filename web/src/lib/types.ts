@@ -7,9 +7,54 @@ export type ExecutionStatus =
   | "failed"
   | "cancelled"
 
+export interface CallerContext {
+  entity_id?: string
+  entity_type?: "USER" | "SERVICE_ACCOUNT" | string
+  user_id?: string
+  service_account_id?: string
+}
+
+export interface IdentityApplicationSummary {
+  id: string
+  name: string
+  client_id: string
+  icon_url: string
+}
+
+export interface IdentitySummary {
+  id: string
+  type: string
+  name: string
+  username?: string
+  avatar_url?: string
+  application?: IdentityApplicationSummary
+}
+
+export interface VerifiedCallerUser {
+  id: string
+  entity_id: string
+  username?: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  avatar_url?: string
+  initial_role?: string
+  major?: string
+  graduation_year?: number
+  groups?: string[]
+}
+
+export interface CallerVerifiedPayload {
+  caller_context: CallerContext
+  required_group: string
+  user: VerifiedCallerUser
+  worker_id: string
+}
+
 export interface RunSummary {
   run_id: string
   caller_entity_id: string
+  caller_context: CallerContext
   kind: string
   status: string
   root_execution_id: string

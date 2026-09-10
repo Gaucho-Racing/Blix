@@ -156,6 +156,12 @@ class AgentWorker:
 
         try:
             caller_user = await self._resolve_caller(execution)
+            state.version = await self._runway.checkpoint_caller(
+                execution.execution_id,
+                self._worker_id,
+                state.version,
+                caller_user.model_dump(mode="json"),
+            )
             resume_result: AgentResult | None = None
             if execution.waiting_on_execution_id is not None:
                 execution_result = await self._runway.get_execution_result(
