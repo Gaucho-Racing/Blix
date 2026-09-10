@@ -9,6 +9,7 @@ export type ExecutionStatus =
 
 export interface RunSummary {
   run_id: string
+  caller_entity_id: string
   kind: string
   status: string
   root_execution_id: string

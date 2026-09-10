@@ -14,6 +14,7 @@ const (
 	Worker    Prefix = "worker"
 	Outbox    Prefix = "outbox"
 	Job       Prefix = "job"
+	Entity    Prefix = "ent"
 )
 
 func New(prefix Prefix) string {

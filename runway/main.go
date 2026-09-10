@@ -11,6 +11,7 @@ import (
 	"github.com/gaucho-racing/blix/runway/database"
 	"github.com/gaucho-racing/blix/runway/mqtt"
 	"github.com/gaucho-racing/blix/runway/pkg/logger"
+	"github.com/gaucho-racing/blix/runway/pkg/sentinel"
 	"github.com/gaucho-racing/blix/runway/service"
 )
 
@@ -49,11 +50,18 @@ func run(configuration config.Config) error {
 	}()
 
 	workers := service.NewWorkerService(db, workerHub, configuration)
+	sentinelClient := sentinel.NewClient(
+		configuration.SentinelURL,
+		configuration.SentinelClientID,
+		configuration.SentinelClientSecret,
+		configuration.SentinelRedirectURI,
+	)
+	auth := service.NewAuthService(sentinelClient, configuration.SentinelScopes)
 	executions := service.NewExecutionService(db, workers, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
 	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)
 	go outbox.Run(ctx)
 	go leaseReaper.Run(ctx)
 
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), executions, workers, eventHub, workerHub)
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), auth, executions, workers, eventHub, workerHub)
 }

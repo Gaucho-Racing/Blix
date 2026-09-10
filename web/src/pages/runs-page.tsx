@@ -22,7 +22,7 @@ export function RunsPage() {
     const needle = search.trim().toLowerCase()
     if (!needle) return runs
     return runs.filter((run) =>
-      [run.run_id, run.agent_id, run.kind, run.execution_status]
+      [run.run_id, run.caller_entity_id, run.agent_id, run.kind, run.execution_status]
         .some((value) => value.toLowerCase().includes(needle)),
     )
   }, [runs, search])
@@ -71,7 +71,7 @@ export function RunsPage() {
         ) : (
           <div className="run-table-wrap">
             <table className="run-table">
-              <thead><tr><th>Run</th><th>Status</th><th>Executions</th><th>Events</th><th>Last activity</th></tr></thead>
+              <thead><tr><th>Run</th><th>Caller</th><th>Status</th><th>Executions</th><th>Events</th><th>Last activity</th></tr></thead>
               <tbody>
                 {filteredRuns.map((run) => (
                   <tr key={run.run_id}>
@@ -81,6 +81,7 @@ export function RunsPage() {
                         <code>{run.run_id}</code>
                       </Link>
                     </td>
+                    <td><code>{run.caller_entity_id || "—"}</code></td>
                     <td><StatusBadge status={run.execution_status} /></td>
                     <td>{run.execution_count}</td>
                     <td>{run.event_count}</td>

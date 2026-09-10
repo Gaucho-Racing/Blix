@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, Clock3, Database, GitFork, LoaderCircle, Radio } from "lucide-react"
+import { ArrowLeft, Clock3, Database, GitFork, LoaderCircle, Radio, UserRound } from "lucide-react"
 import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 
@@ -48,6 +48,7 @@ export function RunDetailsPage() {
           <code>{run.run_id}</code>
         </div>
         <div className="run-header-meta">
+          <span><UserRound size={14} /> {run.caller_entity_id || "Unknown caller"}</span>
           <span><GitFork size={14} /> {run.execution_count} executions</span>
           <span><Database size={14} /> {run.event_count} events</span>
           <span><Clock3 size={14} /> {formatTimestamp(run.created_at)}</span>

@@ -3,4 +3,4 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$script_dir/.."
-exec docker compose run --rm --no-deps cli
+exec docker compose run --rm --no-deps --service-ports cli

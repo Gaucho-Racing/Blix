@@ -9,6 +9,7 @@ const (
 
 type Run struct {
 	ID              string    `json:"run_id" gorm:"primaryKey"`
+	CallerEntityID  string    `json:"caller_entity_id" gorm:"index"`
 	Kind            string    `json:"kind" gorm:"index;not null"`
 	RootExecutionID string    `json:"root_execution_id" gorm:"uniqueIndex;not null"`
 	Status          string    `json:"status" gorm:"index;not null"`

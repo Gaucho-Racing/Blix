@@ -22,6 +22,15 @@ func respondError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrConflict):
 		status = http.StatusConflict
 		message = err.Error()
+	case errors.Is(err, service.ErrUnauthorized):
+		status = http.StatusUnauthorized
+		message = err.Error()
+	case errors.Is(err, service.ErrForbidden):
+		status = http.StatusForbidden
+		message = err.Error()
+	case errors.Is(err, service.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+		message = err.Error()
 	default:
 		logger.SugarLogger.Errorf("request failed: %v", err)
 	}

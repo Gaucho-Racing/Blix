@@ -9,6 +9,7 @@ from blix_agent_worker.models.agent import (
 from blix_agent_worker.models.common import (
     CallID,
     ContractError,
+    EntityID,
     EventID,
     ExecutionID,
     JobID,
@@ -50,6 +51,7 @@ __all__ = [
     "AgentUsage",
     "CallID",
     "ContractError",
+    "EntityID",
     "ConversationMessage",
     "ConversationMessageRole",
     "EventID",

@@ -4,8 +4,18 @@ from typing import Annotated, Literal
 import ulid
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, JsonValue, ValidationError
 
-
-IdentifierPrefix = Literal["run", "execution", "event", "message", "call", "modelcall", "worker", "outbox", "job"]
+IdentifierPrefix = Literal[
+    "run",
+    "execution",
+    "event",
+    "message",
+    "call",
+    "modelcall",
+    "worker",
+    "outbox",
+    "job",
+    "ent",
+]
 
 
 def _prefixed_ulid_validator(prefix: IdentifierPrefix) -> Callable[[object], object]:
@@ -41,6 +51,7 @@ ModelCallID = _prefixed_ulid("modelcall")
 WorkerID = _prefixed_ulid("worker")
 OutboxID = _prefixed_ulid("outbox")
 JobID = _prefixed_ulid("job")
+EntityID = _prefixed_ulid("ent")
 
 
 def new_ulid(prefix: IdentifierPrefix) -> str:

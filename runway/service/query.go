@@ -14,6 +14,7 @@ import (
 
 type RunSummary struct {
 	RunID             string    `json:"run_id"`
+	CallerEntityID    string    `json:"caller_entity_id"`
 	Kind              string    `json:"kind"`
 	Status            string    `json:"status"`
 	RootExecutionID   string    `json:"root_execution_id"`
@@ -63,6 +64,7 @@ func (s *ExecutionService) ListRuns(ctx context.Context, limit int) ([]RunSummar
 	err := s.database.WithContext(ctx).Raw(`
 		SELECT
 			r.id AS run_id,
+			r.caller_entity_id,
 			r.kind,
 			r.status,
 			r.root_execution_id,
@@ -135,6 +137,7 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 	return RunDetails{
 		Run: RunSummary{
 			RunID:             run.ID,
+			CallerEntityID:    run.CallerEntityID,
 			Kind:              run.Kind,
 			Status:            run.Status,
 			RootExecutionID:   run.RootExecutionID,

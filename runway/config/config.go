@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,11 @@ type Config struct {
 	LeaseSweepInterval      time.Duration
 	WorkerHeartbeatInterval time.Duration
 	WorkerOfflineAfter      time.Duration
+	SentinelURL             string
+	SentinelClientID        string
+	SentinelClientSecret    string
+	SentinelRedirectURI     string
+	SentinelScopes          string
 }
 
 func Load() (Config, error) {
@@ -69,12 +75,29 @@ func Load() (Config, error) {
 		LeaseSweepInterval:      leaseSweepInterval,
 		WorkerHeartbeatInterval: workerHeartbeatInterval,
 		WorkerOfflineAfter:      workerOfflineAfter,
+		SentinelURL:             strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
+		SentinelClientID:        value("SENTINEL_CLIENT_ID", ""),
+		SentinelClientSecret:    value("SENTINEL_CLIENT_SECRET", ""),
+		SentinelRedirectURI:     value("SENTINEL_REDIRECT_URI", "http://localhost:14565/callback"),
+		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")
 	}
 	if configuration.MQTTRunEventTopicPrefix == "" || strings.ContainsAny(configuration.MQTTRunEventTopicPrefix, "+#") {
 		return Config{}, fmt.Errorf("MQTT_RUN_EVENT_TOPIC_PREFIX must be a concrete MQTT topic prefix")
+	}
+	if err := validateHTTPURL(configuration.SentinelURL); err != nil {
+		return Config{}, fmt.Errorf("SENTINEL_URL %w", err)
+	}
+	if err := validateHTTPURL(configuration.SentinelRedirectURI); err != nil {
+		return Config{}, fmt.Errorf("SENTINEL_REDIRECT_URI %w", err)
+	}
+	if (configuration.SentinelClientID == "") != (configuration.SentinelClientSecret == "") {
+		return Config{}, fmt.Errorf("SENTINEL_CLIENT_ID and SENTINEL_CLIENT_SECRET must be configured together")
+	}
+	if configuration.SentinelScopes == "" {
+		return Config{}, fmt.Errorf("SENTINEL_SCOPES cannot be empty")
 	}
 	return configuration, nil
 }
@@ -88,4 +111,12 @@ func value(name string, fallback string) string {
 		return configured
 	}
 	return fallback
+}
+
+func validateHTTPURL(raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("must be a valid HTTP or HTTPS URL")
+	}
+	return nil
 }

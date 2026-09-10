@@ -40,12 +40,17 @@ func (h *Handler) GetRun(c *gin.Context) {
 }
 
 func (h *Handler) CreateRun(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	var request createRunRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	created, err := h.executions.CreateRun(c.Request.Context(), request.AgentID)
+	created, err := h.executions.CreateRun(c.Request.Context(), request.AgentID, caller.EntityID)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -54,12 +59,17 @@ func (h *Handler) CreateRun(c *gin.Context) {
 }
 
 func (h *Handler) AppendMessage(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	var request appendMessageRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	appended, err := h.executions.AppendUserMessage(c.Request.Context(), c.Param("runID"), request.Content)
+	appended, err := h.executions.AppendUserMessage(c.Request.Context(), c.Param("runID"), caller.EntityID, request.Content)
 	if err != nil {
 		respondError(c, err)
 		return

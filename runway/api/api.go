@@ -13,6 +13,7 @@ import (
 )
 
 type Handler struct {
+	auth          *service.AuthService
 	executions    *service.ExecutionService
 	workers       *service.WorkerService
 	events        *service.EventHub
@@ -23,13 +24,14 @@ func Run(
 	ctx context.Context,
 	port string,
 	production bool,
+	auth *service.AuthService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) error {
 	api := InitializeRouter(production)
-	InitializeRoutes(api, executions, workers, events, workerUpdates)
+	InitializeRoutes(api, auth, executions, workers, events, workerUpdates)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api,
@@ -66,20 +68,26 @@ func InitializeRouter(production bool) *gin.Engine {
 
 func InitializeRoutes(
 	router *gin.Engine,
+	auth *service.AuthService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) {
-	handler := &Handler{executions: executions, workers: workers, events: events, workerUpdates: workerUpdates}
+	handler := &Handler{auth: auth, executions: executions, workers: workers, events: events, workerUpdates: workerUpdates}
 	router.GET("/ping", Ping)
+	router.GET("/v1/auth/config", handler.GetAuthConfiguration)
+	router.POST("/v1/auth/login", handler.LoginWithSentinel)
+	router.GET("/v1/auth/session", RequireAuthentication(auth), handler.GetSession)
+	router.POST("/v1/auth/refresh", handler.RefreshSession)
+	router.POST("/v1/auth/logout", handler.Logout)
 	router.GET("/v1/events/stream", handler.StreamAllEvents)
 	router.GET("/v1/workers", handler.ListWorkers)
 	router.GET("/v1/workers/stream", handler.StreamWorkers)
 	router.GET("/v1/runs", handler.ListRuns)
-	router.POST("/v1/runs", handler.CreateRun)
+	router.POST("/v1/runs", RequireAuthentication(auth), handler.CreateRun)
 	router.GET("/v1/runs/:runID", handler.GetRun)
-	router.POST("/v1/runs/:runID/messages", handler.AppendMessage)
+	router.POST("/v1/runs/:runID/messages", RequireAuthentication(auth), handler.AppendMessage)
 	router.GET("/v1/runs/:runID/events", handler.ListEvents)
 	router.GET("/v1/runs/:runID/events/stream", handler.StreamRunEvents)
 	router.GET("/v1/executions/:executionID", handler.GetExecution)

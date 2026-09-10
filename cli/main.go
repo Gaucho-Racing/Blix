@@ -38,6 +38,8 @@ var (
 type client struct {
 	baseURL string
 	http    *http.Client
+	session *tokenSession
+	caller  *callerContext
 }
 
 type run struct {
@@ -107,6 +109,15 @@ type apiError struct {
 	Error string `json:"error"`
 }
 
+type httpStatusError struct {
+	status  int
+	message string
+}
+
+func (e *httpStatusError) Error() string {
+	return e.message
+}
+
 type eventsMsg struct {
 	events []executionEvent
 	err    error
@@ -136,6 +147,12 @@ func main() {
 		baseURL: runwayURL,
 		http:    &http.Client{Timeout: 15 * time.Second},
 	}
+	stored, err := loadSession()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, errorPanel("Could not load the saved session: "+err.Error()))
+	} else {
+		api.session = stored
+	}
 	if err := runSession(ctx, api); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
 		os.Exit(1)
@@ -143,22 +160,32 @@ func main() {
 }
 
 func runSession(ctx context.Context, api *client) error {
-	current, err := createRunWithRetry(ctx, api)
-	if err != nil {
-		return err
+	var current *createdRun
+	if api.session != nil {
+		caller, err := api.getSession(ctx)
+		if err == nil {
+			api.caller = &caller
+			created, createErr := createRunWithRetry(ctx, api)
+			if createErr != nil {
+				return createErr
+			}
+			current = &created
+		} else {
+			api.logout(ctx)
+		}
 	}
-	printBanner(current)
+	printBanner(current, api.caller)
 
-	input, err := newSessionInput()
+	terminalInput, err := newSessionInput()
 	if err != nil {
 		return fmt.Errorf("initialize terminal input: %w", err)
 	}
-	defer input.close()
-	stopInput := context.AfterFunc(ctx, input.close)
+	defer terminalInput.close()
+	stopInput := context.AfterFunc(ctx, terminalInput.close)
 	defer stopInput()
 
 	for {
-		line, err := input.read()
+		line, err := terminalInput.read()
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -168,33 +195,63 @@ func runSession(ctx context.Context, api *client) error {
 		if err != nil {
 			return err
 		}
-		input := strings.TrimSpace(line)
-		if input == "" {
+		command := strings.TrimSpace(line)
+		if command == "" {
 			continue
 		}
-		switch input {
+		switch command {
 		case "/quit":
 			fmt.Println(mutedStyle.Render("Session ended."))
 			return nil
 		case "/help":
 			printHelp()
 			continue
-		case "/reset":
-			current, err = api.createRun(ctx)
+		case "/login":
+			caller, err := api.login(ctx)
 			if err != nil {
 				fmt.Println(errorPanel(err.Error()))
 				continue
 			}
+			created, err := createRunWithRetry(ctx, api)
+			if err != nil {
+				fmt.Println(errorPanel(err.Error()))
+				continue
+			}
+			current = &created
+			fmt.Println(mutedStyle.Render("Signed in as " + caller.EntityID + "."))
+			printBanner(current, api.caller)
+			continue
+		case "/logout":
+			api.logout(ctx)
+			current = nil
+			fmt.Println(mutedStyle.Render("Signed out."))
+			printBanner(current, nil)
+			continue
+		case "/reset":
+			if api.caller == nil {
+				fmt.Println(errorPanel("Sign in with /login before starting a run."))
+				continue
+			}
+			created, err := api.createRun(ctx)
+			if err != nil {
+				fmt.Println(errorPanel(err.Error()))
+				continue
+			}
+			current = &created
 			fmt.Println(mutedStyle.Render("Run reset."))
-			printBanner(current)
+			printBanner(current, api.caller)
 			continue
 		}
-		if strings.HasPrefix(input, "/") {
-			fmt.Println(errorPanel("Unknown command: " + input))
+		if strings.HasPrefix(command, "/") {
+			fmt.Println(errorPanel("Unknown command: " + command))
+			continue
+		}
+		if current == nil {
+			fmt.Println(errorPanel("Sign in with /login before sending a message."))
 			continue
 		}
 
-		appended, err := api.appendMessage(ctx, current.Run.ID, input)
+		appended, err := api.appendMessage(ctx, current.Run.ID, command)
 		if err != nil {
 			fmt.Println(errorPanel(err.Error()))
 			continue
@@ -472,6 +529,32 @@ func (c *client) listEvents(ctx context.Context, runID string, after uint64) ([]
 }
 
 func (c *client) request(ctx context.Context, method string, path string, payload any, destination any) error {
+	err := c.doRequest(ctx, method, path, payload, destination, true)
+	var statusError *httpStatusError
+	if !errors.As(err, &statusError) || statusError.status != http.StatusUnauthorized || c.session == nil || c.session.RefreshToken == "" {
+		return err
+	}
+	if refreshErr := c.refreshSession(ctx); refreshErr != nil {
+		c.session = nil
+		c.caller = nil
+		_ = removeSession()
+		return err
+	}
+	return c.doRequest(ctx, method, path, payload, destination, true)
+}
+
+func (c *client) requestWithoutAuth(ctx context.Context, method string, path string, payload any, destination any) error {
+	return c.doRequest(ctx, method, path, payload, destination, false)
+}
+
+func (c *client) doRequest(
+	ctx context.Context,
+	method string,
+	path string,
+	payload any,
+	destination any,
+	includeAuth bool,
+) error {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -485,6 +568,9 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 		return err
 	}
 	request.Header.Set("Accept", "application/json")
+	if includeAuth && c.session != nil && c.session.AccessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+c.session.AccessToken)
+	}
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -496,9 +582,12 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 	if response.StatusCode >= http.StatusBadRequest {
 		var apiErr apiError
 		if json.NewDecoder(response.Body).Decode(&apiErr) == nil && apiErr.Error != "" {
-			return errors.New(apiErr.Error)
+			return &httpStatusError{status: response.StatusCode, message: apiErr.Error}
 		}
-		return fmt.Errorf("runway returned HTTP %d", response.StatusCode)
+		return &httpStatusError{status: response.StatusCode, message: fmt.Sprintf("runway returned HTTP %d", response.StatusCode)}
+	}
+	if destination == nil || response.StatusCode == http.StatusNoContent {
+		return nil
 	}
 	if err := json.NewDecoder(response.Body).Decode(destination); err != nil {
 		return fmt.Errorf("decode runway response: %w", err)
@@ -506,12 +595,23 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 	return nil
 }
 
-func printBanner(current createdRun) {
+func printBanner(current *createdRun, caller *callerContext) {
+	runID := "—"
+	executionID := "—"
+	callerID := "not authenticated"
+	if current != nil {
+		runID = current.Run.ID
+		executionID = current.Execution.ID
+	}
+	if caller != nil {
+		callerID = caller.EntityID
+	}
 	lines := []string{
 		mutedStyle.Render("AGENT      ") + mutedStyle.Render(agentID),
-		mutedStyle.Render("RUN        ") + mutedStyle.Render(current.Run.ID),
-		mutedStyle.Render("EXECUTION  ") + mutedStyle.Render(current.Execution.ID),
-		mutedStyle.Render("COMMANDS   ") + mutedStyle.Render("/help  /reset  /quit"),
+		mutedStyle.Render("CALLER     ") + mutedStyle.Render(callerID),
+		mutedStyle.Render("RUN        ") + mutedStyle.Render(runID),
+		mutedStyle.Render("EXECUTION  ") + mutedStyle.Render(executionID),
+		mutedStyle.Render("COMMANDS   ") + mutedStyle.Render("/login  /logout  /help  /reset  /quit"),
 	}
 	width := terminalWidth() - 2
 	if width < 60 {
@@ -525,6 +625,8 @@ func printBanner(current createdRun) {
 
 func printHelp() {
 	content := strings.Join([]string{
+		pinkStyle.Render("/login") + "  Sign in with Sentinel",
+		pinkStyle.Render("/logout") + " Sign out and clear the saved session",
 		pinkStyle.Render("/help") + "   Show available commands",
 		pinkStyle.Render("/reset") + "  Start a fresh run",
 		pinkStyle.Render("/quit") + "   End the session",

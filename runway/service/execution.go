@@ -18,9 +18,12 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("resource not found")
-	ErrConflict = errors.New("resource state conflict")
-	ErrInvalid  = errors.New("invalid request")
+	ErrNotFound     = errors.New("resource not found")
+	ErrConflict     = errors.New("resource state conflict")
+	ErrInvalid      = errors.New("invalid request")
+	ErrForbidden    = errors.New("forbidden")
+	ErrUnauthorized = errors.New("unauthorized")
+	ErrUnavailable  = errors.New("service unavailable")
 )
 
 var versionedIdentifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*_v[1-9][0-9]*$`)
@@ -46,6 +49,7 @@ type AppendedMessage struct {
 
 type ExecutionContext struct {
 	RunID                string          `json:"run_id"`
+	CallerEntityID       string          `json:"caller_entity_id"`
 	ExecutionID          string          `json:"execution_id"`
 	ParentExecutionID    *string         `json:"parent_execution_id"`
 	AgentID              string          `json:"agent_id"`
@@ -185,15 +189,20 @@ func NewExecutionService(database *gorm.DB, workers *WorkerService, configuratio
 	}
 }
 
-func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (CreatedRun, error) {
+func (s *ExecutionService) CreateRun(ctx context.Context, agentID string, callerEntityID string) (CreatedRun, error) {
 	agentID = strings.TrimSpace(agentID)
 	if !versionedIdentifierPattern.MatchString(agentID) {
 		return CreatedRun{}, fmt.Errorf("%w: agent_id must be a versioned identifier", ErrInvalid)
 	}
+	callerEntityID = strings.TrimSpace(callerEntityID)
+	if !identifier.IsValid(callerEntityID, identifier.Entity) {
+		return CreatedRun{}, fmt.Errorf("%w: caller entity_id is invalid", ErrInvalid)
+	}
 	run := model.Run{
-		ID:     identifier.New(identifier.Run),
-		Kind:   model.RunKindConversation,
-		Status: model.RunStatusActive,
+		ID:             identifier.New(identifier.Run),
+		CallerEntityID: callerEntityID,
+		Kind:           model.RunKindConversation,
+		Status:         model.RunStatusActive,
 	}
 	execution := model.AgentExecution{
 		ID:      identifier.New(identifier.Execution),
@@ -214,6 +223,7 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (Creat
 			"run_id":            run.ID,
 			"root_execution_id": execution.ID,
 			"agent_id":          execution.AgentID,
+			"caller_entity_id":  run.CallerEntityID,
 		})
 		if err != nil {
 			return err
@@ -226,9 +236,13 @@ func (s *ExecutionService) CreateRun(ctx context.Context, agentID string) (Creat
 	return CreatedRun{Run: run, Execution: execution}, nil
 }
 
-func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, content string) (AppendedMessage, error) {
+func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, callerEntityID string, content string) (AppendedMessage, error) {
 	if !identifier.IsValid(runID, identifier.Run) {
 		return AppendedMessage{}, fmt.Errorf("%w: run_id is invalid", ErrInvalid)
+	}
+	callerEntityID = strings.TrimSpace(callerEntityID)
+	if !identifier.IsValid(callerEntityID, identifier.Entity) {
+		return AppendedMessage{}, fmt.Errorf("%w: caller entity_id is invalid", ErrInvalid)
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -239,6 +253,9 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		var run model.Run
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, "id = ?", runID).Error; err != nil {
 			return mapDatabaseError(err)
+		}
+		if run.CallerEntityID != callerEntityID {
+			return ErrForbidden
 		}
 		var execution model.AgentExecution
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", run.RootExecutionID).Error; err != nil {
@@ -359,8 +376,13 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		if err := tx.Where("parent_execution_id = ?", execution.ID).Order("event_position ASC").Find(&messages).Error; err != nil {
 			return err
 		}
+		var run model.Run
+		if err := tx.Select("caller_entity_id").First(&run, "id = ?", execution.RunID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
 		claimed = ExecutionContext{
 			RunID:                execution.RunID,
+			CallerEntityID:       run.CallerEntityID,
 			ExecutionID:          execution.ID,
 			ParentExecutionID:    execution.ParentExecutionID,
 			AgentID:              execution.AgentID,

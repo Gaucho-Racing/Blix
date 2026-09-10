@@ -5,7 +5,15 @@ import httpx
 from pydantic import Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
-from blix_agent_worker.models.common import ContractError, ContractModel, ExecutionID, MessageID, RunID, WorkerID
+from blix_agent_worker.models.common import (
+    ContractError,
+    ContractModel,
+    EntityID,
+    ExecutionID,
+    MessageID,
+    RunID,
+    WorkerID,
+)
 from blix_agent_worker.models.llm import ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
@@ -29,6 +37,7 @@ class RunwayMessage(ContractModel):
 
 class ExecutionContext(ContractModel):
     run_id: RunID
+    caller_entity_id: EntityID
     execution_id: ExecutionID
     parent_execution_id: ExecutionID | None = None
     agent_id: str
