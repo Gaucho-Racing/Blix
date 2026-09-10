@@ -25,7 +25,16 @@ import (
 
 const agentID = "general_conversation_v1"
 
-const blixUsersGroup = "BlixUsers"
+const (
+	blixUsersGroup         = "BlixUsers"
+	nonmemberAccessMessage = "You do not have access to Blix! Please request to join the BlixUsers group."
+	blixBanner             = `██████╗ ██╗     ██╗██╗  ██╗
+██╔══██╗██║     ██║╚██╗██╔╝
+██████╔╝██║     ██║ ╚███╔╝
+██╔══██╗██║     ██║ ██╔██╗
+██████╔╝███████╗██║██╔╝ ██╗
+╚═════╝ ╚══════╝╚═╝╚═╝  ╚═╝`
+)
 
 var (
 	pink        = lipgloss.Color("#E105A3")
@@ -181,15 +190,15 @@ func runSession(ctx context.Context, api *client) error {
 					}
 					current = &created
 				} else {
-					startupError = fmt.Errorf("your Sentinel user is not a member of %s", blixUsersGroup)
+					startupError = errors.New(nonmemberAccessMessage)
 				}
 			}
 		} else {
 			api.logout(ctx)
 		}
 	}
-	printBanner(current, api.caller)
 	printWelcome(api, startupError)
+	printRuntimePanel(current, api.caller)
 
 	terminalInput, err := newSessionInput()
 	if err != nil {
@@ -222,15 +231,15 @@ func runSession(ctx context.Context, api *client) error {
 			printHelp()
 			continue
 		case "/login":
-			caller, err := api.login(ctx)
+			_, err := api.login(ctx)
 			if err != nil {
 				fmt.Println(errorPanel(err.Error()))
 				continue
 			}
 			if !api.canUseBlix() {
 				current = nil
-				printBanner(current, api.caller)
-				printWelcome(api, fmt.Errorf("your Sentinel user is not a member of %s", blixUsersGroup))
+				printWelcome(api, errors.New(nonmemberAccessMessage))
+				printRuntimePanel(current, api.caller)
 				continue
 			}
 			created, err := createRunWithRetry(ctx, api)
@@ -239,16 +248,14 @@ func runSession(ctx context.Context, api *client) error {
 				continue
 			}
 			current = &created
-			fmt.Println(mutedStyle.Render("Signed in as " + caller.EntityID + "."))
-			printBanner(current, api.caller)
 			printWelcome(api, nil)
+			printRuntimePanel(current, api.caller)
 			continue
 		case "/logout":
 			api.logout(ctx)
 			current = nil
-			fmt.Println(mutedStyle.Render("Signed out."))
-			printBanner(current, nil)
 			printWelcome(api, nil)
+			printRuntimePanel(current, nil)
 			continue
 		case "/reset":
 			if !api.canUseBlix() {
@@ -262,7 +269,7 @@ func runSession(ctx context.Context, api *client) error {
 			}
 			current = &created
 			fmt.Println(mutedStyle.Render("Run reset."))
-			printBanner(current, api.caller)
+			printRuntimePanel(current, api.caller)
 			continue
 		}
 		if strings.HasPrefix(command, "/") {
@@ -589,7 +596,7 @@ func (c *client) accessMessage() string {
 	if c.user == nil {
 		return "Your Sentinel profile could not be verified. Sign in again with /login."
 	}
-	return "Your Sentinel user must be a member of " + blixUsersGroup + " to use Blix."
+	return nonmemberAccessMessage
 }
 
 func (c *client) requestWithoutAuth(ctx context.Context, method string, path string, payload any, destination any) error {
@@ -644,7 +651,7 @@ func (c *client) doRequest(
 	return nil
 }
 
-func printBanner(current *createdRun, caller *callerContext) {
+func printRuntimePanel(current *createdRun, caller *callerContext) {
 	runID := "—"
 	executionID := "—"
 	callerID := "not authenticated"
@@ -667,9 +674,7 @@ func printBanner(current *createdRun, caller *callerContext) {
 		width = 60
 	}
 	panel := borderStyle.Width(width - 6).Render(strings.Join(lines, "\n"))
-	title := pinkStyle.Render(" BLIX ")
-	fmt.Println("\n" + title)
-	fmt.Println(panel)
+	fmt.Println("\n" + panel)
 }
 
 func printWelcome(api *client, startupError error) {
@@ -684,6 +689,8 @@ func printWelcome(api *client, startupError error) {
 		Width(width)
 	if api.caller == nil {
 		content := strings.Join([]string{
+			pinkStyle.Render(blixBanner),
+			"",
 			pinkStyle.Render("Welcome to Blix"),
 			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
 			"Run " + pinkStyle.Render("/login") + " to continue.",
@@ -697,6 +704,8 @@ func printWelcome(api *client, startupError error) {
 			message = startupError.Error()
 		}
 		content := strings.Join([]string{
+			pinkStyle.Render(blixBanner),
+			"",
 			pinkStyle.Render("Signed in"),
 			mutedStyle.Render(api.caller.EntityID),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(message),
@@ -711,10 +720,6 @@ func printWelcome(api *client, startupError error) {
 	if name == "" {
 		name = api.user.Email
 	}
-	access := lipgloss.NewStyle().Foreground(lipgloss.Color("#25855A")).Render("● BlixUsers access verified")
-	if !api.canUseBlix() {
-		access = lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render("● BlixUsers membership required")
-	}
 	identity := strings.TrimSpace(api.user.Email)
 	if api.user.Username != "" {
 		if identity != "" {
@@ -722,7 +727,10 @@ func printWelcome(api *client, startupError error) {
 		}
 		identity += "@" + api.user.Username
 	}
-	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity), access}
+	content := []string{pinkStyle.Render(blixBanner), "", pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
+	if !api.canUseBlix() {
+		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(nonmemberAccessMessage))
+	}
 	if startupError != nil && api.canUseBlix() {
 		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(startupError.Error()))
 	}
