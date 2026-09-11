@@ -332,7 +332,13 @@ export function ChatPage() {
                     return (
                       <div className="chat-turn" key={turn.user.event_id}>
                         <ChatMessage content={eventContent(turn.user)} role="user" userAvatarURL={auth.user?.avatar_url} />
-                        <ChatActivity active={isLast && turnActive && !turn.assistant && !turn.failure} events={turn.activity} executions={executions} />
+                        <ChatActivity
+                          active={isLast && turnActive && !turn.assistant && !turn.failure}
+                          completedAt={turn.assistant?.created_at ?? turn.failure?.created_at}
+                          events={turn.activity}
+                          executions={executions}
+                          startedAt={turn.user.created_at}
+                        />
                         {turn.assistant && <ChatMessage content={eventContent(turn.assistant)} role="assistant" />}
                         {turn.failure && <div className="chat-response-error"><TriangleAlert size={15} /><span>{failureContent(turn.failure)}</span></div>}
                       </div>

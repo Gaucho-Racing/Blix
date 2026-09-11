@@ -17,7 +17,7 @@ interface ActivityItem {
   eventID: string
   label: string
   detail: string
-  status: string
+  status?: string
   icon: ComponentType<{ size?: number }>
   danger?: boolean
 }
@@ -40,14 +40,11 @@ function activityItems(events: ExecutionEvent[], executions: ExecutionSummary[])
 
   return events.flatMap((event): ActivityItem[] => {
     if (event.type === "model.response_v1") {
-      const input = readNumber(event.payload, "input_tokens") ?? 0
-      const output = readNumber(event.payload, "output_tokens") ?? 0
       const sequence = readNumber(event.payload, "sequence") ?? 1
       return [{
         eventID: event.event_id,
         label: `Model call ${sequence}`,
         detail: readString(event.payload, "model") ?? "Language model",
-        status: `${(input + output).toLocaleString()} tokens`,
         icon: BrainCircuit,
       }]
     }
@@ -114,11 +111,25 @@ interface ChatActivityProps {
   events: ExecutionEvent[]
   executions: ExecutionSummary[]
   active: boolean
+  startedAt?: string
+  completedAt?: string
 }
 
-export function ChatActivity({ events, executions, active }: ChatActivityProps) {
+function formatDuration(startedAt?: string, completedAt?: string): string | null {
+  if (!startedAt || !completedAt) return null
+  const elapsedMilliseconds = Date.parse(completedAt) - Date.parse(startedAt)
+  if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds < 0) return null
+  const elapsedSeconds = elapsedMilliseconds / 1_000
+  const roundedSeconds = elapsedSeconds < 10
+    ? Math.round(elapsedSeconds * 10) / 10
+    : Math.round(elapsedSeconds)
+  return `${roundedSeconds} ${roundedSeconds === 1 ? "second" : "seconds"}`
+}
+
+export function ChatActivity({ events, executions, active, startedAt, completedAt }: ChatActivityProps) {
   const items = activityItems(events, executions)
   const failed = items.some((item) => item.danger)
+  const duration = formatDuration(startedAt, completedAt)
   if (!active && items.length === 0) return null
 
   return (
@@ -131,7 +142,10 @@ export function ChatActivity({ events, executions, active }: ChatActivityProps) 
           {active ? <span className="thinking-orbit"><i /><i /><i /></span> : failed ? <CircleAlert size={14} /> : <Check size={14} />}
           {active ? "Blix is working" : failed ? "Run failed" : `${items.length} ${items.length === 1 ? "step" : "steps"} completed`}
         </span>
-        {items.length > 0 && <ChevronDown className="chat-activity-chevron" size={14} />}
+        <span className="chat-activity-summary-meta">
+          {!active && duration && <span>Finished in {duration}</span>}
+          {items.length > 0 && <ChevronDown className="chat-activity-chevron" size={14} />}
+        </span>
       </summary>
       {items.length > 0 && (
         <div className="chat-activity-list">
@@ -139,7 +153,7 @@ export function ChatActivity({ events, executions, active }: ChatActivityProps) 
             <div className={`chat-activity-item${danger ? " danger" : ""}`} key={eventID}>
               <span className="chat-activity-icon"><Icon size={13} /></span>
               <span className="chat-activity-copy"><strong>{label}</strong><small>{detail}</small></span>
-              <span className="chat-activity-status">{status}</span>
+              {status && <span className="chat-activity-status">{status}</span>}
             </div>
           ))}
         </div>
