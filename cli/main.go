@@ -39,6 +39,7 @@ const (
 
 var (
 	pink        = lipgloss.Color("#F20AA6")
+	softPink    = lipgloss.Color("#B77A9F")
 	muted       = lipgloss.Color("#918A95")
 	white       = lipgloss.Color("#F3EFF4")
 	green       = lipgloss.Color("#91CF7A")
@@ -323,6 +324,13 @@ func runSession(ctx context.Context, api *client) error {
 				fmt.Println(mutedStyle.Render("Already connected to ") + userStyle.Render(endpoint))
 				continue
 			}
+			validationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err = validateEndpoint(validationCtx, api.http, endpoint)
+			cancel()
+			if err != nil {
+				fmt.Println(errorPanel("Could not connect to " + endpoint + ": " + err.Error()))
+				continue
+			}
 			stored, err := loadCredentials(endpoint)
 			if err != nil {
 				fmt.Println(errorPanel("Could not load credentials for that endpoint: " + err.Error()))
@@ -357,6 +365,14 @@ func runSession(ctx context.Context, api *client) error {
 		}
 		fmt.Println(responsePanel(content))
 	}
+}
+
+func validateEndpoint(ctx context.Context, httpClient *http.Client, endpoint string) error {
+	candidate := &client{baseURL: endpoint, http: httpClient}
+	if err := candidate.requestWithoutAuth(ctx, http.MethodGet, "/api/ping", nil, nil); err != nil {
+		return fmt.Errorf("Runway ping failed: %w", err)
+	}
+	return nil
 }
 
 func normalizeEndpoint(value string) (string, error) {
@@ -450,12 +466,16 @@ func inputPrompt() string {
 
 func userMessageCard(message string) string {
 	width := chatWidth()
-	contentWidth := max(1, width-2)
-	content := pinkStyle.Render("❯") + "  " + userStyle.Render(message)
+	contentWidth := max(1, width-6)
+	arrowStyle := lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
+	messageStyle := lipgloss.NewStyle().Foreground(white).Background(userSurface)
+	content := arrowStyle.Render("❯") + "  " + messageStyle.Render(message)
 	content = lipgloss.Wrap(content, contentWidth, " ")
 	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(softPink).
 		Background(userSurface).
-		Padding(0, 1).
+		Padding(0, 2).
 		MarginLeft(2).
 		Width(width).
 		Render(content)
@@ -921,11 +941,11 @@ func sessionMetadata(current *createdRun, caller *callerContext, endpoint string
 		label string
 		value string
 	}{
-		{label: "endpoint", value: endpoint},
 		{label: "agent", value: agentID},
 		{label: "caller", value: callerID},
 		{label: "run", value: runID},
 		{label: "execution", value: executionID},
+		{label: "endpoint", value: endpoint},
 	}
 	lines := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -1017,6 +1037,7 @@ func responsePanel(content string) string {
 		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderLeftForeground(pink).
 		Padding(0, 2).
+		MarginTop(1).
 		MarginLeft(2).
 		Width(width).
 		Render(content)
@@ -1047,9 +1068,9 @@ func errorPanel(message string) string {
 }
 
 func agentHeader(status string) string {
-	left := "  " + lipgloss.NewStyle().Bold(true).Foreground(pink).Render("◆  blix")
+	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("●  blix")
 	right := mutedStyle.Render(status)
-	return alignedRow(left, right, chatWidth())
+	return "  " + alignedRow(left, right, chatWidth())
 }
 
 func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
@@ -1079,8 +1100,14 @@ func activityLine(depth int, kind string, label string, status string) string {
 	if status != "" {
 		right = statusStyle.Render("[" + status + "]")
 	}
-	prefix := "  " + strings.Repeat("│  ", depth) + "├─ "
-	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(pink).Width(7).Render(kind)
+	prefix := strings.Repeat("│  ", depth) + "├─ "
+	kindColor := softPink
+	if kind == "agent" {
+		kindColor = pink
+	} else if kind == "runtime" {
+		kindColor = muted
+	}
+	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(kindColor).Width(7).Render(kind)
 	label = truncateText(label, width-lipgloss.Width(prefix)-lipgloss.Width(kindLabel)-lipgloss.Width(right)-1)
 	left := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -1088,7 +1115,7 @@ func activityLine(depth int, kind string, label string, status string) string {
 		kindLabel,
 		mutedStyle.Render(label),
 	)
-	return alignedRow(left, right, width)
+	return "  " + alignedRow(left, right, width)
 }
 
 func verticalRule(height int) string {
