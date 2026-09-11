@@ -28,22 +28,19 @@ const agentID = "general_conversation_v1"
 const (
 	blixUsersGroup         = "BlixUsers"
 	nonmemberAccessMessage = "You do not have access to Blix! Please request to join the BlixUsers group."
-	blixBanner             = `██████╗ ██╗     ██╗██╗  ██╗
-██╔══██╗██║     ██║╚██╗██╔╝
-██████╔╝██║     ██║ ╚███╔╝
-██╔══██╗██║     ██║ ██╔██╗
-██████╔╝███████╗██║██╔╝ ██╗
-╚═════╝ ╚══════╝╚═╝╚═╝  ╚═╝`
 )
 
 var (
-	pink        = lipgloss.Color("#E105A3")
-	muted       = lipgloss.Color("#9893A3")
-	white       = lipgloss.Color("#F3F1F6")
-	pinkStyle   = lipgloss.NewStyle().Bold(true).Foreground(pink)
-	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
-	userStyle   = lipgloss.NewStyle().Bold(true).Foreground(white)
-	borderStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(pink).Padding(0, 2)
+	pink       = lipgloss.Color("#F20AA6")
+	muted      = lipgloss.Color("#918A95")
+	white      = lipgloss.Color("#F3EFF4")
+	green      = lipgloss.Color("#91CF7A")
+	amber      = lipgloss.Color("#E4B866")
+	red        = lipgloss.Color("#FF6B7A")
+	surface    = lipgloss.Color("#211F22")
+	pinkStyle  = lipgloss.NewStyle().Bold(true).Foreground(pink)
+	mutedStyle = lipgloss.NewStyle().Foreground(muted)
+	userStyle  = lipgloss.NewStyle().Bold(true).Foreground(white)
 )
 
 type client struct {
@@ -335,7 +332,13 @@ func (i *sessionInput) close() {
 }
 
 func inputPrompt() string {
-	return userStyle.Render("●  you") + " " + mutedStyle.Render("›") + " "
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(pink).
+		Background(surface).
+		PaddingLeft(1).
+		PaddingRight(1).
+		Render("❯") + " "
 }
 
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
@@ -356,7 +359,7 @@ func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 }
 
 func runTurn(ctx context.Context, api *client, runID string, after uint64) (string, error) {
-	fmt.Println(pinkStyle.Render("●  blix"))
+	fmt.Println(agentHeader("working"))
 
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -419,7 +422,7 @@ func (s *turnStatus) render() {
 		return
 	}
 	frame := pinkStyle.Render(s.frames[s.frame])
-	fmt.Print("\r\x1b[2K   " + frame + mutedStyle.Render("Blix is thinking"))
+	fmt.Print("\r\x1b[2K  " + mutedStyle.Render("│") + " " + frame + " " + mutedStyle.Render("thinking"))
 }
 
 func (s *turnStatus) clear() {
@@ -439,13 +442,13 @@ func applyEvent(event executionEvent, toolIDs map[string]string) (string, string
 	case "agent.call_v1":
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			activity := mutedStyle.Render(fmt.Sprintf("   ↳  agent  %s  ·  queued", payload.AgentID))
+			activity := activityLine("agent", payload.AgentID, "queued")
 			return "", activity, false, nil
 		}
 	case "agent.result_v1":
 		var payload agentResultPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			activity := mutedStyle.Render(fmt.Sprintf("   ↳  agent  %s  ·  %s", payload.AgentID, payload.Status))
+			activity := activityLine("agent", payload.AgentID, payload.Status)
 			return "", activity, false, nil
 		}
 	case "tool.call_v1":
@@ -460,18 +463,17 @@ func applyEvent(event executionEvent, toolIDs map[string]string) (string, string
 			if toolID == "" {
 				toolID = "tool"
 			}
-			activity := mutedStyle.Render(fmt.Sprintf("   ↳  tool   %s  ·  %s", toolID, payload.Status))
+			activity := activityLine("tool", toolID, payload.Status)
 			return "", activity, false, nil
 		}
 	case "model.response_v1":
 		var payload modelResponsePayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			tokens := payload.InputTokens + payload.OutputTokens
-			activity := mutedStyle.Render(fmt.Sprintf("   ↳  model  call %d  ·  %d tokens", payload.Sequence, tokens))
+			activity := activityLine("model", fmt.Sprintf("call %d", payload.Sequence), "done")
 			return "", activity, false, nil
 		}
 	case "execution.lease_expired_v1":
-		return "", mutedStyle.Render("   ↳  execution lease expired  ·  requeued"), false, nil
+		return "", activityLine("runtime", "execution lease expired", "requeued"), false, nil
 	case "message.assistant_v1":
 		var payload assistantPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {
@@ -648,19 +650,59 @@ func (c *client) doRequest(
 }
 
 func printSessionPanel(current *createdRun, api *client, startupError error) {
-	width := terminalWidth() - 8
-	if width < 60 {
-		width = 60
+	width := panelWidth(112)
+	contentWidth := width - 6
+	if contentWidth < 20 {
+		contentWidth = 20
 	}
-	content := []string{pinkStyle.Render(blixBanner), ""}
-	content = append(content, welcomeLines(api, startupError)...)
-	content = append(content, "", sessionMetadata(current, api.caller))
+
+	stateLabel := "ready"
+	stateColor := green
+	if api.caller == nil {
+		stateLabel = "signed out"
+		stateColor = amber
+	} else if !api.canUseBlix() {
+		stateLabel = "no access"
+		stateColor = red
+	} else if startupError != nil {
+		stateLabel = "degraded"
+		stateColor = amber
+	}
+	header := alignedRow(
+		pinkStyle.Render("BLIX")+mutedStyle.Render(" / agent runtime"),
+		lipgloss.NewStyle().Bold(true).Foreground(stateColor).Render("● "+stateLabel),
+		contentWidth,
+	)
+
+	welcome := strings.Join(welcomeLines(api, startupError), "\n")
+	metadata := sessionMetadata(current, api.caller)
+	body := welcome + "\n\n" + metadata
+	if contentWidth >= 82 {
+		leftWidth := 34
+		rightWidth := contentWidth - leftWidth - 3
+		body = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			lipgloss.NewStyle().Width(leftWidth).Render(welcome),
+			mutedStyle.Render("│"),
+			"  ",
+			lipgloss.NewStyle().Width(rightWidth).Render(metadata),
+		)
+	}
+
+	commands := mutedStyle.Render("/login  /logout  /help  /reset  /quit")
+	content := strings.Join([]string{
+		header,
+		mutedStyle.Render(strings.Repeat("─", contentWidth)),
+		body,
+		mutedStyle.Render(strings.Repeat("─", contentWidth)),
+		commands,
+	}, "\n")
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(pink).
-		Padding(1, 2).
+		Padding(0, 2).
 		Width(width)
-	fmt.Println(style.Render(strings.Join(content, "\n")))
+	fmt.Println(style.Render(content))
 }
 
 func sessionMetadata(current *createdRun, caller *callerContext) string {
@@ -674,23 +716,23 @@ func sessionMetadata(current *createdRun, caller *callerContext) string {
 	if caller != nil {
 		callerID = caller.EntityID
 	}
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(white).Width(12)
+	labelStyle := lipgloss.NewStyle().Foreground(muted).Width(11)
+	valueStyle := lipgloss.NewStyle().Bold(true).Foreground(white)
 	rows := []struct {
 		label string
 		value string
 	}{
-		{label: "AGENT", value: agentID},
-		{label: "CALLER", value: callerID},
-		{label: "RUN", value: runID},
-		{label: "EXECUTION", value: executionID},
-		{label: "COMMANDS", value: "/login  /logout  /help  /reset  /quit"},
+		{label: "agent", value: agentID},
+		{label: "caller", value: callerID},
+		{label: "run", value: runID},
+		{label: "execution", value: executionID},
 	}
 	lines := make([]string, 0, len(rows))
 	for _, row := range rows {
 		lines = append(lines, lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			labelStyle.Render(row.label),
-			mutedStyle.Render(row.value),
+			valueStyle.Render(row.value),
 		))
 	}
 	return strings.Join(lines, "\n")
@@ -699,9 +741,9 @@ func sessionMetadata(current *createdRun, caller *callerContext) string {
 func welcomeLines(api *client, startupError error) []string {
 	if api.caller == nil {
 		return []string{
-			pinkStyle.Render("Welcome to Blix"),
-			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
-			"Run " + pinkStyle.Render("/login") + " to continue.",
+			userStyle.Render("Welcome to Blix"),
+			mutedStyle.Render("Sign in with Sentinel"),
+			mutedStyle.Render("Run ") + pinkStyle.Render("/login") + mutedStyle.Render(" to continue"),
 		}
 	}
 	if api.user == nil {
@@ -710,9 +752,9 @@ func welcomeLines(api *client, startupError error) []string {
 			message = startupError.Error()
 		}
 		return []string{
-			pinkStyle.Render("Signed in"),
+			userStyle.Render("Signed in"),
 			mutedStyle.Render(api.caller.EntityID),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(message),
+			lipgloss.NewStyle().Foreground(red).Render(message),
 		}
 	}
 	name := strings.TrimSpace(api.user.FirstName + " " + api.user.LastName)
@@ -729,36 +771,54 @@ func welcomeLines(api *client, startupError error) []string {
 		}
 		identity += "@" + api.user.Username
 	}
-	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
+	content := []string{
+		mutedStyle.Render("Welcome back,"),
+		userStyle.Render(name),
+		mutedStyle.Render(identity),
+	}
 	if !api.canUseBlix() {
-		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(nonmemberAccessMessage))
+		content = append(content, lipgloss.NewStyle().Foreground(red).Render(nonmemberAccessMessage))
 	}
 	if startupError != nil && api.canUseBlix() {
-		content = append(content, lipgloss.NewStyle().Foreground(lipgloss.Color("#D64545")).Render(startupError.Error()))
+		content = append(content, lipgloss.NewStyle().Foreground(red).Render(startupError.Error()))
 	}
 	return content
 }
 
 func printHelp() {
-	content := strings.Join([]string{
-		pinkStyle.Render("/login") + "  Sign in with Sentinel",
-		pinkStyle.Render("/logout") + " Sign out and clear the saved session",
-		pinkStyle.Render("/help") + "   Show available commands",
-		pinkStyle.Render("/reset") + "  Start a fresh run",
-		pinkStyle.Render("/quit") + "   End the session",
-	}, "\n")
-	fmt.Println(borderStyle.Render(content))
+	commands := []struct {
+		command string
+		detail  string
+	}{
+		{command: "/login", detail: "Sign in with Sentinel"},
+		{command: "/logout", detail: "Sign out and clear the saved session"},
+		{command: "/help", detail: "Show available commands"},
+		{command: "/reset", detail: "Start a fresh run"},
+		{command: "/quit", detail: "End the session"},
+	}
+	lines := make([]string, 0, len(commands)+1)
+	lines = append(lines, pinkStyle.Render("COMMANDS"))
+	for _, command := range commands {
+		lines = append(lines, lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			lipgloss.NewStyle().Bold(true).Foreground(white).Width(11).Render(command.command),
+			mutedStyle.Render(command.detail),
+		))
+	}
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(muted).
+		Padding(0, 2).
+		Width(panelWidth(76))
+	fmt.Println(style.Render(strings.Join(lines, "\n")))
 }
 
 func responsePanel(content string) string {
-	width := terminalWidth() - 8
-	if width < 50 {
-		width = 50
-	}
-	content = renderMarkdown(content, width-4)
+	width := panelWidth(112)
+	content = renderMarkdown(content, width-6)
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(muted).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderLeftForeground(pink).
 		Padding(0, 2).
 		Width(width).
 		Render(content)
@@ -781,11 +841,85 @@ func renderMarkdown(content string, width int) string {
 
 func errorPanel(message string) string {
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FF6B6B")).
-		Foreground(lipgloss.Color("#FF6B6B")).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderLeftForeground(red).
+		Foreground(red).
 		Padding(0, 1).
 		Render(message)
+}
+
+func agentHeader(status string) string {
+	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("◆  blix")
+	right := mutedStyle.Render(status)
+	return alignedRow(left, right, panelWidth(112))
+}
+
+func activityLine(kind string, label string, status string) string {
+	width := panelWidth(112)
+	status = strings.ToLower(strings.TrimSpace(status))
+	statusStyle := mutedStyle
+	switch status {
+	case "succeeded", "completed", "complete", "done", "ok":
+		statusStyle = lipgloss.NewStyle().Foreground(green)
+	case "queued", "waiting", "requeued":
+		statusStyle = lipgloss.NewStyle().Foreground(amber)
+	case "failed", "error":
+		statusStyle = lipgloss.NewStyle().Foreground(red)
+	case "running", "working":
+		statusStyle = lipgloss.NewStyle().Foreground(pink)
+	}
+
+	right := ""
+	if status != "" {
+		right = statusStyle.Render("[" + status + "]")
+	}
+	reserved := lipgloss.Width(right) + 18
+	label = truncateText(label, width-reserved)
+	left := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		"  ",
+		mutedStyle.Render("│"),
+		"  ",
+		lipgloss.NewStyle().Bold(true).Foreground(pink).Width(9).Render(kind),
+		mutedStyle.Render(label),
+	)
+	return alignedRow(left, right, width)
+}
+
+func alignedRow(left string, right string, width int) string {
+	spacing := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if spacing < 1 {
+		spacing = 1
+	}
+	return left + strings.Repeat(" ", spacing) + right
+}
+
+func truncateText(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	runes := []rune(value)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}
+
+func panelWidth(maximum int) int {
+	width := terminalWidth() - 8
+	if width < 32 {
+		width = 32
+	}
+	if width > maximum {
+		width = maximum
+	}
+	return width
 }
 
 func terminalWidth() int {
