@@ -749,11 +749,11 @@ func (c *client) doRequest(
 }
 
 func printSessionPanel(current *createdRun, api *client, startupError error) {
-	width := terminalWidth() - 8
+	width := panelWidth(132)
 	if width < 60 {
 		width = 60
 	}
-	contentWidth := width - 6
+	contentWidth := width - 8
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -776,14 +776,15 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 	brand := pinkStyle.Render(blixBanner)
 	body := brand + "\n\n" + welcome + "\n\n" + status + "\n\n" + metadata
 	if contentWidth >= 96 {
-		leftWidth := 40
+		leftWidth := 36
 		rightWidth := contentWidth - leftWidth - 3
 		left := brand + "\n\n" + welcome
-		right := alignedRow(mutedStyle.Render("session"), status, rightWidth) + "\n\n" + metadata
+		right := mutedStyle.Render("session") + "  " + status + "\n\n" + metadata
+		bodyHeight := max(lipgloss.Height(left), lipgloss.Height(right))
 		body = lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			lipgloss.NewStyle().Width(leftWidth).Render(left),
-			mutedStyle.Render("│"),
+			verticalRule(bodyHeight),
 			"  ",
 			lipgloss.NewStyle().Width(rightWidth).Render(right),
 		)
@@ -798,7 +799,7 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(pink).
-		Padding(0, 2).
+		Padding(1, 3).
 		Width(width)
 	fmt.Println(style.Render(content))
 }
@@ -944,8 +945,7 @@ func errorPanel(message string) string {
 
 func agentHeader(status string) string {
 	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("◆  blix")
-	right := mutedStyle.Render(status)
-	return alignedRow(left, right, panelWidth(112))
+	return left + mutedStyle.Render("  ·  "+status)
 }
 
 func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
@@ -957,7 +957,7 @@ func newRenderedActivity(key string, depth int, kind string, label string, statu
 }
 
 func activityLine(depth int, kind string, label string, status string) string {
-	width := panelWidth(112)
+	width := panelWidth(78)
 	status = strings.ToLower(strings.TrimSpace(status))
 	statusStyle := mutedStyle
 	switch status {
@@ -976,7 +976,7 @@ func activityLine(depth int, kind string, label string, status string) string {
 		right = statusStyle.Render("[" + status + "]")
 	}
 	prefix := "  " + strings.Repeat("│  ", depth) + "├─ "
-	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(pink).Width(9).Render(kind)
+	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(pink).Width(7).Render(kind)
 	label = truncateText(label, width-lipgloss.Width(prefix)-lipgloss.Width(kindLabel)-lipgloss.Width(right)-1)
 	left := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -985,6 +985,17 @@ func activityLine(depth int, kind string, label string, status string) string {
 		mutedStyle.Render(label),
 	)
 	return alignedRow(left, right, width)
+}
+
+func verticalRule(height int) string {
+	if height < 1 {
+		return ""
+	}
+	lines := make([]string, height)
+	for index := range lines {
+		lines[index] = mutedStyle.Render("│")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func alignedRow(left string, right string, width int) string {
