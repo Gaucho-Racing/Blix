@@ -13,20 +13,21 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/chzyer/readline"
+	"github.com/charmbracelet/colorprofile"
 	"golang.org/x/term"
 )
 
 const (
 	agentID   = "general_conversation_v1"
-	chatInset = 4
+	chatInset = 2
 )
 
 const (
@@ -49,6 +50,7 @@ var (
 	amber       = lipgloss.Color("#E4B866")
 	red         = lipgloss.Color("#FF6B7A")
 	userSurface = lipgloss.Color("#262427")
+	fieldBorder = lipgloss.Color("#484349")
 	pinkStyle   = lipgloss.NewStyle().Bold(true).Foreground(pink)
 	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
 	userStyle   = lipgloss.NewStyle().Bold(true).Foreground(white)
@@ -170,9 +172,14 @@ type activityTree struct {
 }
 
 type sessionInput struct {
-	scanner   *bufio.Scanner
-	editor    *readline.Instance
-	closeOnce sync.Once
+	scanner *bufio.Scanner
+}
+
+type inputModel struct {
+	input     textinput.Model
+	width     int
+	submitted bool
+	cancelled bool
 }
 
 func main() {
@@ -243,20 +250,13 @@ func runSession(ctx context.Context, api *client) error {
 	}
 	printSessionPanel(current, api, startupError)
 
-	terminalInput, err := newSessionInput()
-	if err != nil {
-		return fmt.Errorf("initialize terminal input: %w", err)
-	}
-	defer terminalInput.close()
-	stopInput := context.AfterFunc(ctx, terminalInput.close)
-	defer stopInput()
-
+	terminalInput := newSessionInput()
 	for {
-		line, err := terminalInput.read()
+		line, err := terminalInput.read(ctx)
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		if errors.Is(err, readline.ErrInterrupt) {
+		if errors.Is(err, context.Canceled) {
 			return context.Canceled
 		}
 		if err != nil {
@@ -402,73 +402,119 @@ func normalizeEndpoint(value string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
-func newSessionInput() (*sessionInput, error) {
-	input := &sessionInput{scanner: bufio.NewScanner(os.Stdin)}
+func newSessionInput() *sessionInput {
+	return &sessionInput{scanner: bufio.NewScanner(os.Stdin)}
+}
+
+func (i *sessionInput) read(ctx context.Context) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return input, nil
+		fmt.Print(inputPrompt())
+		if !i.scanner.Scan() {
+			if err := i.scanner.Err(); err != nil {
+				return "", err
+			}
+			return "", io.EOF
+		}
+		return i.scanner.Text(), nil
 	}
 
-	editor, err := readline.NewEx(&readline.Config{
-		Prompt:          inputPrompt(),
-		InterruptPrompt: "\n",
-		EOFPrompt:       "\n",
-		VimMode:         false,
-	})
+	model := newInputModel()
+	program := tea.NewProgram(
+		model,
+		tea.WithContext(ctx),
+		tea.WithColorProfile(colorprofile.TrueColor),
+		tea.WithoutSignalHandler(),
+	)
+	finalModel, err := program.Run()
 	if err != nil {
-		return nil, err
+		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", err
 	}
-	input.editor = editor
-	return input, nil
+	result, ok := finalModel.(*inputModel)
+	if !ok {
+		return "", errors.New("terminal input returned an invalid state")
+	}
+	if result.cancelled {
+		return "", context.Canceled
+	}
+	return result.input.Value(), nil
 }
 
-func (i *sessionInput) read() (string, error) {
-	if i.editor != nil {
-		return i.editor.Readline()
-	}
+func newInputModel() *inputModel {
+	input := textinput.New()
+	input.Prompt = "❯  "
+	styles := textinput.DefaultDarkStyles()
+	styles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(white).Background(userSurface)
+	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
+	styles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
+	input.SetStyles(styles)
 
-	fmt.Print(inputPrompt())
-	if !i.scanner.Scan() {
-		if err := i.scanner.Err(); err != nil {
-			return "", err
-		}
-		return "", io.EOF
-	}
-	return i.scanner.Text(), nil
+	model := &inputModel{input: input, width: chatWidth()}
+	model.resizeInput()
+	return model
 }
 
-func (i *sessionInput) close() {
-	i.closeOnce.Do(func() {
-		if i.editor != nil {
-			_ = i.editor.Close()
-		}
-	})
+func (m *inputModel) Init() tea.Cmd {
+	return m.input.Focus()
 }
 
-func (i *sessionInput) renderSubmittedMessage(message string) {
-	if i.editor != nil {
-		width := terminalWidth()
-		displayWidth := lipgloss.Width(inputPrompt()) + lipgloss.Width(message)
-		lineCount := max(1, (displayWidth-1)/width+1)
-		for range lineCount {
-			fmt.Print("\x1b[1A\r\x1b[2K")
+func (m *inputModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch message := message.(type) {
+	case tea.KeyPressMsg:
+		switch message.String() {
+		case "enter":
+			m.submitted = true
+			return m, tea.Quit
+		case "ctrl+c":
+			m.cancelled = true
+			return m, tea.Quit
 		}
+	case tea.WindowSizeMsg:
+		m.width = max(32, message.Width-chatInset*2)
+		m.resizeInput()
 	}
-	fmt.Println(userMessageCard(message))
+
+	var command tea.Cmd
+	m.input, command = m.input.Update(message)
+	return m, command
+}
+
+func (m *inputModel) View() tea.View {
+	if m.submitted || m.cancelled {
+		return tea.NewView("")
+	}
+	return tea.NewView(inputFieldStyle(m.width).Render(m.input.View()))
+}
+
+func (m *inputModel) resizeInput() {
+	contentWidth := m.width - 6 - lipgloss.Width(m.input.Prompt)
+	m.input.SetWidth(max(1, contentWidth))
+}
+
+func inputFieldStyle(width int) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(fieldBorder).
+		Foreground(white).
+		Background(userSurface).
+		Padding(0, 2).
+		MarginLeft(chatInset).
+		Width(width)
 }
 
 func inputPrompt() string {
 	return strings.Repeat(" ", chatInset) + pinkStyle.Render("❯") + " "
 }
 
+func (i *sessionInput) renderSubmittedMessage(message string) {
+	fmt.Println(userMessageCard(message))
+}
+
 func userMessageCard(message string) string {
-	width := chatWidth()
-	return lipgloss.NewStyle().
-		Foreground(white).
-		Background(userSurface).
-		Padding(0, 2).
-		MarginLeft(chatInset).
-		Width(width).
-		Render("❯  " + message)
+	return inputFieldStyle(chatWidth()).Render("❯  " + message)
 }
 
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
