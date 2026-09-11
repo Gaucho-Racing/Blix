@@ -38,16 +38,17 @@ const (
 )
 
 var (
-	pink       = lipgloss.Color("#F20AA6")
-	muted      = lipgloss.Color("#918A95")
-	white      = lipgloss.Color("#F3EFF4")
-	green      = lipgloss.Color("#91CF7A")
-	amber      = lipgloss.Color("#E4B866")
-	red        = lipgloss.Color("#FF6B7A")
-	surface    = lipgloss.Color("#211F22")
-	pinkStyle  = lipgloss.NewStyle().Bold(true).Foreground(pink)
-	mutedStyle = lipgloss.NewStyle().Foreground(muted)
-	userStyle  = lipgloss.NewStyle().Bold(true).Foreground(white)
+	pink        = lipgloss.Color("#F20AA6")
+	muted       = lipgloss.Color("#918A95")
+	white       = lipgloss.Color("#F3EFF4")
+	green       = lipgloss.Color("#91CF7A")
+	amber       = lipgloss.Color("#E4B866")
+	red         = lipgloss.Color("#FF6B7A")
+	surface     = lipgloss.Color("#211F22")
+	userSurface = lipgloss.Color("#2B2229")
+	pinkStyle   = lipgloss.NewStyle().Bold(true).Foreground(pink)
+	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
+	userStyle   = lipgloss.NewStyle().Bold(true).Foreground(white)
 )
 
 type client struct {
@@ -337,6 +338,7 @@ func runSession(ctx context.Context, api *client) error {
 			fmt.Println(errorPanel("Unknown command: " + command))
 			continue
 		}
+		terminalInput.renderSubmittedMessage(command)
 		if current == nil {
 			fmt.Println(errorPanel(api.accessMessage()))
 			continue
@@ -424,6 +426,18 @@ func (i *sessionInput) close() {
 	})
 }
 
+func (i *sessionInput) renderSubmittedMessage(message string) {
+	if i.editor != nil {
+		width := terminalWidth()
+		displayWidth := lipgloss.Width(inputPrompt()) + lipgloss.Width(message)
+		lineCount := max(1, (displayWidth-1)/width+1)
+		for range lineCount {
+			fmt.Print("\x1b[1A\r\x1b[2K")
+		}
+	}
+	fmt.Println(userMessageCard(message))
+}
+
 func inputPrompt() string {
 	return lipgloss.NewStyle().
 		Bold(true).
@@ -432,6 +446,19 @@ func inputPrompt() string {
 		PaddingLeft(1).
 		PaddingRight(1).
 		Render("❯") + " "
+}
+
+func userMessageCard(message string) string {
+	width := chatWidth()
+	contentWidth := max(1, width-2)
+	content := pinkStyle.Render("❯") + "  " + userStyle.Render(message)
+	content = lipgloss.Wrap(content, contentWidth, " ")
+	return lipgloss.NewStyle().
+		Background(userSurface).
+		Padding(0, 1).
+		MarginLeft(2).
+		Width(width).
+		Render(content)
 }
 
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
@@ -984,12 +1011,13 @@ func printHelp() {
 }
 
 func responsePanel(content string) string {
-	width := panelWidth(112)
+	width := chatWidth()
 	content = renderMarkdown(content, width-6)
 	return lipgloss.NewStyle().
 		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderLeftForeground(pink).
 		Padding(0, 2).
+		MarginLeft(2).
 		Width(width).
 		Render(content)
 }
@@ -1019,8 +1047,9 @@ func errorPanel(message string) string {
 }
 
 func agentHeader(status string) string {
-	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("◆  blix")
-	return left + mutedStyle.Render("  ·  "+status)
+	left := "  " + lipgloss.NewStyle().Bold(true).Foreground(pink).Render("◆  blix")
+	right := mutedStyle.Render(status)
+	return alignedRow(left, right, chatWidth())
 }
 
 func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
@@ -1032,7 +1061,7 @@ func newRenderedActivity(key string, depth int, kind string, label string, statu
 }
 
 func activityLine(depth int, kind string, label string, status string) string {
-	width := panelWidth(78)
+	width := chatWidth()
 	status = strings.ToLower(strings.TrimSpace(status))
 	statusStyle := mutedStyle
 	switch status {
@@ -1105,6 +1134,14 @@ func panelWidth(maximum int) int {
 	}
 	if width > maximum {
 		width = maximum
+	}
+	return width
+}
+
+func chatWidth() int {
+	width := terminalWidth() - 4
+	if width < 32 {
+		return 32
 	}
 	return width
 }
