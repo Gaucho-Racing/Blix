@@ -8,6 +8,7 @@ import {
   MessageSquareText,
   Wrench,
 } from "lucide-react"
+import { useEffect, useRef } from "react"
 import type { ComponentType } from "react"
 
 import { readNumber, readString } from "@/lib/format"
@@ -130,6 +131,21 @@ export function ChatActivity({ events, executions, active, startedAt, completedA
   const items = activityItems(events, executions)
   const failed = items.some((item) => item.danger)
   const duration = formatDuration(startedAt, completedAt)
+  const activityList = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!active || items.length === 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const list = activityList.current
+      if (!list) return
+      list.scrollTo({
+        top: list.scrollHeight,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [active, items.length])
+
   if (!active && items.length === 0) return null
 
   return (
@@ -148,7 +164,7 @@ export function ChatActivity({ events, executions, active, startedAt, completedA
         </span>
       </summary>
       {items.length > 0 && (
-        <div className="chat-activity-list">
+        <div className="chat-activity-list" ref={activityList}>
           {items.map(({ eventID, label, detail, status, icon: Icon, danger }) => (
             <div className={`chat-activity-item${danger ? " danger" : ""}`} key={eventID}>
               <span className="chat-activity-icon"><Icon size={13} /></span>
