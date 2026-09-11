@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -134,6 +135,12 @@ func (e *httpStatusError) Error() string {
 	return e.message
 }
 
+type sessionRestart struct{}
+
+func (sessionRestart) Error() string {
+	return "restart CLI session"
+}
+
 type eventsMsg struct {
 	events []executionEvent
 	err    error
@@ -168,9 +175,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	blixURL := strings.TrimRight(strings.TrimSpace(os.Getenv("BLIX_URL")), "/")
-	if blixURL == "" {
-		blixURL = "http://localhost:10310"
+	configuredURL := strings.TrimSpace(os.Getenv("BLIX_URL"))
+	if configuredURL == "" {
+		configuredURL = "http://localhost:10310"
+	}
+	blixURL, err := normalizeEndpoint(configuredURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
+		os.Exit(1)
 	}
 	api := &client{
 		baseURL: blixURL,
@@ -182,9 +194,20 @@ func main() {
 	} else {
 		api.session = stored
 	}
-	if err := runSession(ctx, api); err != nil && !errors.Is(err, context.Canceled) {
-		fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
-		os.Exit(1)
+	for {
+		err := runSession(ctx, api)
+		var restart sessionRestart
+		if errors.As(err, &restart) {
+			if term.IsTerminal(int(os.Stdout.Fd())) {
+				fmt.Print("\x1b[2J\x1b[H")
+			}
+			continue
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
+			os.Exit(1)
+		}
+		return
 	}
 }
 
@@ -246,6 +269,10 @@ func runSession(ctx context.Context, api *client) error {
 		case "/help":
 			printHelp()
 			continue
+		case "/endpoint":
+			fmt.Println(mutedStyle.Render("Connected to ") + userStyle.Render(api.baseURL))
+			fmt.Println(mutedStyle.Render("Usage: ") + pinkStyle.Render("/endpoint <http-or-https-url>"))
+			continue
 		case "/login":
 			_, err := api.login(ctx)
 			if err != nil {
@@ -285,6 +312,27 @@ func runSession(ctx context.Context, api *client) error {
 			printSessionPanel(current, api, nil)
 			continue
 		}
+		if strings.HasPrefix(command, "/endpoint ") {
+			endpoint, err := normalizeEndpoint(strings.TrimSpace(strings.TrimPrefix(command, "/endpoint")))
+			if err != nil {
+				fmt.Println(errorPanel(err.Error()))
+				continue
+			}
+			if endpoint == api.baseURL {
+				fmt.Println(mutedStyle.Render("Already connected to ") + userStyle.Render(endpoint))
+				continue
+			}
+			stored, err := loadCredentials(endpoint)
+			if err != nil {
+				fmt.Println(errorPanel("Could not load credentials for that endpoint: " + err.Error()))
+				continue
+			}
+			api.baseURL = endpoint
+			api.session = stored
+			api.caller = nil
+			api.user = nil
+			return sessionRestart{}
+		}
 		if strings.HasPrefix(command, "/") {
 			fmt.Println(errorPanel("Unknown command: " + command))
 			continue
@@ -307,6 +355,31 @@ func runSession(ctx context.Context, api *client) error {
 		}
 		fmt.Println(responsePanel(content))
 	}
+}
+
+func normalizeEndpoint(value string) (string, error) {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid Blix endpoint: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("Blix endpoint must use http or https")
+	}
+	if parsed.Host == "" {
+		return "", errors.New("Blix endpoint must include a host")
+	}
+	if parsed.User != nil {
+		return "", errors.New("Blix endpoint cannot include credentials")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", errors.New("Blix endpoint cannot include a path")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("Blix endpoint cannot include a query or fragment")
+	}
+	parsed.Path = ""
+	parsed.RawPath = ""
+	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 func newSessionInput() (*sessionInput, error) {
@@ -771,7 +844,7 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 		stateColor = amber
 	}
 	welcome := strings.Join(welcomeLines(api, startupError), "\n")
-	metadata := sessionMetadata(current, api.caller)
+	metadata := sessionMetadata(current, api.caller, api.baseURL)
 	status := lipgloss.NewStyle().Bold(true).Foreground(stateColor).Render("● " + stateLabel)
 	brand := pinkStyle.Render(blixBanner)
 	body := brand + "\n\n" + welcome + "\n\n" + status + "\n\n" + metadata
@@ -790,7 +863,7 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 		)
 	}
 
-	commands := mutedStyle.Render("/login  /logout  /help  /reset  /quit")
+	commands := mutedStyle.Render("/login  /logout  /endpoint  /help  /reset  /quit")
 	content := strings.Join([]string{
 		body,
 		mutedStyle.Render(strings.Repeat("─", contentWidth)),
@@ -804,7 +877,7 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 	fmt.Println(style.Render(content))
 }
 
-func sessionMetadata(current *createdRun, caller *callerContext) string {
+func sessionMetadata(current *createdRun, caller *callerContext, endpoint string) string {
 	runID := "—"
 	executionID := "—"
 	callerID := "not authenticated"
@@ -821,6 +894,7 @@ func sessionMetadata(current *createdRun, caller *callerContext) string {
 		label string
 		value string
 	}{
+		{label: "endpoint", value: endpoint},
 		{label: "agent", value: agentID},
 		{label: "caller", value: callerID},
 		{label: "run", value: runID},
@@ -887,6 +961,7 @@ func printHelp() {
 	}{
 		{command: "/login", detail: "Sign in with Sentinel"},
 		{command: "/logout", detail: "Sign out and clear the saved session"},
+		{command: "/endpoint", detail: "Show or change the active Blix endpoint"},
 		{command: "/help", detail: "Show available commands"},
 		{command: "/reset", detail: "Start a fresh run"},
 		{command: "/quit", detail: "End the session"},
