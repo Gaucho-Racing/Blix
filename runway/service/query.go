@@ -15,7 +15,7 @@ import (
 
 type RunSummary struct {
 	RunID             string                                  `json:"run_id"`
-	Title             string                                  `json:"title"`
+	Name              string                                  `json:"name"`
 	CallerEntityID    string                                  `json:"caller_entity_id"`
 	CallerContext     datatypes.JSONType[model.CallerContext] `json:"caller_context"`
 	Kind              string                                  `json:"kind"`
@@ -78,10 +78,7 @@ func (s *ExecutionService) ListRuns(
 	err := s.database.WithContext(ctx).Raw(`
 		SELECT
 			r.id AS run_id,
-			COALESCE(
-				(SELECT LEFT(message.content, 160) FROM runway_message message WHERE message.run_id = r.id AND message.role = 'user' ORDER BY message.event_position ASC LIMIT 1),
-				'New conversation'
-			) AS title,
+			r.name,
 			r.caller_entity_id,
 			r.caller_context,
 			r.kind,
@@ -154,21 +151,10 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 	if rootExecution == nil {
 		return RunDetails{}, ErrConflict
 	}
-	title := "New conversation"
-	var firstMessage model.Message
-	err = s.database.WithContext(ctx).
-		Where("run_id = ? AND role = ?", run.ID, model.MessageRoleUser).
-		Order("event_position ASC").
-		First(&firstMessage).Error
-	if err == nil {
-		title = truncateRunTitle(firstMessage.Content)
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return RunDetails{}, err
-	}
 	return RunDetails{
 		Run: RunSummary{
 			RunID:             run.ID,
-			Title:             title,
+			Name:              run.Name,
 			CallerEntityID:    run.CallerEntityID,
 			CallerContext:     run.CallerContext,
 			Kind:              run.Kind,
@@ -186,7 +172,7 @@ func (s *ExecutionService) GetRun(ctx context.Context, runID string) (RunDetails
 	}, nil
 }
 
-func truncateRunTitle(value string) string {
+func truncateRunName(value string) string {
 	characters := []rune(strings.TrimSpace(value))
 	if len(characters) <= 160 {
 		return string(characters)

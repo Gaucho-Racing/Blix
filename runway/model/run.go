@@ -22,6 +22,7 @@ type CallerContext struct {
 
 type Run struct {
 	ID              string                            `json:"run_id" gorm:"primaryKey"`
+	Name            string                            `json:"name" gorm:"type:text;not null;default:''"`
 	CallerEntityID  string                            `json:"caller_entity_id" gorm:"index"`
 	CallerContext   datatypes.JSONType[CallerContext] `json:"caller_context" gorm:"type:jsonb;not null;default:'{}'"`
 	Kind            string                            `json:"kind" gorm:"index;not null"`

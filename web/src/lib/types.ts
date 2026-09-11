@@ -53,7 +53,7 @@ export interface CallerVerifiedPayload {
 
 export interface RunSummary {
   run_id: string
-  title: string
+  name: string
   caller_entity_id: string
   caller_context: CallerContext
   kind: string
@@ -71,6 +71,7 @@ export interface RunSummary {
 export interface CreatedRun {
   run: {
     run_id: string
+    name: string
     caller_entity_id: string
     caller_context: CallerContext
     kind: string

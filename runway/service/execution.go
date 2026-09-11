@@ -328,6 +328,12 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		if err := tx.Create(&message).Error; err != nil {
 			return err
 		}
+		if run.Name == "" {
+			run.Name = truncateRunName(message.Content)
+			if err := tx.Model(&run).Update("name", run.Name).Error; err != nil {
+				return err
+			}
+		}
 
 		execution.Status = model.ExecutionStatusQueued
 		execution.Version++

@@ -261,7 +261,7 @@ export function ChatPage() {
       <header className="workspace-toolbar chat-toolbar">
         <div>
           <span className="workspace-kicker">TEAM WORKSPACE</span>
-          <h1>{run?.title && run.title !== "New conversation" ? run.title : "Chat"}</h1>
+          <h1>{run?.name || "Chat"}</h1>
           {run && <code>{run.run_id}</code>}
         </div>
         <div className="chat-toolbar-actions">
@@ -394,7 +394,7 @@ export function ChatPage() {
                   key={recentRun.run_id}
                   to={`/chat/${recentRun.run_id}`}
                 >
-                  <span>{recentRun.title}</span>
+                  <span>{recentRun.name || "New conversation"}</span>
                   <small>{formatRelative(recentRun.last_activity_at)} · {recentRun.event_count} events</small>
                   <StatusBadge status={runDisplayStatus(recentRun, now)} />
                 </Link>
