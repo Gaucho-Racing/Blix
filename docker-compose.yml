@@ -91,6 +91,35 @@ services:
       SENTINEL_SCOPES: ${SENTINEL_SCOPES:-user:read groups:read}
       SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
+  knowledge:
+    container_name: blix-knowledge
+    build:
+      context: ./knowledge
+      dockerfile: Dockerfile.dev
+    restart: always
+    working_dir: /app
+    ports:
+      - "127.0.0.1:10410:9988"
+    volumes:
+      - ./knowledge:/app
+      - knowledge_gopath:/go
+      - knowledge_wiki:/data/wiki
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENV: DEV
+      PORT: 9988
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: password
+      DATABASE_NAME: blix
+      WIKI_REPOSITORY_URL: https://github.com/gaucho-racing/blixwiki.git
+      WIKI_REPOSITORY_BRANCH: main
+      WIKI_REPOSITORY_PATH: /data/wiki
+      BLIXWIKI_GITHUB_TOKEN: ${BLIXWIKI_GITHUB_TOKEN:-}
+
   agent-worker-1:
     container_name: blix-agent-worker-1
     build:
@@ -104,6 +133,8 @@ services:
     depends_on:
       runway:
         condition: service_started
+      knowledge:
+        condition: service_started
       nanomq:
         condition: service_started
     env_file:
@@ -111,6 +142,7 @@ services:
     environment:
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
+      KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
@@ -130,6 +162,8 @@ services:
     depends_on:
       runway:
         condition: service_started
+      knowledge:
+        condition: service_started
       nanomq:
         condition: service_started
     env_file:
@@ -137,6 +171,7 @@ services:
     environment:
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
+      KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
@@ -156,6 +191,8 @@ services:
     depends_on:
       runway:
         condition: service_started
+      knowledge:
+        condition: service_started
       nanomq:
         condition: service_started
     env_file:
@@ -163,6 +200,7 @@ services:
     environment:
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
+      KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
       MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
@@ -199,5 +237,7 @@ volumes:
   agent_worker_2_venv:
   agent_worker_3_venv:
   pgdata:
+  knowledge_gopath:
+  knowledge_wiki:
   runway_gopath:
   web_node_modules:

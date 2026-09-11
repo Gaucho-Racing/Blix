@@ -8,3 +8,5 @@ dist/
 node_modules/
 cli/cli
 runway/tmp/
+knowledge/tmp/
+knowledge/.data/
