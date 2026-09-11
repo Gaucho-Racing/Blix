@@ -28,6 +28,12 @@ const agentID = "general_conversation_v1"
 const (
 	blixUsersGroup         = "BlixUsers"
 	nonmemberAccessMessage = "You do not have access to Blix! Please request to join the BlixUsers group."
+	blixBanner             = `██████╗ ██╗     ██╗██╗  ██╗
+██╔══██╗██║     ██║╚██╗██╔╝
+██████╔╝██║     ██║ ╚███╔╝
+██╔══██╗██║     ██║ ██╔██╗
+██████╔╝███████╗██║██╔╝ ██╗
+╚═════╝ ╚══════╝╚═╝╚═╝  ╚═╝`
 )
 
 var (
@@ -70,10 +76,11 @@ type appendedMessage struct {
 }
 
 type executionEvent struct {
-	Position uint64          `json:"position"`
-	Type     string          `json:"type"`
-	EntityID string          `json:"entity_id"`
-	Payload  json.RawMessage `json:"payload"`
+	Position    uint64          `json:"position"`
+	ExecutionID string          `json:"execution_id"`
+	Type        string          `json:"type"`
+	EntityID    string          `json:"entity_id"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
 type eventsResponse struct {
@@ -133,9 +140,22 @@ type eventsMsg struct {
 }
 
 type turnStatus struct {
-	frames  []string
-	frame   int
-	enabled bool
+	frames          []string
+	frame           int
+	depth           int
+	lastActivityKey string
+	enabled         bool
+}
+
+type renderedActivity struct {
+	key   string
+	line  string
+	depth int
+}
+
+type activityTree struct {
+	depthByExecution map[string]int
+	agentByExecution map[string]string
 }
 
 type sessionInput struct {
@@ -280,7 +300,7 @@ func runSession(ctx context.Context, api *client) error {
 			continue
 		}
 		fmt.Println()
-		content, err := runTurn(ctx, api, current.Run.ID, appended.EventPosition)
+		content, err := runTurn(ctx, api, current.Run.ID, current.Execution.ID, appended.EventPosition)
 		if err != nil {
 			fmt.Println(errorPanel(err.Error()))
 			continue
@@ -358,7 +378,13 @@ func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 	return createdRun{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
 }
 
-func runTurn(ctx context.Context, api *client, runID string, after uint64) (string, error) {
+func runTurn(
+	ctx context.Context,
+	api *client,
+	runID string,
+	rootExecutionID string,
+	after uint64,
+) (string, error) {
 	fmt.Println(agentHeader("working"))
 
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -372,6 +398,7 @@ func runTurn(ctx context.Context, api *client, runID string, after uint64) (stri
 	defer ticker.Stop()
 	events := watchEvents(turnCtx, api, runID, after)
 	toolIDs := make(map[string]string)
+	tree := newActivityTree(rootExecutionID)
 
 	for {
 		select {
@@ -390,9 +417,9 @@ func runTurn(ctx context.Context, api *client, runID string, after uint64) (stri
 				return "", message.err
 			}
 			for _, event := range message.events {
-				content, activity, done, err := applyEvent(event, toolIDs)
-				if activity != "" {
-					status.printActivity(activity)
+				content, activity, done, err := applyEvent(event, toolIDs, tree)
+				if activity != nil {
+					status.printActivity(*activity)
 				}
 				if done {
 					return content, err
@@ -422,7 +449,8 @@ func (s *turnStatus) render() {
 		return
 	}
 	frame := pinkStyle.Render(s.frames[s.frame])
-	fmt.Print("\r\x1b[2K  " + mutedStyle.Render("│") + " " + frame + " " + mutedStyle.Render("thinking"))
+	prefix := "  " + strings.Repeat("│  ", s.depth) + "│"
+	fmt.Print("\r\x1b[2K" + mutedStyle.Render(prefix) + " " + frame + " " + mutedStyle.Render("thinking"))
 }
 
 func (s *turnStatus) clear() {
@@ -431,25 +459,77 @@ func (s *turnStatus) clear() {
 	}
 }
 
-func (s *turnStatus) printActivity(activity string) {
+func (s *turnStatus) printActivity(activity renderedActivity) {
 	s.clear()
-	fmt.Println(activity)
+	if s.enabled && activity.key != "" && activity.key == s.lastActivityKey {
+		fmt.Print("\x1b[1A\r\x1b[2K")
+	}
+	fmt.Println(activity.line)
+	s.depth = activity.depth
+	s.lastActivityKey = activity.key
 	s.render()
 }
 
-func applyEvent(event executionEvent, toolIDs map[string]string) (string, string, bool, error) {
+func newActivityTree(rootExecutionID string) *activityTree {
+	return &activityTree{
+		depthByExecution: map[string]int{rootExecutionID: 0},
+		agentByExecution: map[string]string{rootExecutionID: agentID},
+	}
+}
+
+func (t *activityTree) executionDepth(executionID string) int {
+	depth, ok := t.depthByExecution[executionID]
+	if !ok {
+		return 0
+	}
+	return depth
+}
+
+func (t *activityTree) agentCall(parentExecutionID string, childExecutionID string, childAgentID string) int {
+	parentDepth := t.executionDepth(parentExecutionID)
+	t.depthByExecution[childExecutionID] = parentDepth + 1
+	t.agentByExecution[childExecutionID] = childAgentID
+	return parentDepth
+}
+
+func applyEvent(
+	event executionEvent,
+	toolIDs map[string]string,
+	tree *activityTree,
+) (string, *renderedActivity, bool, error) {
 	switch event.Type {
 	case "agent.call_v1":
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			activity := activityLine("agent", payload.AgentID, "queued")
-			return "", activity, false, nil
+			depth := tree.agentCall(event.ExecutionID, event.EntityID, payload.AgentID)
+			activity := newRenderedActivity("agent:"+event.EntityID, depth, "agent", payload.AgentID, "queued")
+			return "", &activity, false, nil
+		}
+	case "execution.claimed_v1":
+		agent, ok := tree.agentByExecution[event.ExecutionID]
+		if ok && event.ExecutionID != "" {
+			depth := tree.executionDepth(event.ExecutionID) - 1
+			if depth < 0 {
+				return "", nil, false, nil
+			}
+			activity := newRenderedActivity("agent:"+event.ExecutionID, depth, "agent", agent, "running")
+			return "", &activity, false, nil
 		}
 	case "agent.result_v1":
 		var payload agentResultPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			activity := activityLine("agent", payload.AgentID, payload.Status)
-			return "", activity, false, nil
+			agent := payload.AgentID
+			if agent == "" {
+				agent = tree.agentByExecution[event.EntityID]
+			}
+			activity := newRenderedActivity(
+				"agent:"+event.EntityID,
+				tree.executionDepth(event.ExecutionID),
+				"agent",
+				agent,
+				payload.Status,
+			)
+			return "", &activity, false, nil
 		}
 	case "tool.call_v1":
 		var payload toolCallPayload
@@ -463,31 +543,50 @@ func applyEvent(event executionEvent, toolIDs map[string]string) (string, string
 			if toolID == "" {
 				toolID = "tool"
 			}
-			activity := activityLine("tool", toolID, payload.Status)
-			return "", activity, false, nil
+			activity := newRenderedActivity(
+				"tool:"+event.EntityID,
+				tree.executionDepth(event.ExecutionID),
+				"tool",
+				toolID,
+				payload.Status,
+			)
+			return "", &activity, false, nil
 		}
 	case "model.response_v1":
 		var payload modelResponsePayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			activity := activityLine("model", fmt.Sprintf("call %d", payload.Sequence), "done")
-			return "", activity, false, nil
+			activity := newRenderedActivity(
+				fmt.Sprintf("model:%s:%d", event.ExecutionID, payload.Sequence),
+				tree.executionDepth(event.ExecutionID),
+				"model",
+				fmt.Sprintf("call %d", payload.Sequence),
+				"done",
+			)
+			return "", &activity, false, nil
 		}
 	case "execution.lease_expired_v1":
-		return "", activityLine("runtime", "execution lease expired", "requeued"), false, nil
+		activity := newRenderedActivity(
+			"execution:"+event.ExecutionID,
+			tree.executionDepth(event.ExecutionID),
+			"runtime",
+			"execution lease expired",
+			"requeued",
+		)
+		return "", &activity, false, nil
 	case "message.assistant_v1":
 		var payload assistantPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.Content == "" {
-			return "", "", true, errors.New("Blix returned an invalid assistant message event")
+			return "", nil, true, errors.New("Blix returned an invalid assistant message event")
 		}
-		return payload.Content, "", true, nil
+		return payload.Content, nil, true, nil
 	case "execution.failed_v1":
 		var payload failedPayload
 		if json.Unmarshal(event.Payload, &payload) == nil && payload.Error.Message != "" {
-			return "", "", true, errors.New(payload.Error.Message)
+			return "", nil, true, errors.New(payload.Error.Message)
 		}
-		return "", "", true, errors.New("agent execution failed")
+		return "", nil, true, errors.New("agent execution failed")
 	}
-	return "", "", false, nil
+	return "", nil, false, nil
 }
 
 func watchEvents(
@@ -650,7 +749,10 @@ func (c *client) doRequest(
 }
 
 func printSessionPanel(current *createdRun, api *client, startupError error) {
-	width := panelWidth(112)
+	width := terminalWidth() - 8
+	if width < 60 {
+		width = 60
+	}
 	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
@@ -668,31 +770,27 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 		stateLabel = "degraded"
 		stateColor = amber
 	}
-	header := alignedRow(
-		pinkStyle.Render("BLIX")+mutedStyle.Render(" / agent runtime"),
-		lipgloss.NewStyle().Bold(true).Foreground(stateColor).Render("● "+stateLabel),
-		contentWidth,
-	)
-
 	welcome := strings.Join(welcomeLines(api, startupError), "\n")
 	metadata := sessionMetadata(current, api.caller)
-	body := welcome + "\n\n" + metadata
-	if contentWidth >= 82 {
-		leftWidth := 34
+	status := lipgloss.NewStyle().Bold(true).Foreground(stateColor).Render("● " + stateLabel)
+	brand := pinkStyle.Render(blixBanner)
+	body := brand + "\n\n" + welcome + "\n\n" + status + "\n\n" + metadata
+	if contentWidth >= 96 {
+		leftWidth := 40
 		rightWidth := contentWidth - leftWidth - 3
+		left := brand + "\n\n" + welcome
+		right := alignedRow(mutedStyle.Render("session"), status, rightWidth) + "\n\n" + metadata
 		body = lipgloss.JoinHorizontal(
 			lipgloss.Top,
-			lipgloss.NewStyle().Width(leftWidth).Render(welcome),
+			lipgloss.NewStyle().Width(leftWidth).Render(left),
 			mutedStyle.Render("│"),
 			"  ",
-			lipgloss.NewStyle().Width(rightWidth).Render(metadata),
+			lipgloss.NewStyle().Width(rightWidth).Render(right),
 		)
 	}
 
 	commands := mutedStyle.Render("/login  /logout  /help  /reset  /quit")
 	content := strings.Join([]string{
-		header,
-		mutedStyle.Render(strings.Repeat("─", contentWidth)),
 		body,
 		mutedStyle.Render(strings.Repeat("─", contentWidth)),
 		commands,
@@ -741,9 +839,9 @@ func sessionMetadata(current *createdRun, caller *callerContext) string {
 func welcomeLines(api *client, startupError error) []string {
 	if api.caller == nil {
 		return []string{
-			userStyle.Render("Welcome to Blix"),
-			mutedStyle.Render("Sign in with Sentinel"),
-			mutedStyle.Render("Run ") + pinkStyle.Render("/login") + mutedStyle.Render(" to continue"),
+			pinkStyle.Render("Welcome to Blix"),
+			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
+			mutedStyle.Render("Run ") + pinkStyle.Render("/login") + mutedStyle.Render(" to continue."),
 		}
 	}
 	if api.user == nil {
@@ -752,7 +850,7 @@ func welcomeLines(api *client, startupError error) []string {
 			message = startupError.Error()
 		}
 		return []string{
-			userStyle.Render("Signed in"),
+			pinkStyle.Render("Signed in"),
 			mutedStyle.Render(api.caller.EntityID),
 			lipgloss.NewStyle().Foreground(red).Render(message),
 		}
@@ -771,11 +869,7 @@ func welcomeLines(api *client, startupError error) []string {
 		}
 		identity += "@" + api.user.Username
 	}
-	content := []string{
-		mutedStyle.Render("Welcome back,"),
-		userStyle.Render(name),
-		mutedStyle.Render(identity),
-	}
+	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
 	if !api.canUseBlix() {
 		content = append(content, lipgloss.NewStyle().Foreground(red).Render(nonmemberAccessMessage))
 	}
@@ -854,7 +948,15 @@ func agentHeader(status string) string {
 	return alignedRow(left, right, panelWidth(112))
 }
 
-func activityLine(kind string, label string, status string) string {
+func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
+	return renderedActivity{
+		key:   key,
+		line:  activityLine(depth, kind, label, status),
+		depth: depth,
+	}
+}
+
+func activityLine(depth int, kind string, label string, status string) string {
 	width := panelWidth(112)
 	status = strings.ToLower(strings.TrimSpace(status))
 	statusStyle := mutedStyle
@@ -873,14 +975,13 @@ func activityLine(kind string, label string, status string) string {
 	if status != "" {
 		right = statusStyle.Render("[" + status + "]")
 	}
-	reserved := lipgloss.Width(right) + 18
-	label = truncateText(label, width-reserved)
+	prefix := "  " + strings.Repeat("│  ", depth) + "├─ "
+	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(pink).Width(9).Render(kind)
+	label = truncateText(label, width-lipgloss.Width(prefix)-lipgloss.Width(kindLabel)-lipgloss.Width(right)-1)
 	left := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		"  ",
-		mutedStyle.Render("│"),
-		"  ",
-		lipgloss.NewStyle().Bold(true).Foreground(pink).Width(9).Render(kind),
+		mutedStyle.Render(prefix),
+		kindLabel,
 		mutedStyle.Render(label),
 	)
 	return alignedRow(left, right, width)
