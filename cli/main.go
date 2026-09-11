@@ -24,7 +24,10 @@ import (
 	"golang.org/x/term"
 )
 
-const agentID = "general_conversation_v1"
+const (
+	agentID   = "general_conversation_v1"
+	chatInset = 4
+)
 
 const (
 	blixUsersGroup         = "BlixUsers"
@@ -45,8 +48,7 @@ var (
 	green       = lipgloss.Color("#91CF7A")
 	amber       = lipgloss.Color("#E4B866")
 	red         = lipgloss.Color("#FF6B7A")
-	surface     = lipgloss.Color("#211F22")
-	userSurface = lipgloss.Color("#2B2229")
+	userSurface = lipgloss.Color("#262427")
 	pinkStyle   = lipgloss.NewStyle().Bold(true).Foreground(pink)
 	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
 	userStyle   = lipgloss.NewStyle().Bold(true).Foreground(white)
@@ -455,30 +457,18 @@ func (i *sessionInput) renderSubmittedMessage(message string) {
 }
 
 func inputPrompt() string {
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(pink).
-		Background(surface).
-		PaddingLeft(1).
-		PaddingRight(1).
-		Render("❯") + " "
+	return strings.Repeat(" ", chatInset) + pinkStyle.Render("❯") + " "
 }
 
 func userMessageCard(message string) string {
 	width := chatWidth()
-	contentWidth := max(1, width-6)
-	arrowStyle := lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
-	messageStyle := lipgloss.NewStyle().Foreground(white).Background(userSurface)
-	content := arrowStyle.Render("❯") + "  " + messageStyle.Render(message)
-	content = lipgloss.Wrap(content, contentWidth, " ")
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(softPink).
+		Foreground(white).
 		Background(userSurface).
 		Padding(0, 2).
-		MarginLeft(2).
+		MarginLeft(chatInset).
 		Width(width).
-		Render(content)
+		Render("❯  " + message)
 }
 
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
@@ -569,8 +559,8 @@ func (s *turnStatus) render() {
 		return
 	}
 	frame := pinkStyle.Render(s.frames[s.frame])
-	prefix := "  " + strings.Repeat("│  ", s.depth) + "│"
-	fmt.Print("\r\x1b[2K" + mutedStyle.Render(prefix) + " " + frame + " " + mutedStyle.Render("thinking"))
+	prefix := strings.Repeat(" ", chatInset+s.depth*4)
+	fmt.Print("\r\x1b[2K" + prefix + frame + " " + mutedStyle.Render("thinking"))
 }
 
 func (s *turnStatus) clear() {
@@ -583,6 +573,8 @@ func (s *turnStatus) printActivity(activity renderedActivity) {
 	s.clear()
 	if s.enabled && activity.key != "" && activity.key == s.lastActivityKey {
 		fmt.Print("\x1b[1A\r\x1b[2K")
+	} else if s.lastActivityKey != "" {
+		fmt.Println()
 	}
 	fmt.Println(activity.line)
 	s.depth = activity.depth
@@ -1032,13 +1024,11 @@ func printHelp() {
 
 func responsePanel(content string) string {
 	width := chatWidth()
-	content = renderMarkdown(content, width-6)
+	content = renderMarkdown(content, width-4)
 	return lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder(), false, false, false, true).
-		BorderLeftForeground(pink).
 		Padding(0, 2).
 		MarginTop(1).
-		MarginLeft(2).
+		MarginLeft(chatInset).
 		Width(width).
 		Render(content)
 }
@@ -1070,7 +1060,7 @@ func errorPanel(message string) string {
 func agentHeader(status string) string {
 	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("●  blix")
 	right := mutedStyle.Render(status)
-	return "  " + alignedRow(left, right, chatWidth())
+	return strings.Repeat(" ", chatInset) + alignedRow(left, right, chatWidth())
 }
 
 func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
@@ -1100,22 +1090,22 @@ func activityLine(depth int, kind string, label string, status string) string {
 	if status != "" {
 		right = statusStyle.Render("[" + status + "]")
 	}
-	prefix := strings.Repeat("│  ", depth) + "├─ "
+	prefix := strings.Repeat(" ", depth*4)
 	kindColor := softPink
 	if kind == "agent" {
 		kindColor = pink
 	} else if kind == "runtime" {
 		kindColor = muted
 	}
-	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(kindColor).Width(7).Render(kind)
+	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(kindColor).Width(8).Render(kind)
 	label = truncateText(label, width-lipgloss.Width(prefix)-lipgloss.Width(kindLabel)-lipgloss.Width(right)-1)
 	left := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		mutedStyle.Render(prefix),
+		prefix,
 		kindLabel,
 		mutedStyle.Render(label),
 	)
-	return "  " + alignedRow(left, right, width)
+	return strings.Repeat(" ", chatInset) + alignedRow(left, right, width)
 }
 
 func verticalRule(height int) string {
@@ -1166,7 +1156,7 @@ func panelWidth(maximum int) int {
 }
 
 func chatWidth() int {
-	width := terminalWidth() - 4
+	width := terminalWidth() - chatInset*2
 	if width < 32 {
 		return 32
 	}
