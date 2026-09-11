@@ -10,15 +10,13 @@ services:
     working_dir: /app
     stdin_open: true
     tty: true
+    network_mode: host
     user: "${BLIX_CLI_UID:-0}:${BLIX_CLI_GID:-0}"
     environment:
       HOME: /home/blix
       BLIX_URL: ${BLIX_URL:-http://host.docker.internal:10310}
-      BLIX_CLI_CALLBACK_PORT: ${BLIX_CLI_CALLBACK_PORT:-}
     volumes:
       - ${BLIX_CREDENTIALS_DIR:-/tmp/blix-cli-credentials}:/home/blix/.blix
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   kerbecs:
     container_name: blix-kerbecs

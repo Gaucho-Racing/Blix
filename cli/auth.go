@@ -15,8 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -250,16 +248,7 @@ func receiveAuthorizationCode(
 }
 
 func listenForAuthorizationCallback() (net.Listener, string, error) {
-	bindAddress := "127.0.0.1:0"
-	configuredPort := strings.TrimSpace(os.Getenv("BLIX_CLI_CALLBACK_PORT"))
-	if configuredPort != "" {
-		port, err := strconv.Atoi(configuredPort)
-		if err != nil || port < 1024 || port > 65535 {
-			return nil, "", errors.New("BLIX_CLI_CALLBACK_PORT must be between 1024 and 65535")
-		}
-		bindAddress = net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
-	}
-	listener, err := net.Listen("tcp4", bindAddress)
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return nil, "", fmt.Errorf("listen for Sentinel callback: %w", err)
 	}
