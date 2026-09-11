@@ -16,7 +16,6 @@ services:
       BLIX_URL: ${BLIX_URL:-http://host.docker.internal:10310}
       BLIX_CLI_CALLBACK_PORT: ${BLIX_CLI_CALLBACK_PORT:-}
     volumes:
-      - ./cli:/app
       - ${BLIX_CREDENTIALS_DIR:-/tmp/blix-cli-credentials}:/home/blix/.blix
     extra_hosts:
       - "host.docker.internal:host-gateway"
