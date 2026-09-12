@@ -580,7 +580,7 @@ func welcomeLines(caller *callerContext, user *currentUser, startupError error) 
 			lipgloss.NewStyle().Foreground(red).Render(message),
 		}
 	}
-	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
+	name := strings.TrimSpace(user.FirstName)
 	if name == "" {
 		name = user.Username
 	}
@@ -594,7 +594,7 @@ func welcomeLines(caller *callerContext, user *currentUser, startupError error) 
 		}
 		identity += "@" + user.Username
 	}
-	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
+	content := []string{userStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
 	if !canUseBlixIdentity(caller, user) {
 		content = append(content, lipgloss.NewStyle().Foreground(red).Render(nonmemberAccessMessage))
 	}

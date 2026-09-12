@@ -115,10 +115,10 @@ func newTUIModel(ctx context.Context, api *client) *tuiModel {
 	input.Prompt = "❯  "
 	input.SetVirtualCursor(false)
 	inputStyles := textinput.DefaultDarkStyles()
-	inputStyles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
-	inputStyles.Focused.Text = lipgloss.NewStyle().Foreground(white).Background(userSurface)
-	inputStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
-	inputStyles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
+	inputStyles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink)
+	inputStyles.Focused.Text = lipgloss.NewStyle().Foreground(white)
+	inputStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted)
+	inputStyles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted)
 	inputStyles.Cursor.Color = pink
 	input.SetStyles(inputStyles)
 
@@ -199,7 +199,7 @@ func (m *tuiModel) View() tea.View {
 		cursor := m.input.Cursor()
 		if cursor != nil {
 			cursor.Position.X += chatInset + 3
-			cursor.Position.Y += m.viewport.Height() + 1
+			cursor.Position.Y += m.viewport.Height() + 2
 			view.Cursor = cursor
 		}
 	}
@@ -509,7 +509,7 @@ func (m *tuiModel) resize(width int, height int) {
 	m.width = max(40, width)
 	m.height = max(12, height)
 	m.viewport.SetWidth(m.width)
-	m.viewport.SetHeight(max(1, m.height-4))
+	m.viewport.SetHeight(max(1, m.height-6))
 	m.resizeInput()
 	m.syncTranscript(true)
 }
@@ -686,7 +686,7 @@ func activeInputStyle(width int) lipgloss.Style {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(fieldBorder).
 		Background(userSurface).
-		Padding(0, 2).
+		Padding(1, 2).
 		MarginLeft(chatInset).
 		Width(width)
 }
