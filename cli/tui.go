@@ -187,7 +187,7 @@ func (m *tuiModel) View() tea.View {
 
 	input := m.renderInput()
 	footer := m.renderFooter()
-	content := lipgloss.JoinVertical(lipgloss.Left, m.viewport.View(), input, footer)
+	content := lipgloss.JoinVertical(lipgloss.Left, m.viewport.View(), "", input, footer)
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "Blix"
@@ -205,6 +205,12 @@ func (m *tuiModel) handleKey(message tea.KeyPressMsg) tea.Cmd {
 		var command tea.Cmd
 		m.viewport, command = m.viewport.Update(message)
 		return command
+	case "up":
+		m.viewport.ScrollUp(3)
+		return nil
+	case "down":
+		m.viewport.ScrollDown(3)
+		return nil
 	case "ctrl+up":
 		m.viewport.ScrollUp(1)
 		return nil
@@ -213,10 +219,10 @@ func (m *tuiModel) handleKey(message tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch key {
-	case "up", "ctrl+p":
+	case "ctrl+p":
 		m.historyPrevious()
 		return nil
-	case "down", "ctrl+n":
+	case "ctrl+n":
 		m.historyNext()
 		return nil
 	case "enter":
@@ -485,7 +491,7 @@ func (m *tuiModel) renderInput() string {
 }
 
 func (m *tuiModel) renderFooter() string {
-	left := mutedStyle.Render("  ↑/↓ history  ·  pgup/pgdn scroll")
+	left := mutedStyle.Render("  ↑/↓ scroll  ·  pgup/pgdn page  ·  ctrl+p/n history")
 	rightLabel := "ctrl+c quit  "
 	if m.busy {
 		operation := m.operation
@@ -506,7 +512,7 @@ func (m *tuiModel) resize(width int, height int) {
 	m.width = max(40, width)
 	m.height = max(12, height)
 	m.viewport.SetWidth(m.width)
-	m.viewport.SetHeight(max(1, m.height-6))
+	m.viewport.SetHeight(max(1, m.height-5))
 	m.resizeInput()
 	m.syncTranscript(true)
 }
@@ -593,7 +599,7 @@ func (turn *turnView) visibleActivities() []renderedActivity {
 			"tool-summary:"+activity.executionID,
 			activity.executionID,
 			activity.depth,
-			"tool",
+			"tool_summary",
 			label,
 			"",
 		))
@@ -741,6 +747,11 @@ func renderAgentHeader(status string, width int) string {
 }
 
 func renderActivityLine(activity renderedActivity, width int) string {
+	if activity.kind == "tool_summary" {
+		indent := strings.Repeat(" ", chatInset+activity.depth*4)
+		return indent + pinkStyle.Render(activity.label)
+	}
+
 	status := strings.ToLower(strings.TrimSpace(activity.status))
 	statusStyle := mutedStyle
 	switch status {
