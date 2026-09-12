@@ -115,10 +115,10 @@ func newTUIModel(ctx context.Context, api *client) *tuiModel {
 	input.Prompt = "❯  "
 	input.SetVirtualCursor(false)
 	inputStyles := textinput.DefaultDarkStyles()
-	inputStyles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink)
-	inputStyles.Focused.Text = lipgloss.NewStyle().Foreground(white)
-	inputStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted)
-	inputStyles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted)
+	inputStyles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
+	inputStyles.Focused.Text = lipgloss.NewStyle().Foreground(white).Background(userSurface)
+	inputStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
+	inputStyles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
 	inputStyles.Cursor.Color = pink
 	input.SetStyles(inputStyles)
 
