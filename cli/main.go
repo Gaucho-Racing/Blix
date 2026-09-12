@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,13 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/colorprofile"
-	"golang.org/x/term"
 )
 
 const (
@@ -141,45 +135,17 @@ func (e *httpStatusError) Error() string {
 	return e.message
 }
 
-type sessionRestart struct{}
-
-func (sessionRestart) Error() string {
-	return "restart CLI session"
-}
-
-type eventsMsg struct {
-	events []executionEvent
-	err    error
-}
-
-type turnStatus struct {
-	frames          []string
-	frame           int
-	depth           int
-	lastActivityKey string
-	enabled         bool
-}
-
 type renderedActivity struct {
-	key   string
-	line  string
-	depth int
+	key    string
+	depth  int
+	kind   string
+	label  string
+	status string
 }
 
 type activityTree struct {
 	depthByExecution map[string]int
 	agentByExecution map[string]string
-}
-
-type sessionInput struct {
-	scanner *bufio.Scanner
-}
-
-type inputModel struct {
-	input     textinput.Model
-	width     int
-	submitted bool
-	cancelled bool
 }
 
 func main() {
@@ -205,167 +171,9 @@ func main() {
 	} else {
 		api.session = stored
 	}
-	for {
-		err := runSession(ctx, api)
-		var restart sessionRestart
-		if errors.As(err, &restart) {
-			if term.IsTerminal(int(os.Stdout.Fd())) {
-				fmt.Print("\x1b[2J\x1b[H")
-			}
-			continue
-		}
-		if err != nil && !errors.Is(err, context.Canceled) {
-			fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
-			os.Exit(1)
-		}
-		return
-	}
-}
-
-func runSession(ctx context.Context, api *client) error {
-	var current *createdRun
-	var startupError error
-	if api.session != nil {
-		caller, err := api.getSession(ctx)
-		if err == nil {
-			api.caller = &caller
-			user, userErr := api.getCurrentUser(ctx)
-			if userErr != nil {
-				startupError = fmt.Errorf("could not refresh your Sentinel profile: %w", userErr)
-			} else {
-				api.user = &user
-				if api.canUseBlix() {
-					created, createErr := createRunWithRetry(ctx, api)
-					if createErr != nil {
-						return createErr
-					}
-					current = &created
-				} else {
-					startupError = errors.New(nonmemberAccessMessage)
-				}
-			}
-		} else {
-			api.logout(ctx)
-		}
-	}
-	printSessionPanel(current, api, startupError)
-
-	terminalInput := newSessionInput()
-	for {
-		line, err := terminalInput.read(ctx)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if errors.Is(err, context.Canceled) {
-			return context.Canceled
-		}
-		if err != nil {
-			return err
-		}
-		command := strings.TrimSpace(line)
-		if command == "" {
-			continue
-		}
-		switch command {
-		case "/quit":
-			fmt.Println(mutedStyle.Render("Session ended."))
-			return nil
-		case "/help":
-			printHelp()
-			continue
-		case "/endpoint":
-			fmt.Println(mutedStyle.Render("Connected to ") + userStyle.Render(api.baseURL))
-			fmt.Println(mutedStyle.Render("Usage: ") + pinkStyle.Render("/endpoint <http-or-https-url>"))
-			continue
-		case "/login":
-			_, err := api.login(ctx)
-			if err != nil {
-				fmt.Println(errorPanel(err.Error()))
-				continue
-			}
-			if !api.canUseBlix() {
-				current = nil
-				printSessionPanel(current, api, errors.New(nonmemberAccessMessage))
-				continue
-			}
-			created, err := createRunWithRetry(ctx, api)
-			if err != nil {
-				fmt.Println(errorPanel(err.Error()))
-				continue
-			}
-			current = &created
-			printSessionPanel(current, api, nil)
-			continue
-		case "/logout":
-			api.logout(ctx)
-			current = nil
-			printSessionPanel(current, api, nil)
-			continue
-		case "/reset":
-			if !api.canUseBlix() {
-				fmt.Println(errorPanel(api.accessMessage()))
-				continue
-			}
-			created, err := api.createRun(ctx)
-			if err != nil {
-				fmt.Println(errorPanel(err.Error()))
-				continue
-			}
-			current = &created
-			fmt.Println(mutedStyle.Render("Run reset."))
-			printSessionPanel(current, api, nil)
-			continue
-		}
-		if strings.HasPrefix(command, "/endpoint ") {
-			endpoint, err := normalizeEndpoint(strings.TrimSpace(strings.TrimPrefix(command, "/endpoint")))
-			if err != nil {
-				fmt.Println(errorPanel(err.Error()))
-				continue
-			}
-			if endpoint == api.baseURL {
-				fmt.Println(mutedStyle.Render("Already connected to ") + userStyle.Render(endpoint))
-				continue
-			}
-			validationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			err = validateEndpoint(validationCtx, api.http, endpoint)
-			cancel()
-			if err != nil {
-				fmt.Println(errorPanel("Could not connect to " + endpoint + ": " + err.Error()))
-				continue
-			}
-			stored, err := loadCredentials(endpoint)
-			if err != nil {
-				fmt.Println(errorPanel("Could not load credentials for that endpoint: " + err.Error()))
-				continue
-			}
-			api.baseURL = endpoint
-			api.session = stored
-			api.caller = nil
-			api.user = nil
-			return sessionRestart{}
-		}
-		if strings.HasPrefix(command, "/") {
-			fmt.Println(errorPanel("Unknown command: " + command))
-			continue
-		}
-		terminalInput.renderSubmittedMessage(command)
-		if current == nil {
-			fmt.Println(errorPanel(api.accessMessage()))
-			continue
-		}
-
-		appended, err := api.appendMessage(ctx, current.Run.ID, command)
-		if err != nil {
-			fmt.Println(errorPanel(err.Error()))
-			continue
-		}
-		fmt.Println()
-		content, err := runTurn(ctx, api, current.Run.ID, current.Execution.ID, appended.EventPosition)
-		if err != nil {
-			fmt.Println(errorPanel(err.Error()))
-			continue
-		}
-		fmt.Println(responsePanel(content))
+	if err := runTUI(ctx, api); err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintln(os.Stderr, errorPanel(err.Error()))
+		os.Exit(1)
 	}
 }
 
@@ -402,121 +210,6 @@ func normalizeEndpoint(value string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
-func newSessionInput() *sessionInput {
-	return &sessionInput{scanner: bufio.NewScanner(os.Stdin)}
-}
-
-func (i *sessionInput) read(ctx context.Context) (string, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Print(inputPrompt())
-		if !i.scanner.Scan() {
-			if err := i.scanner.Err(); err != nil {
-				return "", err
-			}
-			return "", io.EOF
-		}
-		return i.scanner.Text(), nil
-	}
-
-	model := newInputModel()
-	program := tea.NewProgram(
-		model,
-		tea.WithContext(ctx),
-		tea.WithColorProfile(colorprofile.TrueColor),
-		tea.WithoutSignalHandler(),
-	)
-	finalModel, err := program.Run()
-	if err != nil {
-		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", err
-	}
-	result, ok := finalModel.(*inputModel)
-	if !ok {
-		return "", errors.New("terminal input returned an invalid state")
-	}
-	if result.cancelled {
-		return "", context.Canceled
-	}
-	return result.input.Value(), nil
-}
-
-func newInputModel() *inputModel {
-	input := textinput.New()
-	input.Prompt = "❯  "
-	styles := textinput.DefaultDarkStyles()
-	styles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
-	styles.Focused.Text = lipgloss.NewStyle().Foreground(white).Background(userSurface)
-	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
-	styles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
-	input.SetStyles(styles)
-
-	model := &inputModel{input: input, width: chatWidth()}
-	model.resizeInput()
-	return model
-}
-
-func (m *inputModel) Init() tea.Cmd {
-	return m.input.Focus()
-}
-
-func (m *inputModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
-	switch message := message.(type) {
-	case tea.KeyPressMsg:
-		switch message.String() {
-		case "enter":
-			m.submitted = true
-			return m, tea.Quit
-		case "ctrl+c":
-			m.cancelled = true
-			return m, tea.Quit
-		}
-	case tea.WindowSizeMsg:
-		m.width = max(32, message.Width-chatInset*2)
-		m.resizeInput()
-	}
-
-	var command tea.Cmd
-	m.input, command = m.input.Update(message)
-	return m, command
-}
-
-func (m *inputModel) View() tea.View {
-	if m.submitted || m.cancelled {
-		return tea.NewView("")
-	}
-	return tea.NewView(inputFieldStyle(m.width).Render(m.input.View()))
-}
-
-func (m *inputModel) resizeInput() {
-	contentWidth := m.width - 6 - lipgloss.Width(m.input.Prompt)
-	m.input.SetWidth(max(1, contentWidth))
-}
-
-func inputFieldStyle(width int) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(fieldBorder).
-		Foreground(white).
-		Background(userSurface).
-		Padding(0, 2).
-		MarginLeft(chatInset).
-		Width(width)
-}
-
-func inputPrompt() string {
-	return strings.Repeat(" ", chatInset) + pinkStyle.Render("❯") + " "
-}
-
-func (i *sessionInput) renderSubmittedMessage(message string) {
-	fmt.Println(userMessageCard(message))
-}
-
-func userMessageCard(message string) string {
-	return inputFieldStyle(chatWidth()).Render("❯  " + message)
-}
-
 func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 	var lastErr error
 	for attempt := 0; attempt < 15; attempt++ {
@@ -532,100 +225,6 @@ func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 		}
 	}
 	return createdRun{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
-}
-
-func runTurn(
-	ctx context.Context,
-	api *client,
-	runID string,
-	rootExecutionID string,
-	after uint64,
-) (string, error) {
-	fmt.Println(agentHeader("working"))
-
-	turnCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	status := newTurnStatus()
-	status.render()
-	defer status.clear()
-
-	ticker := time.NewTicker(spinner.Dot.FPS)
-	defer ticker.Stop()
-	events := watchEvents(turnCtx, api, runID, after)
-	toolIDs := make(map[string]string)
-	tree := newActivityTree(rootExecutionID)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-ticker.C:
-			status.advance()
-		case message, open := <-events:
-			if !open {
-				if ctx.Err() != nil {
-					return "", ctx.Err()
-				}
-				return "", errors.New("Blix event stream closed unexpectedly")
-			}
-			if message.err != nil {
-				return "", message.err
-			}
-			for _, event := range message.events {
-				content, activity, done, err := applyEvent(event, toolIDs, tree)
-				if activity != nil {
-					status.printActivity(*activity)
-				}
-				if done {
-					return content, err
-				}
-			}
-		}
-	}
-}
-
-func newTurnStatus() *turnStatus {
-	return &turnStatus{
-		frames:  spinner.Dot.Frames,
-		enabled: term.IsTerminal(int(os.Stdout.Fd())),
-	}
-}
-
-func (s *turnStatus) advance() {
-	if !s.enabled {
-		return
-	}
-	s.frame = (s.frame + 1) % len(s.frames)
-	s.render()
-}
-
-func (s *turnStatus) render() {
-	if !s.enabled {
-		return
-	}
-	frame := pinkStyle.Render(s.frames[s.frame])
-	prefix := strings.Repeat(" ", chatInset+s.depth*4)
-	fmt.Print("\r\x1b[2K" + prefix + frame + " " + mutedStyle.Render("thinking"))
-}
-
-func (s *turnStatus) clear() {
-	if s.enabled {
-		fmt.Print("\r\x1b[2K")
-	}
-}
-
-func (s *turnStatus) printActivity(activity renderedActivity) {
-	s.clear()
-	if s.enabled && activity.key != "" && activity.key == s.lastActivityKey {
-		fmt.Print("\x1b[1A\r\x1b[2K")
-	} else if s.lastActivityKey != "" {
-		fmt.Println()
-	}
-	fmt.Println(activity.line)
-	s.depth = activity.depth
-	s.lastActivityKey = activity.key
-	s.render()
 }
 
 func newActivityTree(rootExecutionID string) *activityTree {
@@ -747,45 +346,6 @@ func applyEvent(
 	return "", nil, false, nil
 }
 
-func watchEvents(
-	ctx context.Context,
-	api *client,
-	runID string,
-	after uint64,
-) <-chan eventsMsg {
-	messages := make(chan eventsMsg)
-	go func() {
-		defer close(messages)
-		position := after
-		for {
-			events, err := api.listEvents(ctx, runID, position)
-			if err != nil {
-				select {
-				case messages <- eventsMsg{err: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			for _, event := range events {
-				position = event.Position
-			}
-			if len(events) > 0 {
-				select {
-				case messages <- eventsMsg{events: events}:
-				case <-ctx.Done():
-					return
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(250 * time.Millisecond):
-			}
-		}
-	}()
-	return messages
-}
-
 func (c *client) createRun(ctx context.Context) (createdRun, error) {
 	var created createdRun
 	err := c.request(ctx, http.MethodPost, "/api/v1/runs", map[string]string{"agent_id": agentID}, &created)
@@ -829,14 +389,14 @@ func (c *client) request(ctx context.Context, method string, path string, payloa
 	return c.doRequest(ctx, method, path, payload, destination, true)
 }
 
-func (c *client) canUseBlix() bool {
-	if c.caller == nil || c.user == nil {
+func canUseBlixIdentity(caller *callerContext, user *currentUser) bool {
+	if caller == nil || user == nil {
 		return false
 	}
-	if c.caller.EntityType != "USER" || c.caller.UserID != c.user.ID || c.caller.EntityID != c.user.EntityID {
+	if caller.EntityType != "USER" || caller.UserID != user.ID || caller.EntityID != user.EntityID {
 		return false
 	}
-	for _, group := range c.user.Groups {
+	for _, group := range user.Groups {
 		if group == blixUsersGroup {
 			return true
 		}
@@ -844,11 +404,11 @@ func (c *client) canUseBlix() bool {
 	return false
 }
 
-func (c *client) accessMessage() string {
-	if c.caller == nil {
+func accessMessage(caller *callerContext, user *currentUser) string {
+	if caller == nil {
 		return "Sign in with /login before starting a run."
 	}
-	if c.user == nil {
+	if user == nil {
 		return "Your Sentinel profile could not be verified. Sign in again with /login."
 	}
 	return nonmemberAccessMessage
@@ -906,11 +466,15 @@ func (c *client) doRequest(
 	return nil
 }
 
-func printSessionPanel(current *createdRun, api *client, startupError error) {
-	width := panelWidth(132)
-	if width < 60 {
-		width = 60
-	}
+func renderSessionPanel(
+	current *createdRun,
+	caller *callerContext,
+	user *currentUser,
+	endpoint string,
+	startupError error,
+	availableWidth int,
+) string {
+	width := min(132, max(32, availableWidth-chatInset*2))
 	contentWidth := width - 8
 	if contentWidth < 20 {
 		contentWidth = 20
@@ -918,18 +482,18 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 
 	stateLabel := "ready"
 	stateColor := green
-	if api.caller == nil {
+	if caller == nil {
 		stateLabel = "signed out"
 		stateColor = amber
-	} else if !api.canUseBlix() {
+	} else if !canUseBlixIdentity(caller, user) {
 		stateLabel = "no access"
 		stateColor = red
 	} else if startupError != nil {
 		stateLabel = "degraded"
 		stateColor = amber
 	}
-	welcome := strings.Join(welcomeLines(api, startupError), "\n")
-	metadata := sessionMetadata(current, api.caller, api.baseURL)
+	welcome := strings.Join(welcomeLines(caller, user, startupError), "\n")
+	metadata := sessionMetadata(current, caller, endpoint)
 	status := lipgloss.NewStyle().Bold(true).Foreground(stateColor).Render("● " + stateLabel)
 	brand := pinkStyle.Render(blixBanner)
 	body := brand + "\n\n" + welcome + "\n\n" + status + "\n\n" + metadata
@@ -958,8 +522,9 @@ func printSessionPanel(current *createdRun, api *client, startupError error) {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(pink).
 		Padding(1, 3).
+		MarginLeft(chatInset).
 		Width(width)
-	fmt.Println(style.Render(content))
+	return style.Render(content)
 }
 
 func sessionMetadata(current *createdRun, caller *callerContext, endpoint string) string {
@@ -996,50 +561,50 @@ func sessionMetadata(current *createdRun, caller *callerContext, endpoint string
 	return strings.Join(lines, "\n")
 }
 
-func welcomeLines(api *client, startupError error) []string {
-	if api.caller == nil {
+func welcomeLines(caller *callerContext, user *currentUser, startupError error) []string {
+	if caller == nil {
 		return []string{
 			pinkStyle.Render("Welcome to Blix"),
 			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
 			mutedStyle.Render("Run ") + pinkStyle.Render("/login") + mutedStyle.Render(" to continue."),
 		}
 	}
-	if api.user == nil {
+	if user == nil {
 		message := "Your Sentinel profile could not be refreshed."
 		if startupError != nil {
 			message = startupError.Error()
 		}
 		return []string{
 			pinkStyle.Render("Signed in"),
-			mutedStyle.Render(api.caller.EntityID),
+			mutedStyle.Render(caller.EntityID),
 			lipgloss.NewStyle().Foreground(red).Render(message),
 		}
 	}
-	name := strings.TrimSpace(api.user.FirstName + " " + api.user.LastName)
+	name := strings.TrimSpace(user.FirstName + " " + user.LastName)
 	if name == "" {
-		name = api.user.Username
+		name = user.Username
 	}
 	if name == "" {
-		name = api.user.Email
+		name = user.Email
 	}
-	identity := strings.TrimSpace(api.user.Email)
-	if api.user.Username != "" {
+	identity := strings.TrimSpace(user.Email)
+	if user.Username != "" {
 		if identity != "" {
 			identity += "  ·  "
 		}
-		identity += "@" + api.user.Username
+		identity += "@" + user.Username
 	}
 	content := []string{pinkStyle.Render("Welcome back, " + name), mutedStyle.Render(identity)}
-	if !api.canUseBlix() {
+	if !canUseBlixIdentity(caller, user) {
 		content = append(content, lipgloss.NewStyle().Foreground(red).Render(nonmemberAccessMessage))
 	}
-	if startupError != nil && api.canUseBlix() {
+	if startupError != nil && canUseBlixIdentity(caller, user) {
 		content = append(content, lipgloss.NewStyle().Foreground(red).Render(startupError.Error()))
 	}
 	return content
 }
 
-func printHelp() {
+func renderHelpPanel(width int) string {
 	commands := []struct {
 		command string
 		detail  string
@@ -1060,23 +625,7 @@ func printHelp() {
 			mutedStyle.Render(command.detail),
 		))
 	}
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(muted).
-		Padding(0, 2).
-		Width(panelWidth(76))
-	fmt.Println(style.Render(strings.Join(lines, "\n")))
-}
-
-func responsePanel(content string) string {
-	width := chatWidth()
-	content = renderMarkdown(content, width-4)
-	return lipgloss.NewStyle().
-		Padding(0, 2).
-		MarginTop(1).
-		MarginLeft(chatInset).
-		Width(width).
-		Render(content)
+	return lipgloss.NewStyle().Width(max(20, width-4)).Render(strings.Join(lines, "\n"))
 }
 
 func renderMarkdown(content string, width int) string {
@@ -1103,55 +652,14 @@ func errorPanel(message string) string {
 		Render(message)
 }
 
-func agentHeader(status string) string {
-	left := lipgloss.NewStyle().Bold(true).Foreground(pink).Render("●  blix")
-	right := mutedStyle.Render(status)
-	return strings.Repeat(" ", chatInset) + alignedRow(left, right, chatWidth())
-}
-
 func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
 	return renderedActivity{
-		key:   key,
-		line:  activityLine(depth, kind, label, status),
-		depth: depth,
+		key:    key,
+		depth:  depth,
+		kind:   kind,
+		label:  label,
+		status: status,
 	}
-}
-
-func activityLine(depth int, kind string, label string, status string) string {
-	width := chatWidth()
-	status = strings.ToLower(strings.TrimSpace(status))
-	statusStyle := mutedStyle
-	switch status {
-	case "succeeded", "completed", "complete", "done", "ok":
-		statusStyle = lipgloss.NewStyle().Foreground(green)
-	case "queued", "waiting", "requeued":
-		statusStyle = lipgloss.NewStyle().Foreground(amber)
-	case "failed", "error":
-		statusStyle = lipgloss.NewStyle().Foreground(red)
-	case "running", "working":
-		statusStyle = lipgloss.NewStyle().Foreground(pink)
-	}
-
-	right := ""
-	if status != "" {
-		right = statusStyle.Render("[" + status + "]")
-	}
-	prefix := strings.Repeat(" ", depth*4)
-	kindColor := softPink
-	if kind == "agent" {
-		kindColor = pink
-	} else if kind == "runtime" {
-		kindColor = muted
-	}
-	kindLabel := lipgloss.NewStyle().Bold(true).Foreground(kindColor).Width(8).Render(kind)
-	label = truncateText(label, width-lipgloss.Width(prefix)-lipgloss.Width(kindLabel)-lipgloss.Width(right)-1)
-	left := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		prefix,
-		kindLabel,
-		mutedStyle.Render(label),
-	)
-	return strings.Repeat(" ", chatInset) + alignedRow(left, right, width)
 }
 
 func verticalRule(height int) string {
@@ -1188,31 +696,4 @@ func truncateText(value string, width int) string {
 		runes = runes[:len(runes)-1]
 	}
 	return string(runes) + "…"
-}
-
-func panelWidth(maximum int) int {
-	width := terminalWidth() - 8
-	if width < 32 {
-		width = 32
-	}
-	if width > maximum {
-		width = maximum
-	}
-	return width
-}
-
-func chatWidth() int {
-	width := terminalWidth() - chatInset*2
-	if width < 32 {
-		return 32
-	}
-	return width
-}
-
-func terminalWidth() int {
-	width, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil || width <= 0 {
-		return 100
-	}
-	return width
 }
