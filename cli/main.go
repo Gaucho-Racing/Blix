@@ -44,7 +44,6 @@ var (
 	amber       = lipgloss.Color("#E4B866")
 	red         = lipgloss.Color("#FF6B7A")
 	userSurface = lipgloss.Color("#262427")
-	fieldBorder = lipgloss.Color("#484349")
 	pinkStyle   = lipgloss.NewStyle().Bold(true).Foreground(pink)
 	mutedStyle  = lipgloss.NewStyle().Foreground(muted)
 	userStyle   = lipgloss.NewStyle().Bold(true).Foreground(white)

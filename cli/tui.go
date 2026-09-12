@@ -113,13 +113,14 @@ func runTUI(ctx context.Context, api *client) error {
 func newTUIModel(ctx context.Context, api *client) *tuiModel {
 	input := textinput.New()
 	input.Prompt = "❯  "
-	input.SetVirtualCursor(false)
+	input.SetVirtualCursor(true)
 	inputStyles := textinput.DefaultDarkStyles()
 	inputStyles.Focused.Prompt = lipgloss.NewStyle().Bold(true).Foreground(pink).Background(userSurface)
 	inputStyles.Focused.Text = lipgloss.NewStyle().Foreground(white).Background(userSurface)
 	inputStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
 	inputStyles.Focused.Suggestion = lipgloss.NewStyle().Foreground(muted).Background(userSurface)
 	inputStyles.Cursor.Color = pink
+	inputStyles.Cursor.Blink = false
 	input.SetStyles(inputStyles)
 
 	view := viewport.New()
@@ -195,14 +196,6 @@ func (m *tuiModel) View() tea.View {
 	view.AltScreen = true
 	view.WindowTitle = "Blix"
 	view.MouseMode = tea.MouseModeCellMotion
-	if !m.busy && m.input.Focused() {
-		cursor := m.input.Cursor()
-		if cursor != nil {
-			cursor.Position.X += chatInset + 3
-			cursor.Position.Y += m.viewport.Height() + 2
-			view.Cursor = cursor
-		}
-	}
 	return view
 }
 
@@ -494,9 +487,9 @@ func (m *tuiModel) renderInput() string {
 			label = "Blix is working"
 		}
 		content := m.spinner.View() + "  " + mutedStyle.Render(label)
-		return activeInputStyle(m.contentWidth()).Render(content)
+		return renderRoundedSurface(content, m.contentWidth(), 1)
 	}
-	return activeInputStyle(m.contentWidth()).Render(m.input.View())
+	return renderRoundedSurface(m.input.View(), m.contentWidth(), 1)
 }
 
 func (m *tuiModel) renderFooter() string {
@@ -681,24 +674,27 @@ func formatDuration(duration time.Duration) string {
 	return duration.Round(time.Second).String()
 }
 
-func activeInputStyle(width int) lipgloss.Style {
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(fieldBorder).
-		Background(userSurface).
-		Padding(1, 2).
-		MarginLeft(chatInset).
-		Width(width)
-}
-
 func renderUserMessage(content string, width int) string {
-	return lipgloss.NewStyle().
+	message := lipgloss.NewStyle().
 		Foreground(white).
 		Background(userSurface).
-		Padding(1, 2).
-		MarginLeft(chatInset).
-		Width(width).
 		Render("❯  " + content)
+	return renderRoundedSurface(message, width, 0)
+}
+
+func renderRoundedSurface(content string, width int, verticalPadding int) string {
+	width = max(4, width)
+	edgeStyle := lipgloss.NewStyle().Foreground(userSurface)
+	top := edgeStyle.Render("▗" + strings.Repeat("▄", width-2) + "▖")
+	bottom := edgeStyle.Render("▝" + strings.Repeat("▀", width-2) + "▘")
+	body := lipgloss.NewStyle().
+		Background(userSurface).
+		Padding(verticalPadding, 2).
+		Width(width).
+		Render(content)
+	return lipgloss.NewStyle().
+		MarginLeft(chatInset).
+		Render(strings.Join([]string{top, body, bottom}, "\n"))
 }
 
 func renderAgentHeader(status string, width int) string {
