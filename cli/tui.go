@@ -33,14 +33,16 @@ type transcriptBlock struct {
 }
 
 type turnView struct {
-	activities    []renderedActivity
-	activityIndex map[string]int
-	toolIDs       map[string]string
-	tree          *activityTree
-	startedAt     time.Time
-	finishedAt    time.Time
-	response      string
-	err           error
+	activities          []renderedActivity
+	activityIndex       map[string]int
+	toolIDs             map[string]string
+	completedExecutions map[string]bool
+	rootExecutionID     string
+	tree                *activityTree
+	startedAt           time.Time
+	finishedAt          time.Time
+	response            string
+	err                 error
 }
 
 type tuiModel struct {
@@ -122,11 +124,12 @@ func newTUIModel(ctx context.Context, api *client) *tuiModel {
 	inputStyles.Cursor.Color = pink
 	inputStyles.Cursor.Blink = false
 	input.SetStyles(inputStyles)
+	input.Focus()
 
 	view := viewport.New()
 	view.FillHeight = true
 	view.SoftWrap = false
-	view.MouseWheelEnabled = true
+	view.MouseWheelEnabled = false
 
 	loader := spinner.New(spinner.WithSpinner(spinner.Dot))
 	loader.Style = pinkStyle
@@ -154,10 +157,6 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m, m.handleKey(message)
-	case tea.MouseWheelMsg:
-		var command tea.Cmd
-		m.viewport, command = m.viewport.Update(message)
-		return m, command
 	case spinner.TickMsg:
 		if !m.busy {
 			return m, nil
@@ -176,12 +175,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleExecutionEvents(message)
 	}
 
-	if !m.busy {
-		var command tea.Cmd
-		m.input, command = m.input.Update(message)
-		return m, command
-	}
-	return m, nil
+	var command tea.Cmd
+	m.input, command = m.input.Update(message)
+	return m, command
 }
 
 func (m *tuiModel) View() tea.View {
@@ -195,7 +191,6 @@ func (m *tuiModel) View() tea.View {
 	view := tea.NewView(content)
 	view.AltScreen = true
 	view.WindowTitle = "Blix"
-	view.MouseMode = tea.MouseModeCellMotion
 	return view
 }
 
@@ -217,10 +212,6 @@ func (m *tuiModel) handleKey(message tea.KeyPressMsg) tea.Cmd {
 		m.viewport.ScrollDown(1)
 		return nil
 	}
-	if m.busy {
-		return nil
-	}
-
 	switch key {
 	case "up", "ctrl+p":
 		m.historyPrevious()
@@ -229,6 +220,9 @@ func (m *tuiModel) handleKey(message tea.KeyPressMsg) tea.Cmd {
 		m.historyNext()
 		return nil
 	case "enter":
+		if m.busy {
+			return nil
+		}
 		return m.submitInput()
 	}
 
@@ -257,10 +251,12 @@ func (m *tuiModel) submitInput() tea.Cmd {
 	m.nextTurnID++
 	m.activeTurnID = m.nextTurnID
 	m.activeTurn = &turnView{
-		activityIndex: make(map[string]int),
-		toolIDs:       make(map[string]string),
-		tree:          newActivityTree(m.current.Execution.ID),
-		startedAt:     time.Now(),
+		activityIndex:       make(map[string]int),
+		toolIDs:             make(map[string]string),
+		completedExecutions: make(map[string]bool),
+		rootExecutionID:     m.current.Execution.ID,
+		tree:                newActivityTree(m.current.Execution.ID),
+		startedAt:           time.Now(),
 	}
 	m.blocks = append(m.blocks, transcriptBlock{kind: transcriptTurn, turn: m.activeTurn})
 	m.setBusy("Blix is working")
@@ -387,6 +383,9 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 		if activity != nil {
 			m.activeTurn.upsertActivity(*activity)
 		}
+		if event.Type == "agent.result_v1" && event.EntityID != "" {
+			m.activeTurn.completedExecutions[event.EntityID] = true
+		}
 		if done {
 			m.finishTurn(content, err)
 			return nil
@@ -400,6 +399,7 @@ func (m *tuiModel) finishTurn(content string, err error) {
 	m.activeTurn.response = content
 	m.activeTurn.err = err
 	m.activeTurn.finishedAt = time.Now()
+	m.activeTurn.completedExecutions[m.activeTurn.rootExecutionID] = true
 	m.activeTurn = nil
 	m.busy = false
 	m.operation = ""
@@ -410,7 +410,6 @@ func (m *tuiModel) finishTurn(content string, err error) {
 func (m *tuiModel) setBusy(operation string) {
 	m.busy = true
 	m.operation = operation
-	m.input.Blur()
 	m.syncTranscript(true)
 }
 
@@ -457,12 +456,13 @@ func (m *tuiModel) renderTurn(turn *turnView) string {
 		status = fmt.Sprintf("%s in %s", verb, formatDuration(turn.finishedAt.Sub(turn.startedAt)))
 	}
 	parts := []string{renderAgentHeader(status, m.contentWidth())}
-	if len(turn.activities) > 0 {
-		rows := make([]string, 0, len(turn.activities))
-		for _, activity := range turn.activities {
+	activities := turn.visibleActivities()
+	if len(activities) > 0 {
+		rows := make([]string, 0, len(activities))
+		for _, activity := range activities {
 			rows = append(rows, renderActivityLine(activity, m.contentWidth()))
 		}
-		parts = append(parts, strings.Join(rows, "\n\n"))
+		parts = append(parts, strings.Join(rows, "\n"))
 	}
 	if turn.finishedAt.IsZero() {
 		depth := 0
@@ -481,20 +481,24 @@ func (m *tuiModel) renderTurn(turn *turnView) string {
 }
 
 func (m *tuiModel) renderInput() string {
-	if m.busy {
-		label := m.operation
-		if label == "" {
-			label = "Blix is working"
-		}
-		content := m.spinner.View() + "  " + mutedStyle.Render(label)
-		return renderRoundedSurface(content, m.contentWidth(), 1)
-	}
 	return renderRoundedSurface(m.input.View(), m.contentWidth(), 1)
 }
 
 func (m *tuiModel) renderFooter() string {
 	left := mutedStyle.Render("  ↑/↓ history  ·  pgup/pgdn scroll")
-	right := mutedStyle.Render("ctrl+c quit  ")
+	rightLabel := "ctrl+c quit  "
+	if m.busy {
+		operation := m.operation
+		if operation == "" {
+			operation = "Blix is working"
+		}
+		rightLabel = operation + " · enter waits  "
+	}
+	rightWidth := m.width - lipgloss.Width(left) - 1
+	right := ""
+	if rightWidth > 0 {
+		right = mutedStyle.Render(truncateText(rightLabel, rightWidth))
+	}
 	return alignedRow(left, right, m.width)
 }
 
@@ -556,6 +560,45 @@ func (turn *turnView) upsertActivity(activity renderedActivity) {
 	}
 	turn.activityIndex[activity.key] = len(turn.activities)
 	turn.activities = append(turn.activities, activity)
+}
+
+func (turn *turnView) visibleActivities() []renderedActivity {
+	toolCounts := make(map[string]int)
+	for _, activity := range turn.activities {
+		if activity.kind == "tool" {
+			toolCounts[activity.executionID]++
+		}
+	}
+
+	emittedSummaries := make(map[string]bool)
+	visible := make([]renderedActivity, 0, len(turn.activities))
+	for _, activity := range turn.activities {
+		if activity.kind == "model" {
+			continue
+		}
+		if activity.kind != "tool" || !turn.completedExecutions[activity.executionID] {
+			visible = append(visible, activity)
+			continue
+		}
+		if emittedSummaries[activity.executionID] {
+			continue
+		}
+		emittedSummaries[activity.executionID] = true
+		count := toolCounts[activity.executionID]
+		label := fmt.Sprintf("called %d tools", count)
+		if count == 1 {
+			label = "called 1 tool"
+		}
+		visible = append(visible, newRenderedActivity(
+			"tool-summary:"+activity.executionID,
+			activity.executionID,
+			activity.depth,
+			"tool",
+			label,
+			"",
+		))
+	}
+	return visible
 }
 
 func loadSessionCmd(ctx context.Context, api *client, clearBlocks bool) tea.Cmd {

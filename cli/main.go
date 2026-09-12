@@ -135,11 +135,12 @@ func (e *httpStatusError) Error() string {
 }
 
 type renderedActivity struct {
-	key    string
-	depth  int
-	kind   string
-	label  string
-	status string
+	key         string
+	executionID string
+	depth       int
+	kind        string
+	label       string
+	status      string
 }
 
 type activityTree struct {
@@ -258,7 +259,7 @@ func applyEvent(
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			depth := tree.agentCall(event.ExecutionID, event.EntityID, payload.AgentID)
-			activity := newRenderedActivity("agent:"+event.EntityID, depth, "agent", payload.AgentID, "queued")
+			activity := newRenderedActivity("agent:"+event.EntityID, event.EntityID, depth, "agent", payload.AgentID, "queued")
 			return "", &activity, false, nil
 		}
 	case "execution.claimed_v1":
@@ -268,7 +269,7 @@ func applyEvent(
 			if depth < 0 {
 				return "", nil, false, nil
 			}
-			activity := newRenderedActivity("agent:"+event.ExecutionID, depth, "agent", agent, "running")
+			activity := newRenderedActivity("agent:"+event.ExecutionID, event.ExecutionID, depth, "agent", agent, "running")
 			return "", &activity, false, nil
 		}
 	case "agent.result_v1":
@@ -280,6 +281,7 @@ func applyEvent(
 			}
 			activity := newRenderedActivity(
 				"agent:"+event.EntityID,
+				event.EntityID,
 				tree.executionDepth(event.ExecutionID),
 				"agent",
 				agent,
@@ -301,6 +303,7 @@ func applyEvent(
 			}
 			activity := newRenderedActivity(
 				"tool:"+event.EntityID,
+				event.ExecutionID,
 				tree.executionDepth(event.ExecutionID),
 				"tool",
 				toolID,
@@ -313,6 +316,7 @@ func applyEvent(
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			activity := newRenderedActivity(
 				fmt.Sprintf("model:%s:%d", event.ExecutionID, payload.Sequence),
+				event.ExecutionID,
 				tree.executionDepth(event.ExecutionID),
 				"model",
 				fmt.Sprintf("call %d", payload.Sequence),
@@ -323,6 +327,7 @@ func applyEvent(
 	case "execution.lease_expired_v1":
 		activity := newRenderedActivity(
 			"execution:"+event.ExecutionID,
+			event.ExecutionID,
 			tree.executionDepth(event.ExecutionID),
 			"runtime",
 			"execution lease expired",
@@ -651,13 +656,21 @@ func errorPanel(message string) string {
 		Render(message)
 }
 
-func newRenderedActivity(key string, depth int, kind string, label string, status string) renderedActivity {
+func newRenderedActivity(
+	key string,
+	executionID string,
+	depth int,
+	kind string,
+	label string,
+	status string,
+) renderedActivity {
 	return renderedActivity{
-		key:    key,
-		depth:  depth,
-		kind:   kind,
-		label:  label,
-		status: status,
+		key:         key,
+		executionID: executionID,
+		depth:       depth,
+		kind:        kind,
+		label:       label,
+		status:      status,
 	}
 }
 
