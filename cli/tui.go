@@ -481,7 +481,7 @@ func (m *tuiModel) renderTurn(turn *turnView) string {
 }
 
 func (m *tuiModel) renderInput() string {
-	return renderRoundedSurface(m.input.View(), m.contentWidth(), 1)
+	return renderMessageSurface(m.input.View(), m.contentWidth(), 1)
 }
 
 func (m *tuiModel) renderFooter() string {
@@ -722,22 +722,16 @@ func renderUserMessage(content string, width int) string {
 		Foreground(white).
 		Background(userSurface).
 		Render("❯  " + content)
-	return renderRoundedSurface(message, width, 0)
+	return renderMessageSurface(message, width, 1)
 }
 
-func renderRoundedSurface(content string, width int, verticalPadding int) string {
-	width = max(4, width)
-	edgeStyle := lipgloss.NewStyle().Foreground(userSurface)
-	top := edgeStyle.Render("▗" + strings.Repeat("▄", width-2) + "▖")
-	bottom := edgeStyle.Render("▝" + strings.Repeat("▀", width-2) + "▘")
-	body := lipgloss.NewStyle().
+func renderMessageSurface(content string, width int, verticalPadding int) string {
+	return lipgloss.NewStyle().
 		Background(userSurface).
 		Padding(verticalPadding, 2).
+		MarginLeft(chatInset).
 		Width(width).
 		Render(content)
-	return lipgloss.NewStyle().
-		MarginLeft(chatInset).
-		Render(strings.Join([]string{top, body, bottom}, "\n"))
 }
 
 func renderAgentHeader(status string, width int) string {
