@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import JsonValue, field_validator, model_validator
+from pydantic import ConfigDict, JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
     CallID,
@@ -46,6 +46,8 @@ class ToolDefinition(ContractModel):
 
 
 class ToolCall(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     schema_version: Literal[1] = 1
     run_id: RunID
     call_id: CallID
@@ -61,6 +63,8 @@ class ToolResultStatus(StrEnum):
 
 
 class ToolResult(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     schema_version: Literal[1] = 1
     run_id: RunID
     call_id: CallID

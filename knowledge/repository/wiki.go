@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/gaucho-racing/blix/knowledge/config"
+	"github.com/gaucho-racing/blix/knowledge/pkg/githubapp"
 	git "github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -17,13 +19,17 @@ import (
 )
 
 type Wiki struct {
-	mutex      sync.RWMutex
-	repository *git.Repository
-	url        string
-	branch     string
-	path       string
-	auth       transport.AuthMethod
-	lastError  error
+	mutex        sync.RWMutex
+	repository   *git.Repository
+	url          string
+	branch       string
+	path         string
+	installation *ghinstallation.Transport
+	appID        string
+	privateKey   string
+	authorName   string
+	authorEmail  string
+	lastError    error
 }
 
 type State struct {
@@ -38,13 +44,22 @@ type State struct {
 
 func OpenWiki(ctx context.Context, configuration config.Config) (*Wiki, error) {
 	wiki := &Wiki{
-		url:    configuration.WikiRepositoryURL,
-		branch: configuration.WikiRepositoryBranch,
-		path:   configuration.WikiRepositoryPath,
+		url:        configuration.WikiRepositoryURL,
+		branch:     configuration.WikiRepositoryBranch,
+		path:       configuration.WikiRepositoryPath,
+		appID:      configuration.GitHubAppID,
+		privateKey: configuration.GitHubPrivateKey,
 	}
-	if configuration.WikiRepositoryToken != "" {
-		wiki.auth = &githttp.BasicAuth{Username: "x-access-token", Password: configuration.WikiRepositoryToken}
+	installation, err := githubapp.NewTransport(
+		configuration.GitHubAppID,
+		configuration.GitHubInstallationID,
+		configuration.GitHubPrivateKey,
+	)
+	if err != nil {
+		wiki.lastError = fmt.Errorf("configure GitHub App: %w", err)
+		return wiki, wiki.lastError
 	}
+	wiki.installation = installation
 	if err := wiki.openOrClone(ctx); err != nil {
 		wiki.lastError = fmt.Errorf("open wiki repository: %w", err)
 		return wiki, wiki.lastError
@@ -88,9 +103,14 @@ func (w *Wiki) openOrClone(ctx context.Context) error {
 	}
 	repository, err := git.PlainOpen(w.path)
 	if errors.Is(err, git.ErrRepositoryNotExists) {
+		var auth transport.AuthMethod
+		auth, err = w.authentication(ctx)
+		if err != nil {
+			return err
+		}
 		repository, err = git.PlainCloneContext(ctx, w.path, false, &git.CloneOptions{
 			URL:           w.url,
-			Auth:          w.auth,
+			Auth:          auth,
 			ReferenceName: plumbing.NewBranchReferenceName(w.branch),
 			SingleBranch:  true,
 		})
@@ -145,10 +165,14 @@ func (w *Wiki) verifyOrigin() error {
 }
 
 func (w *Wiki) syncToRemote(ctx context.Context) error {
+	auth, err := w.authentication(ctx)
+	if err != nil {
+		return err
+	}
 	remoteReference := plumbing.NewRemoteReferenceName("origin", w.branch)
-	err := w.repository.FetchContext(ctx, &git.FetchOptions{
+	err = w.repository.FetchContext(ctx, &git.FetchOptions{
 		RemoteName: "origin",
-		Auth:       w.auth,
+		Auth:       auth,
 		Force:      true,
 		RefSpecs: []gitconfig.RefSpec{
 			gitconfig.RefSpec("+refs/heads/" + w.branch + ":" + remoteReference.String()),
@@ -164,23 +188,18 @@ func (w *Wiki) syncToRemote(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	worktree, err := w.repository.Worktree()
-	if err != nil {
-		return err
-	}
 	localBranch := plumbing.NewBranchReferenceName(w.branch)
-	if _, err := w.repository.Reference(localBranch, true); errors.Is(err, plumbing.ErrReferenceNotFound) {
-		return worktree.Checkout(&git.CheckoutOptions{
-			Branch: localBranch,
-			Hash:   remote.Hash(),
-			Create: true,
-			Force:  true,
-		})
-	} else if err != nil {
-		return err
+	return w.repository.Storer.SetReference(plumbing.NewHashReference(localBranch, remote.Hash()))
+}
+
+func (w *Wiki) authentication(ctx context.Context) (transport.AuthMethod, error) {
+	token, err := w.installation.Token(ctx)
+	if err != nil {
+		var httpError *ghinstallation.HTTPError
+		if errors.As(err, &httpError) && httpError.Response != nil {
+			httpError.Response.Body.Close()
+		}
+		return nil, fmt.Errorf("authenticate GitHub App installation: %w", err)
 	}
-	if err := worktree.Checkout(&git.CheckoutOptions{Branch: localBranch, Force: true}); err != nil {
-		return err
-	}
-	return worktree.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: remote.Hash()})
+	return &githttp.BasicAuth{Username: "x-access-token", Password: token}, nil
 }

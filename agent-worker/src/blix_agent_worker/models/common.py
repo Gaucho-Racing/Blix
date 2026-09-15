@@ -17,6 +17,9 @@ IdentifierPrefix = Literal[
     "ent",
     "usr",
     "sa",
+    "source",
+    "sourcerecord",
+    "changeset",
 ]
 
 
@@ -56,6 +59,9 @@ JobID = _prefixed_ulid("job")
 EntityID = _prefixed_ulid("ent")
 UserID = _prefixed_ulid("usr")
 ServiceAccountID = _prefixed_ulid("sa")
+SourceID = _prefixed_ulid("source")
+SourceRecordID = _prefixed_ulid("sourcerecord")
+ChangesetID = _prefixed_ulid("changeset")
 
 
 def new_ulid(prefix: IdentifierPrefix) -> str:

@@ -16,11 +16,12 @@ import (
 type Handler struct {
 	sources *service.SourceService
 	wiki    *repository.Wiki
+	pages   *service.WikiService
 }
 
-func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki) error {
+func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService) error {
 	router := InitializeRouter(production)
-	InitializeRoutes(router, sources, wiki)
+	InitializeRoutes(router, sources, wiki, pages)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           router,
@@ -55,11 +56,18 @@ func InitializeRouter(production bool) *gin.Engine {
 	return gin.Default()
 }
 
-func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki) {
-	handler := &Handler{sources: sources, wiki: wiki}
+func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService) {
+	handler := &Handler{sources: sources, wiki: wiki, pages: pages}
 	router.GET("/ping", Ping)
 	internal := router.Group("/internal/v1")
 	internal.GET("/repository", handler.GetRepository)
+	internal.POST("/repository/seed", handler.SeedWiki)
+	internal.GET("/pages", handler.ListWikiPages)
+	internal.GET("/page", handler.ReadWikiPage)
+	internal.POST("/changesets", handler.CreateWikiChangeset)
+	internal.GET("/changesets", handler.ListWikiChangesets)
+	internal.GET("/changesets/:changesetID", handler.GetWikiChangeset)
+	internal.POST("/changesets/:changesetID/apply", handler.ApplyWikiChangeset)
 	internal.POST("/sources", handler.CreateSource)
 	internal.GET("/sources", handler.ListSources)
 	internal.POST("/sources/:sourceID/records", handler.IngestSourceRecord)

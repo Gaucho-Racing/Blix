@@ -109,7 +109,9 @@ services:
       WIKI_REPOSITORY_URL: https://github.com/gaucho-racing/blixwiki.git
       WIKI_REPOSITORY_BRANCH: main
       WIKI_REPOSITORY_PATH: /data/wiki
-      BLIXWIKI_GITHUB_TOKEN: ${BLIXWIKI_GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
 
   agent-worker-1:
     container_name: blix-agent-worker-1

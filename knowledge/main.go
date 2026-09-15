@@ -38,5 +38,6 @@ func run(configuration config.Config) error {
 		logger.SugarLogger.Warnf("initialize wiki repository: %v", err)
 	}
 	sources := service.NewSourceService(db)
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki)
+	pages := service.NewWikiService(db, wiki)
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages)
 }

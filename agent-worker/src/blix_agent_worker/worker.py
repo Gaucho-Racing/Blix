@@ -14,6 +14,7 @@ from blix_agent_worker.agents.general_conversation import (
     GeneralConversationV1Input,
     GeneralConversationV1Output,
 )
+from blix_agent_worker.agents.knowledge_curator import KnowledgeCuratorV1Agent
 from blix_agent_worker.clients import (
     ExecutionContext,
     RunwayClient,
@@ -24,6 +25,7 @@ from blix_agent_worker.clients import (
     TavilyClient,
     WorkerRegistration,
 )
+from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.llm import BifrostResponsesModel
 from blix_agent_worker.models.agent import (
     AgentExecutionState,
@@ -40,6 +42,7 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
+from blix_agent_worker.tools.knowledge import KnowledgeApplyV1Tool, KnowledgeProposeV1Tool, KnowledgeReadV1Tool
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
@@ -84,12 +87,14 @@ class AgentWorker:
         model: BifrostResponsesModel,
         tavily: TavilyClient,
         sentinel: SentinelClient,
+        knowledge: KnowledgeClient,
     ) -> None:
         self._runway = runway
         self._worker_id = worker_id
         self._model = model
         self._tavily = tavily
         self._sentinel = sentinel
+        self._knowledge = knowledge
 
     async def handle(self, dispatch: DispatchMessage) -> None:
         try:
@@ -313,6 +318,9 @@ class AgentWorker:
             ToolRegistry(
                 [
                     CurrentTimeV1Tool(),
+                    KnowledgeReadV1Tool(self._knowledge),
+                    KnowledgeProposeV1Tool(self._knowledge),
+                    KnowledgeApplyV1Tool(self._knowledge),
                     SentinelApiV1Tool(self._sentinel, caller_user.id),
                     SentinelImpersonateV1Tool(self._sentinel, caller_user.id),
                     WebExtractV1Tool(self._tavily),
@@ -326,7 +334,13 @@ class AgentWorker:
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
         )
-        agent_registry = AgentRegistry([deep_research])
+        knowledge_curator = KnowledgeCuratorV1Agent(
+            model=self._model,
+            tool_runner=tool_runner,
+            on_tool_result=checkpoint,
+            on_model_response=checkpoint_model,
+        )
+        agent_registry = AgentRegistry([deep_research, knowledge_curator])
         trusted_context = {
             "caller": {
                 **execution.caller_context.model_dump(mode="json"),
@@ -415,6 +429,7 @@ async def run() -> None:
         ) as model,
         TavilyClient() as tavily,
         SentinelClient() as sentinel,
+        KnowledgeClient() as knowledge,
     ):
         registration = await _register_worker(runway, worker_id, concurrency)
         worker_heartbeat = asyncio.create_task(
@@ -425,7 +440,7 @@ async def run() -> None:
                 registration.heartbeat_interval_ms,
             )
         )
-        worker = AgentWorker(runway, worker_id, model, tavily, sentinel)
+        worker = AgentWorker(runway, worker_id, model, tavily, sentinel, knowledge)
         execution_capacity = asyncio.Semaphore(concurrency)
         active_executions: set[asyncio.Task[None]] = set()
         pending_execution_ids: set[str] = set()

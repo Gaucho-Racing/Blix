@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from blix_agent_worker.models.common import ContractModel, Identifier, JsonObject, NonEmptyText, VersionedIdentifier
 
@@ -33,6 +33,8 @@ class ModelCallableDefinition(ContractModel):
 
 
 class ModelCallRequest(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     ref: NonEmptyText
     callable_id: VersionedIdentifier
     arguments: JsonObject

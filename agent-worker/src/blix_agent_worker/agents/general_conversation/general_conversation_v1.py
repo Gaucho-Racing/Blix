@@ -75,7 +75,7 @@ class GeneralConversationV1Agent:
             "web_extract_v1",
             "web_search_v1",
         ),
-        subagent_ids=("deep_research_v1",),
+        subagent_ids=("deep_research_v1", "knowledge_curator_v1"),
     )
 
     def __init__(

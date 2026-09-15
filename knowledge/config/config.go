@@ -19,7 +19,9 @@ type Config struct {
 	WikiRepositoryURL    string
 	WikiRepositoryBranch string
 	WikiRepositoryPath   string
-	WikiRepositoryToken  string
+	GitHubAppID          string
+	GitHubInstallationID string
+	GitHubPrivateKey     string
 }
 
 func Load() (Config, error) {
@@ -42,11 +44,14 @@ func Load() (Config, error) {
 		WikiRepositoryURL:    value("WIKI_REPOSITORY_URL", "https://github.com/gaucho-racing/blixwiki.git"),
 		WikiRepositoryBranch: value("WIKI_REPOSITORY_BRANCH", "main"),
 		WikiRepositoryPath:   value("WIKI_REPOSITORY_PATH", ".data/wiki"),
-		WikiRepositoryToken:  value("BLIXWIKI_GITHUB_TOKEN", ""),
+		GitHubAppID:          value("GITHUB_APP_ID", ""),
+		GitHubInstallationID: value("GITHUB_APP_INSTALLATION_ID", ""),
+		GitHubPrivateKey:     value("GITHUB_APP_PRIVATE_KEY", ""),
 	}
 	parsedRepositoryURL, err := url.ParseRequestURI(configuration.WikiRepositoryURL)
-	if err != nil || parsedRepositoryURL.Scheme != "https" || parsedRepositoryURL.Host == "" {
-		return Config{}, fmt.Errorf("WIKI_REPOSITORY_URL must be a valid HTTPS URL")
+	if err != nil || parsedRepositoryURL.Scheme != "https" || parsedRepositoryURL.Host != "github.com" ||
+		parsedRepositoryURL.User != nil || parsedRepositoryURL.RawQuery != "" || parsedRepositoryURL.Fragment != "" {
+		return Config{}, fmt.Errorf("WIKI_REPOSITORY_URL must be an HTTPS github.com URL without credentials, query, or fragment")
 	}
 	if configuration.WikiRepositoryBranch == "" || strings.ContainsAny(configuration.WikiRepositoryBranch, " ~^:?*[\\") {
 		return Config{}, fmt.Errorf("WIKI_REPOSITORY_BRANCH is invalid")
