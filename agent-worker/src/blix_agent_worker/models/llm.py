@@ -95,6 +95,8 @@ class ModelUsage(ContractModel):
 
 
 class ModelContinuation(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     adapter_id: Identifier
     state: JsonObject
 

@@ -1,8 +1,9 @@
 import json
+import os
 from typing import Literal, Self, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, HttpUrl, TypeAdapter, ValidationError
 
 from blix_agent_worker.llm.main import ModelClientError
 from blix_agent_worker.models.common import JsonObject
@@ -19,71 +20,92 @@ from blix_agent_worker.models.llm import (
 type ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
-class _BifrostModel(BaseModel):
+class _ResponseModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class _BifrostOutputContent(_BifrostModel):
+class _OutputContent(_ResponseModel):
     type: str
     text: str | None = None
     refusal: str | None = None
 
 
-class _BifrostOutputItem(_BifrostModel):
+class _OutputItem(_ResponseModel):
     type: str
     call_id: str | None = None
     name: str | None = None
     arguments: str | None = None
-    content: tuple[_BifrostOutputContent, ...] = ()
+    content: tuple[_OutputContent, ...] = ()
 
 
-class _BifrostUsage(_BifrostModel):
+class _Usage(_ResponseModel):
     input_tokens: int = 0
     output_tokens: int = 0
 
 
-class _BifrostResponse(_BifrostModel):
+class _Response(_ResponseModel):
     status: str
-    output: tuple[_BifrostOutputItem, ...]
-    usage: _BifrostUsage | None = None
+    output: tuple[_OutputItem, ...]
+    usage: _Usage | None = None
 
 
-class BifrostResponsesModel:
-    _CONTINUATION_ADAPTER_ID = "bifrost_responses_v1"
+class OpenAIResponsesModel:
+    _CONTINUATION_ADAPTER_ID = "openai_responses_v1"
 
     def __init__(
         self,
         *,
         base_url: str,
-        username: str,
-        password: str,
-        virtual_key: str,
+        api_key: str,
         model: str,
-        reasoning_effort: ReasoningEffort = "medium",
+        reasoning_effort: ReasoningEffort | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not base_url.strip():
-            raise ValueError("base_url cannot be empty")
-        if not username.strip():
-            raise ValueError("username cannot be empty")
-        if not password:
-            raise ValueError("password cannot be empty")
-        if not virtual_key.strip():
-            raise ValueError("virtual_key cannot be empty")
+        try:
+            endpoint = TypeAdapter(HttpUrl).validate_python(base_url.strip())
+        except ValidationError as error:
+            raise ValueError("LLM_GATEWAY_ENDPOINT must be an absolute HTTP(S) API base URL") from error
+        if endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+            raise ValueError("LLM_GATEWAY_ENDPOINT cannot contain credentials, a query, or a fragment")
+        if not api_key.strip():
+            raise ValueError("LLM_GATEWAY_API_KEY cannot be empty")
+        if any(ord(char) < 33 or ord(char) > 126 for char in api_key.strip()):
+            raise ValueError("LLM_GATEWAY_API_KEY must contain only printable non-whitespace ASCII characters")
         if not model.strip():
-            raise ValueError("model cannot be empty")
+            raise ValueError("LLM_MODEL cannot be empty")
+        if reasoning_effort is not None:
+            try:
+                reasoning_effort = TypeAdapter(ReasoningEffort).validate_python(reasoning_effort)
+            except ValidationError as error:
+                raise ValueError("LLM_REASONING_EFFORT is invalid") from error
 
-        self._model = model
+        self._base_url = f"{str(endpoint).rstrip('/')}/"
+        self._model = model.strip()
         self._reasoning_effort = reasoning_effort
         self._client = httpx.AsyncClient(
-            base_url=f"{base_url.rstrip('/')}/",
-            auth=httpx.BasicAuth(username=username, password=password),
+            base_url=self._base_url,
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "x-bf-vk": virtual_key,
+                "Authorization": f"Bearer {api_key.strip()}",
             },
             timeout=None,
+            follow_redirects=False,
+            transport=transport,
         )
+
+    @classmethod
+    def from_environment(cls) -> Self:
+        return cls(
+            base_url=os.environ.get("LLM_GATEWAY_ENDPOINT", ""),
+            api_key=os.environ.get("LLM_GATEWAY_API_KEY", ""),
+            model=os.environ.get("LLM_MODEL", "gpt-5.6-luna"),
+            reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", "").strip() or None,
+        )
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     async def __aenter__(self) -> Self:
         return self
@@ -102,25 +124,25 @@ class BifrostResponsesModel:
             raise ModelClientError("invalid_model_request", str(error)) from error
 
         try:
-            response = await self._client.post("v1/responses", json=payload)
+            response = await self._client.post("responses", json=payload)
         except httpx.RequestError as error:
             raise ModelClientError("model_unavailable", "The model gateway is unavailable.", retryable=True) from error
 
-        if response.is_error:
+        if not response.is_success:
             message = self._error_message(response)
             retryable = response.status_code == 429 or response.status_code >= 500
             raise ModelClientError("model_request_failed", message, retryable=retryable)
 
         try:
             body = response.json()
-            parsed = _BifrostResponse.model_validate(body)
+            parsed = _Response.model_validate(body)
             if parsed.status != "completed":
                 raise ValueError(f"model response has terminal status {parsed.status!r}")
             message = self._model_message(parsed.output)
             output_items = self._output_items(body)
             continuation = ModelContinuation(
                 adapter_id=self._CONTINUATION_ADAPTER_ID,
-                state={"input_items": [*input_items, *output_items]},
+                state={"endpoint": self._base_url, "model": self._model, "input_items": [*input_items, *output_items]},
             )
         except (ValueError, ValidationError) as error:
             raise ModelClientError(
@@ -128,7 +150,7 @@ class BifrostResponsesModel:
                 "The model gateway returned an invalid response.",
             ) from error
 
-        usage = parsed.usage or _BifrostUsage()
+        usage = parsed.usage or _Usage()
         return ModelResponse(
             message=message,
             usage=ModelUsage(
@@ -144,8 +166,9 @@ class BifrostResponsesModel:
             "input": input_items,
             "store": False,
             "include": ["reasoning.encrypted_content"],
-            "reasoning": {"effort": self._reasoning_effort},
         }
+        if self._reasoning_effort is not None:
+            payload["reasoning"] = {"effort": self._reasoning_effort}
         instructions = [
             message.content
             for message in request.messages
@@ -179,7 +202,12 @@ class BifrostResponsesModel:
         if request.continuation is None:
             return self._conversation_items(request.messages)
         if request.continuation.adapter_id != self._CONTINUATION_ADAPTER_ID:
-            raise ValueError("the model continuation belongs to a different adapter")
+            raise ValueError("the saved execution uses a different model adapter; start a new run")
+        if (
+            request.continuation.state.get("endpoint") != self._base_url
+            or request.continuation.state.get("model") != self._model
+        ):
+            raise ValueError("the saved execution uses a different endpoint or model; start a new run")
 
         continuation_items = request.continuation.state.get("input_items")
         if not isinstance(continuation_items, list) or not continuation_items:
@@ -236,7 +264,7 @@ class BifrostResponsesModel:
         ]
 
     @staticmethod
-    def _model_message(output: tuple[_BifrostOutputItem, ...]) -> ModelMessage:
+    def _model_message(output: tuple[_OutputItem, ...]) -> ModelMessage:
         requests: list[ModelCallRequest] = []
         text_parts: list[str] = []
         for item in output:

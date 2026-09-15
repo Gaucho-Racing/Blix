@@ -1,4 +1,4 @@
-from blix_agent_worker.llm.bifrost import BifrostResponsesModel
 from blix_agent_worker.llm.main import LanguageModel, ModelClientError
+from blix_agent_worker.llm.openai_responses import OpenAIResponsesModel
 
-__all__ = ["BifrostResponsesModel", "LanguageModel", "ModelClientError"]
+__all__ = ["OpenAIResponsesModel", "LanguageModel", "ModelClientError"]

@@ -26,7 +26,7 @@ from blix_agent_worker.clients import (
     WorkerRegistration,
 )
 from blix_agent_worker.clients.knowledge import KnowledgeClient
-from blix_agent_worker.llm import BifrostResponsesModel
+from blix_agent_worker.llm import OpenAIResponsesModel
 from blix_agent_worker.models.agent import (
     AgentExecutionState,
     AgentResult,
@@ -47,9 +47,6 @@ from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
 from blix_agent_worker.tools.web_search import WebSearchV1Tool
-
-BIFROST_BASE_URL = "https://bifrost.gauchoracing.com"
-MODEL = "openai/gpt-5.6-luna"
 
 logger = logging.getLogger("blix_agent_worker")
 
@@ -84,7 +81,7 @@ class AgentWorker:
         self,
         runway: RunwayClient,
         worker_id: str,
-        model: BifrostResponsesModel,
+        model: OpenAIResponsesModel,
         tavily: TavilyClient,
         sentinel: SentinelClient,
         knowledge: KnowledgeClient,
@@ -145,7 +142,7 @@ class AgentWorker:
                 execution.execution_id,
                 self._worker_id,
                 state.version,
-                MODEL,
+                self._model.model,
                 turn_message_id,
                 sequence,
                 response,
@@ -407,7 +404,6 @@ class AgentWorker:
 
 async def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    credentials = _bifrost_credentials()
     concurrency = _agent_worker_concurrency()
     runway_url = os.environ.get("RUNWAY_URL", "http://localhost:10400").strip()
     mqtt_host = os.environ.get("MQTT_HOST", "localhost").strip()
@@ -420,13 +416,7 @@ async def run() -> None:
 
     async with (
         RunwayClient(runway_url) as runway,
-        BifrostResponsesModel(
-            base_url=BIFROST_BASE_URL,
-            username=credentials["BIFROST_USERNAME"],
-            password=credentials["BIFROST_PASSWORD"],
-            virtual_key=credentials["BIFROST_VIRTUAL_KEY"],
-            model=MODEL,
-        ) as model,
+        OpenAIResponsesModel.from_environment() as model,
         TavilyClient() as tavily,
         SentinelClient() as sentinel,
         KnowledgeClient() as knowledge,
@@ -529,18 +519,6 @@ def _agent_worker_concurrency() -> int:
     if concurrency < 1:
         raise RuntimeError("AGENT_WORKER_CONCURRENCY must be at least 1.")
     return concurrency
-
-
-def _bifrost_credentials() -> dict[str, str]:
-    credentials = {
-        "BIFROST_USERNAME": os.environ.get("BIFROST_USERNAME", "").strip(),
-        "BIFROST_PASSWORD": os.environ.get("BIFROST_PASSWORD", ""),
-        "BIFROST_VIRTUAL_KEY": os.environ.get("BIFROST_VIRTUAL_KEY", "").strip(),
-    }
-    missing = [name for name, value in credentials.items() if not value]
-    if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-    return credentials
 
 
 def main() -> None:
