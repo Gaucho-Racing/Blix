@@ -749,7 +749,7 @@ func renderAgentHeader(status string, width int) string {
 func renderActivityLine(activity renderedActivity, width int) string {
 	if activity.kind == "tool_summary" {
 		indent := strings.Repeat(" ", chatInset+activity.depth*4)
-		return indent + pinkStyle.Render(activity.label)
+		return indent + lipgloss.NewStyle().Bold(true).Foreground(softPink).Render(activity.label)
 	}
 
 	status := strings.ToLower(strings.TrimSpace(activity.status))
