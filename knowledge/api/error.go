@@ -14,6 +14,16 @@ func respondError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := "internal server error"
 	switch {
+	case errors.Is(err, service.ErrUnauthorized):
+		status = http.StatusUnauthorized
+		message = "unauthorized"
+	case errors.Is(err, service.ErrForbidden):
+		status = http.StatusForbidden
+		message = "forbidden"
+	case errors.Is(err, service.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+		message = "authentication service unavailable"
+		logger.SugarLogger.Errorf("authentication unavailable: %v", err)
 	case errors.Is(err, service.ErrInvalid), errors.Is(err, repository.ErrInvalid):
 		status = http.StatusBadRequest
 		message = err.Error()

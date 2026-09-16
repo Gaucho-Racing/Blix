@@ -45,7 +45,7 @@ export interface PageRevision {
   content: string
 }
 
-const path = "/v1/knowledge/changesets"
+const path = "/knowledge/v1/changesets"
 
 export async function listChangesets(status: string, before: string): Promise<ChangesetPage> {
   const { data } = await api.get<ChangesetPage>(path, { params: { status, before, limit: 30 } })

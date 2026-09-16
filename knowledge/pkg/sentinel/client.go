@@ -1,0 +1,252 @@
+package sentinel
+
+import (
+	"context"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+var (
+	ErrInvalidToken           = errors.New("invalid sentinel token")
+	ErrSigningKeysUnavailable = errors.New("sentinel signing keys unavailable")
+)
+
+const signingKeyRefetchFloor = time.Minute
+
+type Client struct {
+	baseURL      string
+	clientID     string
+	http         *http.Client
+	keyMu        sync.RWMutex
+	keys         map[string]*rsa.PublicKey
+	lastKeyFetch time.Time
+	keyFetchErr  error
+	keyFetchMu   sync.Mutex
+}
+
+type Claims struct {
+	EntityID         string
+	EntityType       string
+	UserID           string
+	ServiceAccountID string
+	Audience         []string
+	Scope            string
+	Groups           []string
+}
+
+func NewClient(baseURL string, clientID string) *Client {
+	return &Client{
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		clientID: strings.TrimSpace(clientID),
+		http:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (c *Client) Configured() bool {
+	return c.baseURL != "" && c.clientID != ""
+}
+
+func (c *Client) InitializeSigningKeys(ctx context.Context) error {
+	return c.refreshSigningKeys(ctx, true)
+}
+
+func (c *Client) ValidateToken(ctx context.Context, token string) (Claims, error) {
+	tokenClaims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(
+		token,
+		tokenClaims,
+		func(token *jwt.Token) (any, error) {
+			kid, _ := token.Header["kid"].(string)
+			return c.signingKey(ctx, kid)
+		},
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithExpirationRequired(),
+		jwt.WithAudience(c.clientID),
+	)
+	if err != nil {
+		if errors.Is(err, ErrSigningKeysUnavailable) {
+			return Claims{}, err
+		}
+		return Claims{}, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	if !parsed.Valid {
+		return Claims{}, ErrInvalidToken
+	}
+	raw := map[string]any(tokenClaims)
+	claims := Claims{
+		EntityID:         stringClaim(raw, "sub"),
+		EntityType:       stringClaim(raw, "entity_type"),
+		UserID:           stringClaim(raw, "user_id"),
+		ServiceAccountID: stringClaim(raw, "service_account_id"),
+		Audience:         stringSliceClaim(raw, "aud"),
+		Scope:            stringClaim(raw, "scope"),
+		Groups:           stringSliceClaim(raw, "groups"),
+	}
+	if claims.EntityType == "" && stringClaim(raw, "type") == "service_account" {
+		claims.EntityType = "SERVICE_ACCOUNT"
+	}
+	if claims.EntityID == "" {
+		return Claims{}, fmt.Errorf("%w: token subject is missing", ErrInvalidToken)
+	}
+	return claims, nil
+}
+
+func (c *Client) signingKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+	if kid == "" {
+		return nil, fmt.Errorf("%w: token key id is missing", ErrInvalidToken)
+	}
+	if key := c.cachedSigningKey(kid); key != nil {
+		return key, nil
+	}
+	if err := c.refreshSigningKeys(ctx, false); err != nil {
+		return nil, err
+	}
+	if key := c.cachedSigningKey(kid); key != nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("%w: no signing key matches kid %q", ErrInvalidToken, kid)
+}
+
+func (c *Client) cachedSigningKey(kid string) *rsa.PublicKey {
+	c.keyMu.RLock()
+	defer c.keyMu.RUnlock()
+	return c.keys[kid]
+}
+
+func (c *Client) refreshSigningKeys(ctx context.Context, force bool) error {
+	c.keyFetchMu.Lock()
+	defer c.keyFetchMu.Unlock()
+
+	c.keyMu.RLock()
+	lastFetch := c.lastKeyFetch
+	lastError := c.keyFetchErr
+	c.keyMu.RUnlock()
+	if !force && !lastFetch.IsZero() && time.Since(lastFetch) < signingKeyRefetchFloor {
+		return lastError
+	}
+
+	keys, fetchErr := c.fetchSigningKeys(ctx)
+	var err error
+	if fetchErr != nil {
+		err = fmt.Errorf("%w: %v", ErrSigningKeysUnavailable, fetchErr)
+	}
+	c.keyMu.Lock()
+	c.lastKeyFetch = time.Now()
+	c.keyFetchErr = err
+	if err == nil {
+		c.keys = keys
+	}
+	c.keyMu.Unlock()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) fetchSigningKeys(ctx context.Context) (map[string]*rsa.PublicKey, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/core/keys", nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	body, err := c.do(request)
+	if err != nil {
+		return nil, err
+	}
+	var document struct {
+		Keys []struct {
+			KeyType   string `json:"kty"`
+			Use       string `json:"use"`
+			Algorithm string `json:"alg"`
+			ID        string `json:"kid"`
+			Modulus   string `json:"n"`
+			Exponent  string `json:"e"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, fmt.Errorf("decode Sentinel JWKS: %w", err)
+	}
+	keys := make(map[string]*rsa.PublicKey, len(document.Keys))
+	for _, encoded := range document.Keys {
+		if encoded.KeyType != "RSA" || encoded.Algorithm != "RS256" || encoded.Use != "sig" || encoded.ID == "" {
+			continue
+		}
+		key, err := decodeRSAKey(encoded.Modulus, encoded.Exponent)
+		if err != nil {
+			return nil, fmt.Errorf("decode Sentinel signing key %q: %w", encoded.ID, err)
+		}
+		keys[encoded.ID] = key
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("Sentinel JWKS contains no RS256 signing keys")
+	}
+	return keys, nil
+}
+
+func decodeRSAKey(modulus string, exponent string) (*rsa.PublicKey, error) {
+	n, err := base64.RawURLEncoding.DecodeString(modulus)
+	if err != nil || len(n) == 0 {
+		return nil, errors.New("invalid RSA modulus")
+	}
+	e, err := base64.RawURLEncoding.DecodeString(exponent)
+	if err != nil || len(e) == 0 || len(e) > 4 {
+		return nil, errors.New("invalid RSA exponent")
+	}
+	exponentValue := new(big.Int).SetBytes(e)
+	if !exponentValue.IsInt64() || exponentValue.Int64() < 2 {
+		return nil, errors.New("invalid RSA exponent")
+	}
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(exponentValue.Int64())}, nil
+}
+
+func (c *Client) do(request *http.Request) ([]byte, error) {
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("sentinel request failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Sentinel signing keys returned HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read Sentinel signing keys: %w", err)
+	}
+	if len(body) > 1<<20 {
+		return nil, errors.New("Sentinel signing keys response is too large")
+	}
+	return body, nil
+}
+
+func stringClaim(claims map[string]any, name string) string {
+	value, _ := claims[name].(string)
+	return value
+}
+
+func stringSliceClaim(claims map[string]any, name string) []string {
+	switch values := claims[name].(type) {
+	case string:
+		return []string{values}
+	case []any:
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/config"
 	"github.com/gaucho-racing/blix/knowledge/database"
 	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
+	"github.com/gaucho-racing/blix/knowledge/pkg/sentinel"
 	"github.com/gaucho-racing/blix/knowledge/repository"
 	"github.com/gaucho-racing/blix/knowledge/service"
 )
@@ -39,5 +40,12 @@ func run(configuration config.Config) error {
 	}
 	sources := service.NewSourceService(db)
 	pages := service.NewWikiService(db, wiki)
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages)
+	sentinelClient := sentinel.NewClient(configuration.SentinelURL, configuration.SentinelClientID)
+	if sentinelClient.Configured() {
+		if err := sentinelClient.InitializeSigningKeys(ctx); err != nil {
+			logger.SugarLogger.Warnf("initialize Sentinel signing keys: %v", err)
+		}
+	}
+	auth := service.NewAuthService(sentinelClient)
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages, auth)
 }

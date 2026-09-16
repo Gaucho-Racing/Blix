@@ -78,6 +78,5 @@ func run(configuration config.Config) error {
 		workers,
 		eventHub,
 		workerHub,
-		service.NewKnowledgeService(configuration.KnowledgeURL),
 	)
 }

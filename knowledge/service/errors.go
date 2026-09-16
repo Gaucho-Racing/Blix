@@ -7,9 +7,12 @@ import (
 )
 
 var (
-	ErrInvalid  = errors.New("invalid request")
-	ErrNotFound = errors.New("resource not found")
-	ErrConflict = errors.New("resource state conflict")
+	ErrUnauthorized = errors.New("unauthorized")
+	ErrForbidden    = errors.New("forbidden")
+	ErrUnavailable  = errors.New("service unavailable")
+	ErrInvalid      = errors.New("invalid request")
+	ErrNotFound     = errors.New("resource not found")
+	ErrConflict     = errors.New("resource state conflict")
 )
 
 func mapDatabaseError(err error) error {

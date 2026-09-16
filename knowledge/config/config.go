@@ -22,6 +22,8 @@ type Config struct {
 	GitHubAppID          string
 	GitHubInstallationID string
 	GitHubPrivateKey     string
+	SentinelURL          string
+	SentinelClientID     string
 }
 
 func Load() (Config, error) {
@@ -47,6 +49,8 @@ func Load() (Config, error) {
 		GitHubAppID:          value("GITHUB_APP_ID", ""),
 		GitHubInstallationID: value("GITHUB_APP_INSTALLATION_ID", ""),
 		GitHubPrivateKey:     value("GITHUB_APP_PRIVATE_KEY", ""),
+		SentinelURL:          strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
+		SentinelClientID:     value("SENTINEL_CLIENT_ID", ""),
 	}
 	parsedRepositoryURL, err := url.ParseRequestURI(configuration.WikiRepositoryURL)
 	if err != nil || parsedRepositoryURL.Scheme != "https" || parsedRepositoryURL.Host != "github.com" ||
@@ -58,6 +62,11 @@ func Load() (Config, error) {
 	}
 	if configuration.WikiRepositoryPath == "" {
 		return Config{}, fmt.Errorf("WIKI_REPOSITORY_PATH cannot be empty")
+	}
+	sentinelURL, err := url.ParseRequestURI(configuration.SentinelURL)
+	if err != nil || sentinelURL.Host == "" || (sentinelURL.Scheme != "http" && sentinelURL.Scheme != "https") ||
+		sentinelURL.User != nil || sentinelURL.RawQuery != "" || sentinelURL.Fragment != "" {
+		return Config{}, fmt.Errorf("SENTINEL_URL must be an HTTP or HTTPS URL without credentials, query, or fragment")
 	}
 	return configuration, nil
 }

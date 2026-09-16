@@ -90,13 +90,23 @@ func (h *Handler) ListWikiChangesets(c *gin.Context) {
 }
 
 func (h *Handler) ReviewWikiChangeset(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
-	var request service.ReviewChangesetInput
+	var request struct {
+		Note string `json:"note"`
+	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), request)
+	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), service.ReviewChangesetInput{
+		ReviewerEntityID: caller.EntityID,
+		Note:             request.Note,
+	})
 	if err != nil {
 		respondError(c, err)
 		return

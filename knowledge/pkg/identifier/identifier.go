@@ -18,6 +18,7 @@ const (
 	Execution          Prefix = "execution"
 	Message            Prefix = "message"
 	User               Prefix = "usr"
+	ServiceAccount     Prefix = "sa"
 )
 
 func New(prefix Prefix) string {

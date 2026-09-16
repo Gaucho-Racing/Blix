@@ -27,6 +27,12 @@ providers:
     watch: false
 
 upstreams:
+  knowledge:
+    name: blix-knowledge
+    version: 0.1.0
+    instances:
+      - http://knowledge:9988
+
   runway:
     name: blix-runway
     version: 0.1.0
@@ -40,6 +46,22 @@ upstreams:
       - http://web:5173
 
 routes:
+  - name: knowledge-api
+    match:
+      path: /api/knowledge/v1/*
+    upstream: knowledge
+    rewrite:
+      strip_prefix: /api/knowledge
+    envelope: passthrough
+
+  - name: knowledge-ping
+    match:
+      path: /api/knowledge/ping
+    upstream: knowledge
+    rewrite:
+      strip_prefix: /api/knowledge
+    envelope: passthrough
+
   - name: runway-api
     match:
       path: /api/*

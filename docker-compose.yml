@@ -30,6 +30,7 @@ services:
       KERBECS_CONFIG: /etc/kerbecs/kerbecs.yaml
     depends_on:
       - runway
+      - knowledge
       - web
 
   web:
@@ -46,6 +47,7 @@ services:
         condition: service_started
     environment:
       WEB_RUNWAY_URL: http://runway:9999
+      WEB_KNOWLEDGE_URL: http://knowledge:9988
 
   runway:
     container_name: blix-runway
@@ -82,7 +84,6 @@ services:
       SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID:-}
       SENTINEL_CLIENT_SECRET: ${SENTINEL_CLIENT_SECRET:-}
       SENTINEL_SCOPES: ${SENTINEL_SCOPES:-user:read groups:read}
-      KNOWLEDGE_URL: http://knowledge:9988
       SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
   knowledge:
@@ -113,6 +114,8 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
+      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID:-}
 
   agent-worker-1:
     container_name: blix-agent-worker-1

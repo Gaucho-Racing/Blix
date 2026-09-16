@@ -17,7 +17,6 @@ const (
 	Entity         Prefix = "ent"
 	User           Prefix = "usr"
 	ServiceAccount Prefix = "sa"
-	Changeset      Prefix = "changeset"
 )
 
 func New(prefix Prefix) string {

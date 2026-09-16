@@ -19,9 +19,9 @@ type Handler struct {
 	pages   *service.WikiService
 }
 
-func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService) error {
+func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, auth *service.AuthService) error {
 	router := InitializeRouter(production)
-	InitializeRoutes(router, sources, wiki, pages)
+	InitializeRoutes(router, sources, wiki, pages, auth)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           router,
@@ -56,9 +56,14 @@ func InitializeRouter(production bool) *gin.Engine {
 	return gin.Default()
 }
 
-func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService) {
+func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, auth *service.AuthService) {
 	handler := &Handler{sources: sources, wiki: wiki, pages: pages}
 	router.GET("/ping", Ping)
+	reviews := router.Group("/v1/changesets", RequireAuthentication(auth), RequireGroup("BlixAdmins"))
+	reviews.GET("", handler.ListWikiChangesets)
+	reviews.GET("/:changesetID", handler.GetWikiChangeset)
+	reviews.GET("/:changesetID/base", handler.GetWikiChangesetBase)
+	reviews.POST("/:changesetID/review/:decision", handler.ReviewWikiChangeset)
 	internal := router.Group("/internal/v1")
 	internal.GET("/repository", handler.GetRepository)
 	internal.POST("/repository/seed", handler.SeedWiki)
@@ -69,7 +74,6 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.GET("/changesets/:changesetID", handler.GetWikiChangeset)
 	internal.GET("/changesets/:changesetID/base", handler.GetWikiChangesetBase)
 	internal.POST("/changesets/:changesetID/apply", handler.ApplyWikiChangeset)
-	internal.POST("/changesets/:changesetID/review/:decision", handler.ReviewWikiChangeset)
 	internal.POST("/sources", handler.CreateSource)
 	internal.GET("/sources", handler.ListSources)
 	internal.POST("/chat-records", handler.IngestChatRecord)
