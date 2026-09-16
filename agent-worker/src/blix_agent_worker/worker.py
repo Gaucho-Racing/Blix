@@ -336,7 +336,7 @@ class AgentWorker:
                     KnowledgeApplyV1Tool(self._knowledge),
                     KnowledgeRememberV1Tool(
                         self._knowledge,
-                        messages[-1] if messages and execution.parent_execution_id is None else None,
+                        messages if execution.parent_execution_id is None else (),
                         execution.caller_context,
                     ),
                     SentinelApiV1Tool(self._sentinel, caller_user.id),

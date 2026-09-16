@@ -19,6 +19,7 @@ from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
     JsonObject,
+    MessageID,
     SourceID,
     SourceRecordID,
     validation_error_details,
@@ -239,7 +240,10 @@ class KnowledgeApplyV1Tool(_KnowledgeTool):
 
 
 class KnowledgeRememberV1Input(ContractModel):
-    pass
+    message_id: MessageID | None = Field(
+        default=None,
+        description="Original user message ID from this conversation. Omit to capture the latest user message.",
+    )
 
 
 class _StoredChatRecord(BaseModel):
@@ -261,8 +265,10 @@ class KnowledgeRememberV1Tool(_KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_remember_v1",
         description=(
-            "Capture the current user chat message verbatim as attributed evidence when asked to remember team "
-            "knowledge. Takes no arguments: message, caller, timestamp, run and execution IDs come from the runtime. "
+            "Capture an original user chat message verbatim as attributed evidence when asked to remember team "
+            "knowledge. Supply message_id from the conversation message index to capture an earlier message, "
+            "or omit it for the latest message. Call once per source message when remembering multiple messages. "
+            "Text, caller, timestamp, run and execution IDs come from the runtime, not model-supplied content. "
             "Stores a source record only, not a wiki update. Delegate its returned source_record_id to "
             "knowledge_curator_v1, normally in propose mode for unsupported human claims. Do not capture secrets "
             "or sensitive personal information into the shared knowledge store. Safe to retry."
@@ -272,13 +278,17 @@ class KnowledgeRememberV1Tool(_KnowledgeTool):
         idempotent=True,
     )
 
-    def __init__(self, client: KnowledgeClient, message: ConversationMessage | None, caller: CallerContext) -> None:
+    def __init__(
+        self, client: KnowledgeClient, messages: tuple[ConversationMessage, ...], caller: CallerContext
+    ) -> None:
         super().__init__(client)
-        self._message = message
+        self._messages = {message.message_id: message for message in messages}
+        self._latest_message_id = messages[-1].message_id if messages else None
         self._caller = caller
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeRememberV1Input, url: str) -> JsonObject:
-        message = self._message
+        message_id = arguments.message_id or self._latest_message_id
+        message = self._messages.get(message_id)
         if (
             message is None
             or message.role is not ConversationMessageRole.USER
@@ -286,7 +296,8 @@ class KnowledgeRememberV1Tool(_KnowledgeTool):
             or message.parent_execution_id != call.parent_execution_id
         ):
             raise KnowledgeClientError(
-                "chat_context_unavailable", "This execution has no current user message to remember."
+                "chat_context_unavailable",
+                "The selected message must be an original user message from this run and conversation execution.",
             )
         if self._caller.entity_type is not EntityType.USER or self._caller.user_id is None:
             raise KnowledgeClientError("invalid_caller", "Remembering chat knowledge requires a user caller.")

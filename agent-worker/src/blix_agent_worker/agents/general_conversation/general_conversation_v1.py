@@ -7,7 +7,9 @@ from pydantic import Field, ValidationError, model_validator
 from blix_agent_worker.agents.callables import CallableCatalog, CallableCatalogError, CallableNotFoundError
 from blix_agent_worker.agents.general_conversation.prompt import (
     GENERAL_CONVERSATION_V1_CONTEXT_SECTION,
+    GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION,
     GENERAL_CONVERSATION_V1_SYSTEM_PROMPT,
+    GENERAL_CONVERSATION_V1_USER_MESSAGE,
 )
 from blix_agent_worker.agents.runner import AgentRunner
 from blix_agent_worker.llm import LanguageModel, ModelClientError
@@ -131,6 +133,20 @@ class GeneralConversationV1Agent:
             return self._failure(task, "agent_configuration_error", str(error))
 
         system_prompt = self.definition.instructions
+        system_prompt += GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION.format(
+            message_index=json.dumps(
+                [
+                    {
+                        "position": position,
+                        "message_id": message.message_id,
+                        "created_at": message.created_at.isoformat(),
+                    }
+                    for position, message in enumerate(agent_input.messages, start=1)
+                    if message.role is ConversationMessageRole.USER
+                ],
+                separators=(",", ":"),
+            )
+        )
         if task.context:
             system_prompt += GENERAL_CONVERSATION_V1_CONTEXT_SECTION.format(
                 context=json.dumps(task.context, ensure_ascii=False, separators=(",", ":"))
@@ -145,7 +161,13 @@ class GeneralConversationV1Agent:
                             if message.role is ConversationMessageRole.USER
                             else ModelMessageRole.ASSISTANT
                         ),
-                        content=message.content,
+                        content=(
+                            GENERAL_CONVERSATION_V1_USER_MESSAGE.format(
+                                message_id=message.message_id, content=message.content
+                            )
+                            if message.role is ConversationMessageRole.USER
+                            else message.content
+                        ),
                     )
                     for message in agent_input.messages
                 ),
