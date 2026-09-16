@@ -21,6 +21,7 @@ type Handler struct {
 	workers       *service.WorkerService
 	events        *service.EventHub
 	workerUpdates *service.WorkerHub
+	knowledge     *service.KnowledgeService
 }
 
 func Run(
@@ -33,9 +34,10 @@ func Run(
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
+	knowledge *service.KnowledgeService,
 ) error {
 	api := InitializeRouter(production)
-	InitializeRoutes(api, auth, identities, executions, workers, events, workerUpdates)
+	InitializeRoutes(api, auth, identities, executions, workers, events, workerUpdates, knowledge)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api,
@@ -78,6 +80,7 @@ func InitializeRoutes(
 	workers *service.WorkerService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
+	knowledge *service.KnowledgeService,
 ) {
 	handler := &Handler{
 		auth:          auth,
@@ -86,6 +89,7 @@ func InitializeRoutes(
 		workers:       workers,
 		events:        events,
 		workerUpdates: workerUpdates,
+		knowledge:     knowledge,
 	}
 	router.GET("/ping", Ping)
 	router.GET("/v1/auth/config", handler.GetAuthConfiguration)
@@ -98,6 +102,11 @@ func InitializeRoutes(
 	router.GET("/v1/events/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamAllEvents)
 	router.GET("/v1/workers", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListWorkers)
 	router.GET("/v1/workers/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamWorkers)
+	reviews := router.Group("/v1/knowledge/changesets", RequireAuthentication(auth), RequireGroup(adminGroup))
+	reviews.GET("", handler.ListKnowledgeChangesets)
+	reviews.GET("/:changesetID", handler.GetKnowledgeChangeset)
+	reviews.GET("/:changesetID/base", handler.GetKnowledgeChangesetBase)
+	reviews.POST("/:changesetID/review/:decision", handler.ReviewKnowledgeChangeset)
 	router.GET("/v1/runs", RequireAuthentication(auth), handler.ListRuns)
 	router.POST("/v1/runs", RequireAuthentication(auth), handler.CreateRun)
 	router.GET("/v1/runs/:runID", RequireAuthentication(auth), handler.GetRun)

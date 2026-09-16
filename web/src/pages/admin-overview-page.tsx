@@ -1,7 +1,14 @@
-import { Bot, ChevronRight, ServerCog, Workflow, Wrench } from "lucide-react"
+import { Bot, ChevronRight, GitPullRequest, ServerCog, Workflow, Wrench } from "lucide-react"
 import { Link } from "react-router-dom"
 
 const destinations = [
+  {
+    description: "Review proposed wiki edits, publish approved changes, and reject unsupported claims.",
+    href: "/admin/knowledge",
+    icon: GitPullRequest,
+    label: "Wiki changes",
+    status: "Live",
+  },
   {
     description: "Trace messages, model calls, tools, and delegated executions.",
     href: "/admin/runs",

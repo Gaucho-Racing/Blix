@@ -41,6 +41,53 @@ type Snapshot struct {
 	Pages     []Page `json:"pages"`
 }
 
+type PageRevision struct {
+	CommitSHA string `json:"commit_sha"`
+	Exists    bool   `json:"exists"`
+	Content   string `json:"content"`
+}
+
+func (w *Wiki) PageAt(ctx context.Context, commitSHA, pagePath string) (PageRevision, error) {
+	if !ValidCommit(commitSHA) || !ValidPagePath(pagePath) {
+		return PageRevision{}, ErrInvalid
+	}
+	result := PageRevision{CommitSHA: commitSHA}
+	if commitSHA == "" {
+		return result, nil
+	}
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	if w.repository == nil {
+		return result, ErrUnavailable
+	}
+	if err := w.syncToRemote(ctx); err != nil {
+		return result, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	commit, err := w.repository.CommitObject(plumbing.NewHash(commitSHA))
+	if err != nil {
+		return result, fmt.Errorf("%w: base revision is unavailable", ErrUnavailable)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return result, err
+	}
+	err = tree.Files().ForEach(func(file *object.File) error {
+		if file.Name != pagePath {
+			return nil
+		}
+		if file.Size > MaxPageBytes || (file.Mode != filemode.Regular && file.Mode != filemode.Executable) {
+			return ErrInvalid
+		}
+		content, err := file.Contents()
+		if err != nil {
+			return err
+		}
+		result.Exists, result.Content = true, content
+		return nil
+	})
+	return result, err
+}
+
 type Edit struct {
 	Operation string `json:"operation"`
 	Path      string `json:"path"`

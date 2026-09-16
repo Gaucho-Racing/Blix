@@ -15,6 +15,7 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 	"github.com/gaucho-racing/blix/knowledge/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 //go:embed seed/*.md seed/team/*.md seed/seasons/*.md seed/seasons/gr26/*.md seed/seasons/gr27/*.md
@@ -24,8 +25,14 @@ var seasonPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 type WikiService struct {
 	database *gorm.DB
-	wiki     *repository.Wiki
+	wiki     wikiRepository
 	writer   sync.Mutex
+}
+
+type wikiRepository interface {
+	Prepare(context.Context, string, string, string, []repository.Edit, time.Time) (string, error)
+	Publish(context.Context, string, string) error
+	Refresh(context.Context) (string, error)
 }
 
 type CreateChangesetInput struct {
@@ -43,7 +50,7 @@ type ChangesetDetails struct {
 	Files     []model.ChangesetFile `json:"files"`
 }
 
-func NewWikiService(database *gorm.DB, wiki *repository.Wiki) *WikiService {
+func NewWikiService(database *gorm.DB, wiki wikiRepository) *WikiService {
 	return &WikiService{database: database, wiki: wiki}
 }
 
@@ -99,13 +106,38 @@ func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDet
 	return result, err
 }
 
-func (s *WikiService) ListChangesets(ctx context.Context, limit int) ([]model.Changeset, error) {
+type ChangesetPage struct {
+	Changesets []model.Changeset `json:"changesets"`
+	NextCursor string            `json:"next_cursor"`
+}
+
+func (s *WikiService) ListChangesets(ctx context.Context, limit int, status, before string) (ChangesetPage, error) {
 	if limit < 1 || limit > 100 {
-		return nil, ErrInvalid
+		return ChangesetPage{}, ErrInvalid
+	}
+	query := s.database.WithContext(ctx)
+	if status != "" {
+		switch status {
+		case model.ChangesetStatusProposed, model.ChangesetStatusPrepared, model.ChangesetStatusCommitted, model.ChangesetStatusFailed, model.ChangesetStatusRejected:
+			query = query.Where("status = ?", status)
+		default:
+			return ChangesetPage{}, ErrInvalid
+		}
+	}
+	if before != "" {
+		if !identifier.IsValid(before, identifier.Changeset) {
+			return ChangesetPage{}, ErrInvalid
+		}
+		query = query.Where("id < ?", before)
 	}
 	results := []model.Changeset{}
-	err := s.database.WithContext(ctx).Order("created_at DESC, id DESC").Limit(limit).Find(&results).Error
-	return results, err
+	err := query.Order("id DESC").Limit(limit + 1).Find(&results).Error
+	page := ChangesetPage{Changesets: results}
+	if len(results) > limit {
+		page.Changesets = results[:limit]
+		page.NextCursor = results[limit-1].ID
+	}
+	return page, err
 }
 
 func (s *WikiService) ApplyChangeset(ctx context.Context, id string) (ChangesetDetails, error) {
@@ -115,47 +147,68 @@ func (s *WikiService) ApplyChangeset(ctx context.Context, id string) (ChangesetD
 }
 
 func (s *WikiService) apply(ctx context.Context, id string) (ChangesetDetails, error) {
-	result, err := s.GetChangeset(ctx, id)
-	if err != nil {
-		return result, err
-	}
-	if result.Changeset.Status == model.ChangesetStatusCommitted {
-		return result, nil
-	}
-	changeset := &result.Changeset
-	if changeset.ResultCommitSHA == "" {
-		edits := make([]repository.Edit, 0, len(result.Files))
-		for _, file := range result.Files {
-			edits = append(edits, repository.Edit{Operation: file.Operation, Path: file.Path, Content: file.Content})
+	return s.applyReviewed(ctx, id, nil)
+}
+
+func (s *WikiService) applyReviewed(ctx context.Context, id string, review *ReviewChangesetInput) (ChangesetDetails, error) {
+	for _, publish := range []bool{false, true} {
+		var operationError error
+		err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			result, err := s.lockChangeset(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			changeset := result.Changeset
+			if changeset.Status == model.ChangesetStatusRejected {
+				return fmt.Errorf("%w: rejected changesets cannot be published", ErrConflict)
+			}
+			if changeset.Status == model.ChangesetStatusCommitted {
+				return nil
+			}
+			updates := map[string]any{}
+			if review != nil && changeset.ReviewDecision != "approved" {
+				updates = reviewUpdates(*review, "approved")
+			}
+			if publish {
+				operationError = s.wiki.Publish(ctx, changeset.BaseCommitSHA, changeset.ResultCommitSHA)
+				if operationError == nil {
+					updates["status"], updates["committed_at"], updates["error"] = model.ChangesetStatusCommitted, time.Now().UTC(), ""
+				}
+			} else if changeset.ResultCommitSHA == "" {
+				edits := make([]repository.Edit, 0, len(result.Files))
+				for _, file := range result.Files {
+					edits = append(edits, repository.Edit{Operation: file.Operation, Path: file.Path, Content: file.Content})
+				}
+				var sha string
+				sha, operationError = s.wiki.Prepare(ctx, changeset.BaseCommitSHA, changeset.ID, changeset.Summary, edits, changeset.CreatedAt)
+				if operationError == nil {
+					updates["result_commit_sha"], updates["status"], updates["error"] = sha, model.ChangesetStatusPrepared, ""
+				}
+			}
+			if operationError != nil {
+				updates["status"], updates["error"] = model.ChangesetStatusFailed, operationError.Error()
+			}
+			if len(updates) == 0 {
+				return nil
+			}
+			return tx.Model(&model.Changeset{}).Where("id = ?", id).Updates(updates).Error
+		})
+		if err != nil || operationError != nil {
+			return ChangesetDetails{}, errors.Join(err, operationError)
 		}
-		sha, err := s.wiki.Prepare(ctx, changeset.BaseCommitSHA, changeset.ID, changeset.Summary, edits, changeset.CreatedAt)
-		if err != nil {
-			return result, s.recordFailure(ctx, changeset.ID, err)
-		}
-		if err := s.database.WithContext(ctx).Model(&model.Changeset{}).Where("id = ?", id).Updates(map[string]any{
-			"result_commit_sha": sha, "status": model.ChangesetStatusPrepared, "error": "",
-		}).Error; err != nil {
-			return result, err
-		}
-		changeset.ResultCommitSHA = sha
-	}
-	if err := s.wiki.Publish(ctx, changeset.BaseCommitSHA, changeset.ResultCommitSHA); err != nil {
-		return result, s.recordFailure(ctx, id, err)
-	}
-	now := time.Now().UTC()
-	if err := s.database.WithContext(ctx).Model(&model.Changeset{}).Where("id = ?", id).Updates(map[string]any{
-		"status": model.ChangesetStatusCommitted, "committed_at": now, "error": "",
-	}).Error; err != nil {
-		return result, err
 	}
 	return s.GetChangeset(ctx, id)
 }
 
-func (s *WikiService) recordFailure(ctx context.Context, id string, cause error) error {
-	err := s.database.WithContext(ctx).Model(&model.Changeset{}).Where("id = ?", id).Updates(map[string]any{
-		"status": model.ChangesetStatusFailed, "error": cause.Error(),
-	}).Error
-	return errors.Join(cause, err)
+func (s *WikiService) lockChangeset(ctx context.Context, tx *gorm.DB, id string) (ChangesetDetails, error) {
+	if !identifier.IsValid(id, identifier.Changeset) {
+		return ChangesetDetails{}, ErrInvalid
+	}
+	var changeset model.Changeset
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&changeset, "id = ?", id).Error; err != nil {
+		return ChangesetDetails{}, mapDatabaseError(err)
+	}
+	return NewWikiService(tx, s.wiki).GetChangeset(ctx, id)
 }
 
 func (s *WikiService) Seed(ctx context.Context) (ChangesetDetails, error) {

@@ -7,6 +7,7 @@ const (
 	ChangesetStatusPrepared  = "prepared"
 	ChangesetStatusCommitted = "committed"
 	ChangesetStatusFailed    = "failed"
+	ChangesetStatusRejected  = "rejected"
 
 	ChangesetTypeContent    = "content"
 	ChangesetTypeStructural = "structural"
@@ -24,6 +25,10 @@ type Changeset struct {
 	BaseCommitSHA   string     `json:"base_commit_sha" gorm:"size:64;not null"`
 	ResultCommitSHA string     `json:"result_commit_sha" gorm:"size:64;not null"`
 	Error           string     `json:"error" gorm:"type:text;not null"`
+	ReviewDecision  string     `json:"review_decision" gorm:"not null;default:''"`
+	ReviewedBy      string     `json:"reviewed_by" gorm:"not null;default:''"`
+	ReviewNote      string     `json:"review_note" gorm:"type:text;not null;default:''"`
+	ReviewedAt      *time.Time `json:"reviewed_at,omitempty"`
 	CommittedAt     *time.Time `json:"committed_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt       time.Time  `json:"updated_at" gorm:"autoUpdateTime"`

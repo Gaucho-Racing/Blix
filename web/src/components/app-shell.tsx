@@ -1,4 +1,4 @@
-import { Bot, BookOpen, CalendarClock, Gauge, LockKeyhole, LogIn, LogOut, MessageSquare, ServerCog, Workflow, Wrench } from "lucide-react"
+import { Bot, BookOpen, CalendarClock, Gauge, GitPullRequest, LockKeyhole, LogIn, LogOut, MessageSquare, ServerCog, Workflow, Wrench } from "lucide-react"
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 
 import { useAuth } from "@/lib/auth"
@@ -70,6 +70,11 @@ export function AppShell() {
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/agents">
                 <Bot size={17} />
                 Agents
+                {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
+              </NavLink>
+              <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/knowledge">
+                <GitPullRequest size={17} />
+                Wiki changes
                 {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/tools">

@@ -31,6 +31,7 @@ type Config struct {
 	SentinelClientSecret    string
 	SentinelScopes          string
 	SentinelServiceToken    string
+	KnowledgeURL            string
 }
 
 func Load() (Config, error) {
@@ -80,6 +81,7 @@ func Load() (Config, error) {
 		SentinelClientSecret:    value("SENTINEL_CLIENT_SECRET", ""),
 		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
 		SentinelServiceToken:    value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
+		KnowledgeURL:            strings.TrimRight(value("KNOWLEDGE_URL", "http://knowledge:9988"), "/"),
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")
@@ -89,6 +91,9 @@ func Load() (Config, error) {
 	}
 	if err := validateHTTPURL(configuration.SentinelURL); err != nil {
 		return Config{}, fmt.Errorf("SENTINEL_URL %w", err)
+	}
+	if err := validateHTTPURL(configuration.KnowledgeURL); err != nil {
+		return Config{}, fmt.Errorf("KNOWLEDGE_URL %w", err)
 	}
 	if (configuration.SentinelClientID == "") != (configuration.SentinelClientSecret == "") {
 		return Config{}, fmt.Errorf("SENTINEL_CLIENT_ID and SENTINEL_CLIENT_SECRET must be configured together")

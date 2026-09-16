@@ -54,18 +54,54 @@ func (h *Handler) GetWikiChangeset(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *Handler) GetWikiChangesetBase(c *gin.Context) {
+	result, err := h.pages.GetChangeset(c.Request.Context(), c.Param("changesetID"))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	for _, file := range result.Files {
+		if file.Path != c.Query("path") {
+			continue
+		}
+		page, err := h.wiki.PageAt(c.Request.Context(), result.Changeset.BaseCommitSHA, file.Path)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, page)
+		return
+	}
+	respondError(c, service.ErrNotFound)
+}
+
 func (h *Handler) ListWikiChangesets(c *gin.Context) {
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.pages.ListChangesets(c.Request.Context(), limit)
+	result, err := h.pages.ListChangesets(c.Request.Context(), limit, c.Query("status"), c.Query("before"))
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"changesets": result})
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) ReviewWikiChangeset(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
+	var request service.ReviewChangesetInput
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) ApplyWikiChangeset(c *gin.Context) {
