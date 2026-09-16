@@ -70,6 +70,10 @@ class GeneralConversationV1Agent:
         model_profile="general_reasoning",
         tool_ids=(
             "current_time_v1",
+            "knowledge_remember_v1",
+            "knowledge_read_v1",
+            "knowledge_propose_v1",
+            "knowledge_apply_v1",
             "sentinel_api_v1",
             "sentinel_impersonate_v1",
             "web_extract_v1",

@@ -16,6 +16,8 @@ const (
 	Entity             Prefix = "ent"
 	Run                Prefix = "run"
 	Execution          Prefix = "execution"
+	Message            Prefix = "message"
+	User               Prefix = "usr"
 )
 
 func New(prefix Prefix) string {

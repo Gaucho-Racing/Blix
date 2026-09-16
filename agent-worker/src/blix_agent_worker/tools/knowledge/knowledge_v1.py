@@ -2,7 +2,16 @@ import os
 import posixpath
 from typing import Annotated, ClassVar, Literal, Self
 
-from pydantic import ConfigDict, Field, HttpUrl, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from blix_agent_worker.clients.knowledge import KnowledgeClient, KnowledgeClientError
 from blix_agent_worker.models.common import (
@@ -10,9 +19,12 @@ from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
     JsonObject,
+    SourceID,
     SourceRecordID,
     validation_error_details,
 )
+from blix_agent_worker.models.context import CallerContext, EntityType
+from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, ToolResult, ToolResultStatus
 
 PagePath = Annotated[str, Field(min_length=4, max_length=512, pattern=r"^[a-zA-Z0-9_/-][a-zA-Z0-9_./-]*\.md$")]
@@ -224,3 +236,88 @@ class KnowledgeApplyV1Tool(_KnowledgeTool):
                 "changeset_not_owned", "Only changesets from this run and execution may be applied."
             )
         return await self._client.request(url, "POST", f"{path}/apply")
+
+
+class KnowledgeRememberV1Input(ContractModel):
+    pass
+
+
+class _StoredChatRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    source_id: SourceID
+    source_record_id: SourceRecordID
+
+
+class _RememberResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    record: _StoredChatRecord
+    created: bool
+
+
+class KnowledgeRememberV1Tool(_KnowledgeTool):
+    input_model = KnowledgeRememberV1Input
+    definition = ToolDefinition(
+        id="knowledge_remember_v1",
+        description=(
+            "Capture the current user chat message verbatim as attributed evidence when asked to remember team "
+            "knowledge. Takes no arguments: message, caller, timestamp, run and execution IDs come from the runtime. "
+            "Stores a source record only, not a wiki update. Delegate its returned source_record_id to "
+            "knowledge_curator_v1, normally in propose mode for unsupported human claims. Do not capture secrets "
+            "or sensitive personal information into the shared knowledge store. Safe to retry."
+        ),
+        input_schema=KnowledgeRememberV1Input.model_json_schema(),
+        impact=ToolImpact.MUTATING,
+        idempotent=True,
+    )
+
+    def __init__(self, client: KnowledgeClient, message: ConversationMessage | None, caller: CallerContext) -> None:
+        super().__init__(client)
+        self._message = message
+        self._caller = caller
+
+    async def _execute(self, call: ToolCall, arguments: KnowledgeRememberV1Input, url: str) -> JsonObject:
+        message = self._message
+        if (
+            message is None
+            or message.role is not ConversationMessageRole.USER
+            or message.run_id != call.run_id
+            or message.parent_execution_id != call.parent_execution_id
+        ):
+            raise KnowledgeClientError(
+                "chat_context_unavailable", "This execution has no current user message to remember."
+            )
+        if self._caller.entity_type is not EntityType.USER or self._caller.user_id is None:
+            raise KnowledgeClientError("invalid_caller", "Remembering chat knowledge requires a user caller.")
+        if not message.content.strip() or len(message.content.encode("utf-8")) > 1024 * 1024:
+            raise KnowledgeClientError("invalid_knowledge_request", "The message must contain text up to 1 MiB.")
+        response = await self._client.request(
+            url,
+            "POST",
+            "chat-records",
+            payload={
+                "run_id": call.run_id,
+                "execution_id": call.parent_execution_id,
+                "message_id": message.message_id,
+                "entity_id": self._caller.entity_id,
+                "user_id": self._caller.user_id,
+                "content": message.content,
+                "occurred_at": message.created_at.isoformat(),
+            },
+        )
+        try:
+            stored = _RememberResponse.model_validate(response)
+        except ValidationError as error:
+            raise KnowledgeClientError(
+                "invalid_knowledge_response", "The knowledge service returned an invalid record."
+            ) from error
+        return {
+            "source_id": stored.record.source_id,
+            "source_record_id": stored.record.source_record_id,
+            "message_id": message.message_id,
+            "created": stored.created,
+            "evidence_type": "human_statement",
+            "wiki_status": "not_published",
+            "recommended_mode": "propose",
+        }

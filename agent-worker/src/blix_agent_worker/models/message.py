@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 
 from blix_agent_worker.models.common import ContractModel, ExecutionID, MessageID, NonEmptyText, RunID
 
@@ -13,6 +13,8 @@ class ConversationMessageRole(StrEnum):
 
 
 class ConversationMessage(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     message_id: MessageID
     run_id: RunID
     parent_execution_id: ExecutionID

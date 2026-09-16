@@ -42,7 +42,12 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
-from blix_agent_worker.tools.knowledge import KnowledgeApplyV1Tool, KnowledgeProposeV1Tool, KnowledgeReadV1Tool
+from blix_agent_worker.tools.knowledge import (
+    KnowledgeApplyV1Tool,
+    KnowledgeProposeV1Tool,
+    KnowledgeReadV1Tool,
+    KnowledgeRememberV1Tool,
+)
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
@@ -311,6 +316,17 @@ class AgentWorker:
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
         resume_result: AgentResult | None,
     ) -> AgentRunOutcome:
+        messages = tuple(
+            ConversationMessage(
+                message_id=message.message_id,
+                run_id=message.run_id,
+                parent_execution_id=message.parent_execution_id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+            )
+            for message in execution.messages
+        )
         tool_runner = ToolRunner(
             ToolRegistry(
                 [
@@ -318,6 +334,11 @@ class AgentWorker:
                     KnowledgeReadV1Tool(self._knowledge),
                     KnowledgeProposeV1Tool(self._knowledge),
                     KnowledgeApplyV1Tool(self._knowledge),
+                    KnowledgeRememberV1Tool(
+                        self._knowledge,
+                        messages[-1] if messages and execution.parent_execution_id is None else None,
+                        execution.caller_context,
+                    ),
                     SentinelApiV1Tool(self._sentinel, caller_user.id),
                     SentinelImpersonateV1Tool(self._sentinel, caller_user.id),
                     WebExtractV1Tool(self._tavily),
@@ -360,17 +381,6 @@ class AgentWorker:
             task = execution.task.model_copy(update={"context": task_context})
             return await agent.run(task, state=execution.state, resume_result=resume_result)
 
-        messages = tuple(
-            ConversationMessage(
-                message_id=message.message_id,
-                run_id=message.run_id,
-                parent_execution_id=message.parent_execution_id,
-                role=message.role,
-                content=message.content,
-                created_at=message.created_at,
-            )
-            for message in execution.messages
-        )
         agent_input = GeneralConversationV1Input(messages=messages)
         agent = GeneralConversationV1Agent(
             model=self._model,

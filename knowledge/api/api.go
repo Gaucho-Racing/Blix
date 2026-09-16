@@ -70,6 +70,7 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.POST("/changesets/:changesetID/apply", handler.ApplyWikiChangeset)
 	internal.POST("/sources", handler.CreateSource)
 	internal.GET("/sources", handler.ListSources)
+	internal.POST("/chat-records", handler.IngestChatRecord)
 	internal.POST("/sources/:sourceID/records", handler.IngestSourceRecord)
 	internal.GET("/source-records/:sourceRecordID", handler.GetSourceRecord)
 }

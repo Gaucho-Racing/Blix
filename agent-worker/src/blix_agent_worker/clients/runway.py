@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Self
 
 import httpx
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
 from blix_agent_worker.models.common import (
@@ -27,6 +27,8 @@ class RunwayClientError(Exception):
 
 
 class RunwayMessage(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     message_id: MessageID
     run_id: RunID
     parent_execution_id: ExecutionID
