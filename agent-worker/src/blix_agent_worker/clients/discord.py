@@ -115,6 +115,8 @@ class DiscordMessage(BaseModel):
     pinned: bool = False
     attachments: tuple[DiscordAttachment, ...] = ()
     embeds: tuple[JsonObject, ...] = ()
+    components: tuple[JsonObject, ...] = ()
+    flags: int = 0
     message_reference: JsonObject | None = None
 
 
@@ -254,11 +256,16 @@ class DiscordClient:
             raise self._invalid_response()
         cleanup_succeeded = False
         try:
-            query = {"wait": "true"}
+            query = {"wait": "true", "with_components": "true"}
             if channel.type in PUBLIC_THREAD_TYPES:
                 query["thread_id"] = channel.id
             body: JsonObject = {
-                "content": content,
+                "flags": 1 << 15,
+                "components": [
+                    {"type": 10, "content": content},
+                    {"type": 14, "divider": True, "spacing": 1},
+                    {"type": 10, "content": "-# Sent via Blix"},
+                ],
                 "username": username,
                 "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
             }

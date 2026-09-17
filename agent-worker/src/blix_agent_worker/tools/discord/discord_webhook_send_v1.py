@@ -10,7 +10,11 @@ class DiscordWebhookSendV1Input(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False)
 
     channel_id: DiscordID = Field(description="Destination text/announcement channel or existing public thread ID.")
-    content: str = Field(min_length=1, max_length=2000, description="Exact message to publish. Mentions are enabled.")
+    content: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="Message body to publish. Mentions are enabled. Runtime adds the divider and Blix attribution.",
+    )
 
     @field_validator("content")
     @classmethod
@@ -34,8 +38,9 @@ class DiscordWebhookSendV1Tool:
         id="discord_webhook_send_v1",
         description=(
             "Publish a Discord message only when the user requests sending it. Creates a temporary channel webhook, "
-            "sends once, then attempts deletion. Runtime supplies the verified caller's name and avatar, labeled "
-            "'via Blix'; this is a bot/webhook message, not the user's Discord account. Bot permissions and the "
+            "sends once, then attempts deletion. Runtime supplies the verified caller's name and avatar, and adds "
+            "a divider with a small 'Sent via Blix' footer. Do not add attribution yourself. This is a bot/webhook "
+            "message, not the user's Discord account. Bot permissions and the "
             "configured guild apply. User, role, and everyone mentions are enabled. No attachments or new threads. "
             "An uncertain result must not be blindly retried. Successful sends return a message URL; failed cleanup "
             "does not mean the message failed."
@@ -64,7 +69,7 @@ class DiscordWebhookSendV1Tool:
             )
         name = " ".join(f"{self._caller.first_name} {self._caller.last_name}".split())
         name = name or self._caller.username.strip() or "Member"
-        username = f"{name[:71]} via Blix"
+        username = name[:80]
         avatar_url = None
         if self._caller.avatar_url:
             try:
