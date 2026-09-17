@@ -25,6 +25,7 @@ from blix_agent_worker.clients import (
     TavilyClient,
     WorkerRegistration,
 )
+from blix_agent_worker.clients.discord import DiscordClient
 from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.llm import OpenAIResponsesModel
 from blix_agent_worker.models.agent import (
@@ -42,6 +43,7 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
+from blix_agent_worker.tools.discord import DiscordReadV1Tool
 from blix_agent_worker.tools.knowledge import (
     KnowledgeApplyV1Tool,
     KnowledgeProposeV1Tool,
@@ -90,6 +92,7 @@ class AgentWorker:
         tavily: TavilyClient,
         sentinel: SentinelClient,
         knowledge: KnowledgeClient,
+        discord: DiscordClient,
     ) -> None:
         self._runway = runway
         self._worker_id = worker_id
@@ -97,6 +100,7 @@ class AgentWorker:
         self._tavily = tavily
         self._sentinel = sentinel
         self._knowledge = knowledge
+        self._discord = discord
 
     async def handle(self, dispatch: DispatchMessage) -> None:
         try:
@@ -331,6 +335,7 @@ class AgentWorker:
             ToolRegistry(
                 [
                     CurrentTimeV1Tool(),
+                    DiscordReadV1Tool(self._discord),
                     KnowledgeReadV1Tool(self._knowledge),
                     KnowledgeProposeV1Tool(self._knowledge),
                     KnowledgeApplyV1Tool(self._knowledge),
@@ -430,6 +435,7 @@ async def run() -> None:
         TavilyClient() as tavily,
         SentinelClient() as sentinel,
         KnowledgeClient() as knowledge,
+        DiscordClient() as discord,
     ):
         registration = await _register_worker(runway, worker_id, concurrency)
         worker_heartbeat = asyncio.create_task(
@@ -440,7 +446,7 @@ async def run() -> None:
                 registration.heartbeat_interval_ms,
             )
         )
-        worker = AgentWorker(runway, worker_id, model, tavily, sentinel, knowledge)
+        worker = AgentWorker(runway, worker_id, model, tavily, sentinel, knowledge, discord)
         execution_capacity = asyncio.Semaphore(concurrency)
         active_executions: set[asyncio.Task[None]] = set()
         pending_execution_ids: set[str] = set()

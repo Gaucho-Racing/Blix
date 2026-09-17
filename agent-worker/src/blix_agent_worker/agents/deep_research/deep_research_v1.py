@@ -60,7 +60,7 @@ class DeepResearchV1Agent(ToolAgent):
         id="deep_research_v1",
         kind=AgentKind.SPECIALIST,
         description=(
-            "Research a question using public web sources, inspect the strongest sources, and return a rigorous "
+            "Research a question using public web and authorized internal sources, and return a rigorous "
             "report with inline source URLs."
         ),
         instructions=DEEP_RESEARCH_V1_SYSTEM_PROMPT,
@@ -69,6 +69,7 @@ class DeepResearchV1Agent(ToolAgent):
         model_profile="deep_research",
         tool_ids=(
             "current_time_v1",
+            "discord_read_v1",
             "knowledge_read_v1",
             "sentinel_api_v1",
             "sentinel_impersonate_v1",
