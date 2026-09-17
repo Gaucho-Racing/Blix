@@ -4,13 +4,19 @@ from typing import Annotated, Self
 
 from pydantic import Field, ValidationError, model_validator
 
-from blix_agent_worker.agents.callables import CallableCatalog, CallableCatalogError, CallableNotFoundError
+from blix_agent_worker.agents.callables import (
+    CallableCatalog,
+    CallableCatalogError,
+    CallableNotFoundError,
+    restrict_callable_ids,
+)
 from blix_agent_worker.agents.general_conversation.prompt import (
     GENERAL_CONVERSATION_V1_CONTEXT_SECTION,
     GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION,
     GENERAL_CONVERSATION_V1_SYSTEM_PROMPT,
     GENERAL_CONVERSATION_V1_USER_MESSAGE,
 )
+from blix_agent_worker.agents.registry import AgentRegistryError
 from blix_agent_worker.agents.runner import AgentRunner
 from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
@@ -45,6 +51,7 @@ from blix_agent_worker.models.llm import (
 from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRunner
+from blix_agent_worker.tools.registry import ToolRegistryError
 
 
 class GeneralConversationV1Input(ContractModel):
@@ -74,8 +81,6 @@ class GeneralConversationV1Agent:
             "current_time_v1",
             "knowledge_remember_v1",
             "knowledge_read_v1",
-            "knowledge_propose_v1",
-            "knowledge_apply_v1",
             "sentinel_api_v1",
             "sentinel_impersonate_v1",
             "web_extract_v1",
@@ -123,14 +128,18 @@ class GeneralConversationV1Agent:
         if any(message.parent_execution_id != task.execution_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the agent execution.")
 
-        tool_definitions = self._tool_runner.registry.definitions()
-        allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
-        subagent_definitions = self._agent_runner.registry.definitions()
-        allowed_subagent_ids = frozenset(definition.id for definition in subagent_definitions)
         try:
+            tool_definitions = self._tool_runner.registry.definitions(
+                restrict_callable_ids(self.definition.tool_ids, task.allowed_tool_ids)
+            )
+            subagent_definitions = self._agent_runner.registry.definitions(
+                restrict_callable_ids(self.definition.subagent_ids, task.allowed_subagent_ids)
+            )
             catalog = CallableCatalog(tools=tool_definitions, agents=subagent_definitions)
-        except CallableCatalogError as error:
+        except (CallableCatalogError, ToolRegistryError, AgentRegistryError) as error:
             return self._failure(task, "agent_configuration_error", str(error))
+        allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
+        allowed_subagent_ids = frozenset(definition.id for definition in subagent_definitions)
 
         system_prompt = self.definition.instructions
         system_prompt += GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION.format(

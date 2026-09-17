@@ -4,7 +4,12 @@ from typing import ClassVar
 
 from pydantic import ValidationError
 
-from blix_agent_worker.agents.callables import CallableCatalog, CallableNotFoundError
+from blix_agent_worker.agents.callables import (
+    CallableCatalog,
+    CallableCatalogError,
+    CallableNotFoundError,
+    restrict_callable_ids,
+)
 from blix_agent_worker.llm import LanguageModel, ModelClientError
 from blix_agent_worker.models.agent import (
     AgentDefinition,
@@ -34,6 +39,7 @@ from blix_agent_worker.models.llm import (
 )
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRunner
+from blix_agent_worker.tools.registry import ToolRegistryError
 
 
 class ToolAgent:
@@ -45,7 +51,7 @@ class ToolAgent:
         raise NotImplementedError
 
     def tool_definitions(self, agent_input: ContractModel) -> tuple[ToolDefinition, ...]:
-        return self._tool_runner.registry.definitions()
+        return self._tool_runner.registry.definitions(self.definition.tool_ids)
 
     def validate_output(self, task: AgentTask, output: ContractModel, messages: list[ModelMessage]) -> None:
         pass
@@ -83,9 +89,15 @@ class ToolAgent:
                 details=validation_error_details(error),
             )
 
-        tool_definitions = self.tool_definitions(agent_input)
+        permitted_ids = frozenset(restrict_callable_ids(self.definition.tool_ids, task.allowed_tool_ids))
+        try:
+            tool_definitions = tuple(
+                definition for definition in self.tool_definitions(agent_input) if definition.id in permitted_ids
+            )
+            catalog = CallableCatalog(tools=tool_definitions)
+        except (CallableCatalogError, ToolRegistryError) as error:
+            return self._failure(task, "agent_configuration_error", str(error))
         allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
-        catalog = CallableCatalog(tools=tool_definitions)
 
         if state is None:
             messages = self.initial_messages(task, agent_input)

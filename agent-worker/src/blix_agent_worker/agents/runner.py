@@ -86,8 +86,8 @@ class AgentRunner:
             input=delegation.input,
             context=parent_task.context,
             artifact_refs=parent_task.artifact_refs,
-            allowed_tool_ids=None,
-            allowed_subagent_ids=None,
+            allowed_tool_ids=agent.definition.tool_ids,
+            allowed_subagent_ids=agent.definition.subagent_ids,
             delegation_depth=parent_task.delegation_depth + 1,
             response_schema=agent.definition.output_schema,
         )

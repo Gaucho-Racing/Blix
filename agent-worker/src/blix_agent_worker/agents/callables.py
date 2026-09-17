@@ -1,10 +1,17 @@
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from types import MappingProxyType
 
 from blix_agent_worker.models.agent import AgentDefinition
 from blix_agent_worker.models.common import JsonObject
 from blix_agent_worker.models.llm import ModelCallableDefinition, ModelCallableKind
 from blix_agent_worker.models.tool import ToolDefinition
+
+
+def restrict_callable_ids(declared: tuple[str, ...], restriction: Collection[str] | None) -> tuple[str, ...]:
+    if restriction is None:
+        return declared
+    permitted = frozenset(restriction)
+    return tuple(callable_id for callable_id in declared if callable_id in permitted)
 
 
 class CallableCatalogError(Exception):

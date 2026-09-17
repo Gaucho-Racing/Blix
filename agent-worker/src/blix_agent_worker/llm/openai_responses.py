@@ -99,7 +99,7 @@ class OpenAIResponsesModel:
         return cls(
             base_url=os.environ.get("LLM_GATEWAY_ENDPOINT", ""),
             api_key=os.environ.get("LLM_GATEWAY_API_KEY", ""),
-            model=os.environ.get("LLM_MODEL", "gpt-5.6-luna"),
+            model=os.environ.get("LLM_MODEL", "gpt-6-astra"),
             reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", "").strip() or None,
         )
 
