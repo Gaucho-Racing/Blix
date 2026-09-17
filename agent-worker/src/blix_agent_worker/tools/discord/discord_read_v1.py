@@ -65,8 +65,8 @@ class DiscordReadV1Tool:
     definition = ToolDefinition(
         id="discord_read_v1",
         description=(
-            "Read Discord through Blix's bot, restricted to configured shared channels and public threads. "
-            "list_channels discovers allowed text, announcement, forum, and media channels; "
+            "Read Discord through Blix's bot in the configured server, subject to the bot's Discord permissions. "
+            "list_channels discovers text, announcement, forum, and media channels; "
             "get_channel reads metadata; "
             "list_messages reads up to 100 messages newest-first (before/after/around are mutually exclusive); "
             "get_message reads one message; list_active_threads discovers active public threads; "

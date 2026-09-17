@@ -27,7 +27,6 @@ class DiscordSettings(BaseModel):
 
     bot_token: SecretStr
     guild_id: DiscordID
-    allowed_channel_ids: Annotated[frozenset[DiscordID], Field(min_length=1, max_length=100)]
 
     @classmethod
     def from_environment(cls) -> Self:
@@ -38,17 +37,11 @@ class DiscordSettings(BaseModel):
             return cls(
                 bot_token=SecretStr(token),
                 guild_id=os.environ.get("DISCORD_GUILD_ID", "").strip(),
-                allowed_channel_ids=frozenset(
-                    item.strip()
-                    for item in os.environ.get("DISCORD_ALLOWED_CHANNEL_IDS", "").split(",")
-                    if item.strip()
-                ),
             )
         except ValidationError as error:
             raise DiscordClientError(
                 "tool_not_configured",
-                "Set DISCORD_GUILD_ID and DISCORD_ALLOWED_CHANNEL_IDS (1–100 comma-separated channel IDs). "
-                "Only include channels whose contents may be shared with all Blix users.",
+                "Set DISCORD_GUILD_ID to the Discord server ID.",
             ) from error
 
 
@@ -137,7 +130,7 @@ class DiscordClient:
         channel = DiscordChannel.model_validate(body)
         if self._allowed_root(channel, settings):
             return channel
-        if channel.type in PUBLIC_THREAD_TYPES and channel.parent_id in settings.allowed_channel_ids:
+        if channel.type in PUBLIC_THREAD_TYPES and channel.parent_id is not None:
             parent = DiscordChannel.model_validate(await self._get(f"channels/{channel.parent_id}", settings))
             if parent.id == channel.parent_id and self._allowed_root(parent, settings):
                 return channel
@@ -275,11 +268,7 @@ class DiscordClient:
 
     @staticmethod
     def _allowed_root(channel: DiscordChannel, settings: DiscordSettings) -> bool:
-        return (
-            channel.guild_id == settings.guild_id
-            and channel.id in settings.allowed_channel_ids
-            and channel.type in ROOT_CHANNEL_TYPES
-        )
+        return channel.guild_id == settings.guild_id and channel.type in ROOT_CHANNEL_TYPES
 
     @staticmethod
     def _check_message(message: DiscordMessage, channel: DiscordChannel, settings: DiscordSettings) -> None:
@@ -290,7 +279,7 @@ class DiscordClient:
     def _denied() -> DiscordClientError:
         return DiscordClientError(
             "discord_channel_not_allowed",
-            "Only configured server channels and their public threads are available; "
+            "Only supported channels in the configured server and their public threads are available; "
             "DMs and private threads are excluded.",
         )
 

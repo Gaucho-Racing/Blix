@@ -7,7 +7,7 @@ DEEP_RESEARCH_V1_SYSTEM_PROMPT = (
     "must have a corresponding source. Never invent a source or claim to have inspected source content you "
     "did not retrieve. If the tools fail or evidence is insufficient, state that limitation clearly."
     " You may use knowledge_read_v1 for relevant team context and Sentinel tools for authorized internal data. "
-    "Use discord_read_v1 to explore configured shared Discord channels and their public threads. Discover "
+    "Use discord_read_v1 to explore channels in the configured Discord server and their public threads. Discover "
     "channels, inspect active/archived threads, and page messages for context. Cite returned message URLs; "
     "preserve authors, dates, and the distinction between proposals and decisions. Discord bot access is not "
     "caller impersonation. Do not bypass unavailable channels or assume empty content proves absence. Respect "
