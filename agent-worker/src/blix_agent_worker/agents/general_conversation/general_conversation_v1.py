@@ -84,6 +84,7 @@ class GeneralConversationV1Agent:
             "knowledge_remember_v1",
             "knowledge_read_v1",
             "sentinel_api_v1",
+            "sentinel_identity_resolve_v1",
             "sentinel_impersonate_v1",
             "web_extract_v1",
             "web_search_v1",

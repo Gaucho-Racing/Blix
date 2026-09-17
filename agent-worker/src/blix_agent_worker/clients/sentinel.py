@@ -72,6 +72,42 @@ class _SentinelServiceAccount(BaseModel):
     entity_id: EntityID
 
 
+class SentinelLinkedAccount(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    entity_id: EntityID
+    provider: str = Field(min_length=1)
+    external_id: str = Field(min_length=1)
+
+
+class _LinkedUser(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: UserID
+    entity_id: EntityID
+
+
+class SentinelLinkedIdentity(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: EntityID
+    type: EntityType
+    user: _LinkedUser | None = None
+    service_account: _SentinelServiceAccount | None = None
+    external_auths: tuple[SentinelLinkedAccount, ...]
+
+    @model_validator(mode="after")
+    def validate_links(self) -> Self:
+        profile = self.user if self.type is EntityType.USER else self.service_account
+        if profile is None or profile.entity_id != self.id:
+            raise ValueError("Sentinel returned a mismatched identity")
+        if self.user is not None and self.service_account is not None:
+            raise ValueError("Sentinel returned multiple identity types")
+        if any(account.entity_id != self.id for account in self.external_auths):
+            raise ValueError("Sentinel returned a mismatched linked account")
+        return self
+
+
 class SentinelEntity(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -104,10 +140,11 @@ class SentinelCredential:
 
 
 class SentinelClient:
-    def __init__(self) -> None:
+    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._client = httpx.AsyncClient(
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             timeout=30,
+            transport=transport,
         )
         self._credentials: dict[str, SentinelCredential] = {}
         self._application_ids: dict[tuple[str, str], str] = {}
@@ -152,6 +189,56 @@ class SentinelClient:
                 "invalid_sentinel_response",
                 "Sentinel returned an invalid caller entity.",
             ) from error
+
+    async def resolve_external_identity(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        provider: str,
+        external_id: str,
+    ) -> SentinelLinkedIdentity | None:
+        try:
+            response = await self._client.get(
+                f"{sentinel_url.rstrip('/')}/api/core/entity/external/"
+                f"{quote(provider.upper(), safe='')}/{quote(external_id, safe='')}",
+                headers={"Authorization": f"Bearer {service_account_token}"},
+            )
+        except httpx.RequestError:
+            raise SentinelClientError(
+                "sentinel_unavailable",
+                "Sentinel is unavailable while resolving linked identities.",
+                retryable=True,
+            ) from None
+        if response.status_code == 404:
+            return None
+        if response.status_code == 401:
+            raise SentinelClientError("tool_not_configured", "Sentinel rejected SENTINEL_SERVICE_ACCOUNT_TOKEN.")
+        if response.status_code == 403:
+            raise SentinelClientError(
+                "sentinel_identity_read_denied",
+                "Sentinel denied linked-identity lookup. The service account needs user:read and "
+                "Sentinel must have the scoped lookup endpoint deployed.",
+            )
+        if not response.is_success:
+            raise SentinelClientError(
+                "sentinel_identity_request_failed",
+                f"Sentinel returned HTTP {response.status_code}.",
+                retryable=response.status_code == 429 or response.status_code >= 500,
+            )
+        try:
+            identity = SentinelLinkedIdentity.model_validate(response.json())
+            if not any(
+                account.provider.casefold() == provider.casefold() and account.external_id == external_id
+                for account in identity.external_auths
+            ):
+                raise ValueError("Sentinel returned an unrelated identity")
+            return identity
+        except ValueError:
+            raise SentinelClientError(
+                "invalid_sentinel_response",
+                "Sentinel returned an invalid linked identity.",
+            ) from None
 
     async def impersonate(
         self,

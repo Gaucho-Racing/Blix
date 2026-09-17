@@ -51,6 +51,7 @@ from blix_agent_worker.tools.knowledge import (
     KnowledgeRememberV1Tool,
 )
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
+from blix_agent_worker.tools.sentinel_identity import SentinelIdentityResolveV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
 from blix_agent_worker.tools.web_search import WebSearchV1Tool
@@ -346,6 +347,7 @@ class AgentWorker:
                         execution.caller_context,
                     ),
                     SentinelApiV1Tool(self._sentinel, caller_user.id),
+                    SentinelIdentityResolveV1Tool(self._sentinel),
                     SentinelImpersonateV1Tool(self._sentinel, caller_user.id),
                     WebExtractV1Tool(self._tavily),
                     WebSearchV1Tool(self._tavily),
