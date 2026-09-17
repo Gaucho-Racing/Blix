@@ -241,7 +241,7 @@ class DiscordClient:
         cached = self._footer_cache.get(settings.guild_id)
         if cached is not None and cached[0] > time.monotonic():
             return cached[1]
-        footer = "-# [Sent via Blix](https://blix.gauchoracing.com)"
+        footer = "-# Sent via Blix"
         try:
             emojis = await self._get(f"guilds/{settings.guild_id}/emojis", settings)
             if not isinstance(emojis, list):
@@ -251,10 +251,10 @@ class DiscordClient:
                     emoji = DiscordEmoji.model_validate(item)
                     if emoji.available:
                         prefix = "a" if emoji.animated else ""
-                        footer = f"-# <{prefix}:blix:{emoji.id}> [Sent via Blix](https://blix.gauchoracing.com)"
+                        footer = f"-# Sent via <{prefix}:blix:{emoji.id}>"
                         break
         except (DiscordClientError, ValidationError):
-            logger.warning("Discord Blix emoji lookup failed; using linked text attribution")
+            logger.warning("Discord Blix emoji lookup failed; using plain text attribution")
             return footer
         self._footer_cache[settings.guild_id] = (time.monotonic() + 300, footer)
         return footer
