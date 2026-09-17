@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import math
 import os
+import re
 import time
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, ValidationError
@@ -12,6 +14,27 @@ from blix_agent_worker.models.common import JsonObject
 DiscordID = Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,19}$")]
 ROOT_CHANNEL_TYPES = frozenset({0, 5, 15, 16})
 PUBLIC_THREAD_TYPES = frozenset({10, 11})
+logger = logging.getLogger(__name__)
+
+
+class _WebhookLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = re.sub(r"(/webhooks/[0-9]+/)[^/?\s\"']+", r"\1REDACTED", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+class DiscordWebhook(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: DiscordID
+    type: Literal[1]
+    guild_id: DiscordID
+    channel_id: DiscordID
+    token: SecretStr = Field(min_length=1)
 
 
 class DiscordClientError(Exception):
@@ -97,6 +120,9 @@ class DiscordMessage(BaseModel):
 
 class DiscordClient:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        http_logger = logging.getLogger("httpx")
+        if not any(isinstance(item, _WebhookLogFilter) for item in http_logger.filters):
+            http_logger.addFilter(_WebhookLogFilter())
         self._client = httpx.AsyncClient(
             base_url="https://discord.com/api/v10/",
             headers={
@@ -197,20 +223,117 @@ class DiscordClient:
         return threads, body["has_more"]
 
     async def _get(self, path: str, settings: DiscordSettings, query: dict[str, str | int] | None = None) -> JsonValue:
+        return await self._request("GET", path, settings, query=query)
+
+    async def webhook_send(
+        self,
+        settings: DiscordSettings,
+        *,
+        channel_id: str,
+        content: str,
+        username: str,
+        avatar_url: str | None,
+        audit_reason: str,
+    ) -> JsonObject:
+        channel = await self.channel(channel_id, settings)
+        if channel.type not in {0, 5} | PUBLIC_THREAD_TYPES:
+            raise DiscordClientError(
+                "invalid_arguments", "Choose a text/announcement channel or an existing public thread."
+            )
+        parent_id = channel.parent_id if channel.type in PUBLIC_THREAD_TYPES else channel.id
+        webhook = DiscordWebhook.model_validate(
+            await self._request(
+                "POST",
+                f"channels/{parent_id}/webhooks",
+                settings,
+                body={"name": "Blix"},
+                audit_reason=audit_reason,
+            )
+        )
+        if webhook.channel_id != parent_id or webhook.guild_id != settings.guild_id:
+            raise self._invalid_response()
+        cleanup_succeeded = False
+        try:
+            query = {"wait": "true"}
+            if channel.type in PUBLIC_THREAD_TYPES:
+                query["thread_id"] = channel.id
+            body: JsonObject = {
+                "content": content,
+                "username": username,
+                "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
+            }
+            if avatar_url:
+                body["avatar_url"] = avatar_url
+            try:
+                message = DiscordMessage.model_validate(
+                    await self._request(
+                        "POST",
+                        f"webhooks/{webhook.id}/{webhook.token.get_secret_value()}",
+                        settings,
+                        query=query,
+                        body=body,
+                        authenticate=False,
+                        sending=True,
+                    )
+                )
+                self._check_message(message, channel, settings)
+            except ValidationError:
+                raise self._send_uncertain() from None
+            except DiscordClientError as error:
+                if error.code == "invalid_discord_response":
+                    raise self._send_uncertain() from None
+                raise
+        finally:
+            try:
+                await self._request("DELETE", f"webhooks/{webhook.id}", settings, audit_reason=audit_reason)
+                cleanup_succeeded = True
+            except DiscordClientError as error:
+                logger.warning("Discord webhook cleanup failed webhook_id=%s code=%s", webhook.id, error.code)
+        return {
+            "guild_id": settings.guild_id,
+            "channel_id": channel.id,
+            "message_id": message.id,
+            "url": f"https://discord.com/channels/{settings.guild_id}/{channel.id}/{message.id}",
+            "username": username,
+            "webhook_deleted": cleanup_succeeded,
+        }
+
+    @staticmethod
+    def _send_uncertain() -> DiscordClientError:
+        return DiscordClientError(
+            "discord_send_uncertain",
+            "Discord may have delivered the message. Do not resend automatically; inspect channel history first.",
+        )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        settings: DiscordSettings,
+        *,
+        query: dict[str, str | int] | None = None,
+        body: JsonObject | None = None,
+        authenticate: bool = True,
+        audit_reason: str | None = None,
+        sending: bool = False,
+    ) -> JsonValue:
         async with self._request_lock:
             remaining = self._blocked_until - time.monotonic()
             if remaining > 0:
                 raise DiscordClientError(
                     "discord_rate_limited",
-                    "Discord reads are cooling down; retry later.",
+                    "Discord requests are cooling down; retry later.",
                     retryable=True,
                     retry_after=remaining,
                 )
             try:
-                response = await self._client.get(
-                    path, params=query, headers={"Authorization": f"Bot {settings.bot_token.get_secret_value()}"}
-                )
+                headers = {"Authorization": f"Bot {settings.bot_token.get_secret_value()}"} if authenticate else {}
+                if audit_reason:
+                    headers["X-Audit-Log-Reason"] = audit_reason
+                response = await self._client.request(method, path, params=query, json=body, headers=headers)
             except httpx.RequestError as error:
+                if sending:
+                    raise self._send_uncertain() from None
                 raise DiscordClientError(
                     "discord_unavailable", "Discord could not be reached.", retryable=True
                 ) from error
@@ -235,18 +358,23 @@ class DiscordClient:
                 raise DiscordClientError("tool_not_configured", "Discord rejected DISCORD_BOT_TOKEN.")
             if response.status_code == 403:
                 raise DiscordClientError(
-                    "discord_access_denied", "The bot lacks access. Check View Channel and Read Message History."
+                    "discord_access_denied",
+                    "The bot lacks access. Check View Channel, Read Message History, and Manage Webhooks for sends.",
                 )
             if response.status_code == 404:
                 raise DiscordClientError(
                     "discord_not_found", "Discord could not find the requested channel or message."
                 )
             if not response.is_success:
+                if sending and response.status_code >= 500:
+                    raise self._send_uncertain()
                 raise DiscordClientError(
                     "discord_request_failed",
                     f"Discord returned HTTP {response.status_code}.",
-                    retryable=response.status_code >= 500,
+                    retryable=method == "GET" and response.status_code >= 500,
                 )
+            if response.status_code == 204:
+                return None
             try:
                 return response.json()
             except ValueError as error:

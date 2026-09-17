@@ -43,7 +43,7 @@ from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
-from blix_agent_worker.tools.discord import DiscordReadV1Tool
+from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordWebhookSendV1Tool
 from blix_agent_worker.tools.knowledge import (
     KnowledgeApplyV1Tool,
     KnowledgeProposeV1Tool,
@@ -336,6 +336,7 @@ class AgentWorker:
                 [
                     CurrentTimeV1Tool(),
                     DiscordReadV1Tool(self._discord),
+                    DiscordWebhookSendV1Tool(self._discord, caller_user),
                     KnowledgeReadV1Tool(self._knowledge),
                     KnowledgeProposeV1Tool(self._knowledge),
                     KnowledgeApplyV1Tool(self._knowledge),

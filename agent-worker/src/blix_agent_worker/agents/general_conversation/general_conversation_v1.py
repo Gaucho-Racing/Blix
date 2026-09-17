@@ -80,6 +80,7 @@ class GeneralConversationV1Agent:
         tool_ids=(
             "current_time_v1",
             "discord_read_v1",
+            "discord_webhook_send_v1",
             "knowledge_remember_v1",
             "knowledge_read_v1",
             "sentinel_api_v1",
