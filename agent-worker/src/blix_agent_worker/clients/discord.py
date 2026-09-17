@@ -37,6 +37,15 @@ class DiscordWebhook(BaseModel):
     token: SecretStr = Field(min_length=1)
 
 
+class DiscordEmoji(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: DiscordID
+    name: Literal["blix"]
+    animated: bool = False
+    available: bool = True
+
+
 class DiscordClientError(Exception):
     def __init__(self, code: str, message: str, *, retryable: bool = False, retry_after: float | None = None) -> None:
         self.code = code
@@ -137,6 +146,7 @@ class DiscordClient:
         )
         self._request_lock = asyncio.Lock()
         self._blocked_until = 0.0
+        self._footer_cache: dict[str, tuple[float, str]] = {}
 
     async def __aenter__(self) -> Self:
         return self
@@ -227,6 +237,28 @@ class DiscordClient:
     async def _get(self, path: str, settings: DiscordSettings, query: dict[str, str | int] | None = None) -> JsonValue:
         return await self._request("GET", path, settings, query=query)
 
+    async def _webhook_footer(self, settings: DiscordSettings) -> str:
+        cached = self._footer_cache.get(settings.guild_id)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        footer = "-# [Sent via Blix](https://blix.gauchoracing.com)"
+        try:
+            emojis = await self._get(f"guilds/{settings.guild_id}/emojis", settings)
+            if not isinstance(emojis, list):
+                raise self._invalid_response()
+            for item in emojis:
+                if isinstance(item, dict) and item.get("name") == "blix":
+                    emoji = DiscordEmoji.model_validate(item)
+                    if emoji.available:
+                        prefix = "a" if emoji.animated else ""
+                        footer = f"-# <{prefix}:blix:{emoji.id}> [Sent via Blix](https://blix.gauchoracing.com)"
+                        break
+        except (DiscordClientError, ValidationError):
+            logger.warning("Discord Blix emoji lookup failed; using linked text attribution")
+            return footer
+        self._footer_cache[settings.guild_id] = (time.monotonic() + 300, footer)
+        return footer
+
     async def webhook_send(
         self,
         settings: DiscordSettings,
@@ -243,6 +275,7 @@ class DiscordClient:
                 "invalid_arguments", "Choose a text/announcement channel or an existing public thread."
             )
         parent_id = channel.parent_id if channel.type in PUBLIC_THREAD_TYPES else channel.id
+        footer = await self._webhook_footer(settings)
         webhook = DiscordWebhook.model_validate(
             await self._request(
                 "POST",
@@ -264,7 +297,7 @@ class DiscordClient:
                 "components": [
                     {"type": 10, "content": content},
                     {"type": 14, "divider": True, "spacing": 1},
-                    {"type": 10, "content": "-# Sent via Blix"},
+                    {"type": 10, "content": footer},
                 ],
                 "username": username,
                 "allowed_mentions": {"parse": ["users", "roles", "everyone"]},
