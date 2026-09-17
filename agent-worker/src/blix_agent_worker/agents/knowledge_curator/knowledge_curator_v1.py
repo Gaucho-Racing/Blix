@@ -12,7 +12,7 @@ from blix_agent_worker.models.agent import AgentDefinition, AgentKind, AgentTask
 from blix_agent_worker.models.common import ChangesetID, ContractModel, NonEmptyText, SourceRecordID
 from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole
 from blix_agent_worker.models.tool import ToolDefinition, ToolResult, ToolResultStatus
-from blix_agent_worker.tools.knowledge.knowledge_v1 import CommitSHA, PagePath
+from blix_agent_worker.tools.knowledge._shared import CommitSHA, PagePath
 
 
 class KnowledgeCuratorV1Input(ContractModel):
