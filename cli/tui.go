@@ -95,8 +95,7 @@ type messageAppendedMsg struct {
 }
 
 type queuedMessageMsg struct {
-	content string
-	err     error
+	err error
 }
 
 type interruptedMsg struct {
@@ -176,6 +175,9 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize(message.Width, message.Height)
 		return m, nil
 	case tea.KeyPressMsg:
+		if message.String() == "esc" && m.busy && m.current != nil {
+			return m, interruptRunCmd(m.ctx, m.api, m.current.Run.ID)
+		}
 		return m, m.handleKey(message)
 	case spinner.TickMsg:
 		if !m.busy {
@@ -194,8 +196,6 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case queuedMessageMsg:
 		if message.err != nil {
 			m.appendBlock(transcriptError, message.err.Error(), nil)
-		} else {
-			m.appendBlock(transcriptNotice, "Queued message\n"+message.content, nil)
 		}
 		return m, nil
 	case interruptedMsg:
@@ -282,8 +282,9 @@ func (m *tuiModel) submitInput() tea.Cmd {
 		return m.handleCommand(value)
 	}
 	if m.busy {
-		m.appendBlock(transcriptNotice, "Blix is working. Use /queue <message> to queue work or /stop to interrupt.", nil)
-		return nil
+		m.appendBlock(transcriptUser, value, nil)
+		m.input.Reset()
+		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, value)
 	}
 	if m.current == nil {
 		m.appendBlock(transcriptError, accessMessage(m.caller, m.user), nil)
@@ -333,18 +334,6 @@ func (m *tuiModel) handleCommand(command string) tea.Cmd {
 		}
 		m.setBusy("Starting a new run")
 		return tea.Batch(createRunCmd(m.ctx, m.api), m.spinner.Tick)
-	case "/stop":
-		if m.current == nil {
-			return nil
-		}
-		return interruptRunCmd(m.ctx, m.api, m.current.Run.ID)
-	}
-	if strings.HasPrefix(command, "/queue ") {
-		content := strings.TrimSpace(strings.TrimPrefix(command, "/queue"))
-		if content == "" || m.current == nil {
-			return nil
-		}
-		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, content)
 	}
 
 	if strings.HasPrefix(command, "/endpoint ") {
@@ -609,7 +598,7 @@ func (m *tuiModel) renderFooter() string {
 		if operation == "" {
 			operation = "Blix is working"
 		}
-		rightLabel = operation + " · enter waits  "
+		rightLabel = operation + " · enter queues · esc stops  "
 	}
 	rightWidth := m.width - lipgloss.Width(left) - 1
 	right := ""
@@ -791,7 +780,7 @@ func appendMessageCmd(ctx context.Context, api *client, turnID uint64, current c
 func queueMessageCmd(ctx context.Context, api *client, runID string, content string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := api.appendMessage(ctx, runID, content)
-		return queuedMessageMsg{content: content, err: err}
+		return queuedMessageMsg{err: err}
 	}
 }
 

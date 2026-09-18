@@ -627,8 +627,6 @@ func renderHelpPanel(width int) string {
 		{command: "/endpoint", detail: "Show or change the active Blix endpoint"},
 		{command: "/help", detail: "Show available commands"},
 		{command: "/reset", detail: "Start a fresh run"},
-		{command: "/queue", detail: "Queue a message while Blix is working"},
-		{command: "/stop", detail: "Interrupt the active turn"},
 		{command: "/quit", detail: "End the session"},
 	}
 	lines := make([]string, 0, len(commands)+1)

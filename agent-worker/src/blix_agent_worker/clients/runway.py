@@ -71,6 +71,7 @@ class ExecutionContext(ContractModel):
     ] = ()
     notification_turn_id: NotificationID | None = None
     active_turn_message_id: MessageID | None = None
+    active_turn_position: int = 0
 
 
 class VersionResponse(ContractModel):

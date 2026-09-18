@@ -136,7 +136,14 @@ class AgentWorker:
 
     async def _handle_claimed(self, execution: ExecutionContext, relinquishing_lease: asyncio.Event) -> None:
         state = ExecutionState(version=execution.version)
-        latest_message = execution.messages[-1] if execution.messages else None
+        latest_message = next(
+            (
+                message
+                for message in reversed(execution.messages)
+                if message.message_id == execution.active_turn_message_id
+            ),
+            execution.messages[-1] if execution.messages else None,
+        )
         turn_message_id = (
             latest_message.message_id
             if latest_message is not None and latest_message.role is ConversationMessageRole.USER

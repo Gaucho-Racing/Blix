@@ -64,6 +64,7 @@ type ExecutionContext struct {
 	Notifications        []model.ExecutionNotification `json:"notifications"`
 	NotificationTurnID   string                        `json:"notification_turn_id,omitempty"`
 	ActiveTurnMessageID  *string                       `json:"active_turn_message_id,omitempty"`
+	ActiveTurnPosition   uint64                        `json:"active_turn_position,omitempty"`
 }
 
 type Heartbeat struct {
@@ -409,15 +410,17 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			}
 			if activeCount == 0 {
 				execution.ActiveTurnMessageID = nil
+				execution.ActiveTurnPosition = 0
 				execution.State = nil
 			}
 		}
 		if execution.ParentExecutionID == nil && execution.ActiveTurnMessageID == nil {
 			var next model.Message
 			err := tx.Where("parent_execution_id = ? AND role = ? AND pending = ?", execution.ID, model.MessageRoleUser, true).
-				Order("event_position ASC").First(&next).Error
+				Order("event_position DESC").First(&next).Error
 			if err == nil {
 				execution.ActiveTurnMessageID = &next.ID
+				execution.ActiveTurnPosition = next.EventPosition
 			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
@@ -497,6 +500,7 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			Messages:             messages,
 			Notifications:        notifications,
 			ActiveTurnMessageID:  execution.ActiveTurnMessageID,
+			ActiveTurnPosition:   execution.ActiveTurnPosition,
 		}
 		if len(notifications) > 0 {
 			claimed.NotificationTurnID = notifications[0].ID
@@ -1158,12 +1162,15 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		execution.LeaseExpiresAt = nil
 		execution.WaitingOnExecutionID = nil
 		execution.State = nil
-		if execution.ActiveTurnMessageID != nil {
-			if err := tx.Model(&model.Message{}).Where("id = ?", *execution.ActiveTurnMessageID).
+		if execution.ActiveTurnPosition > 0 {
+			if err := tx.Model(&model.Message{}).
+				Where("parent_execution_id = ? AND role = ? AND pending = ? AND event_position <= ?",
+					execution.ID, model.MessageRoleUser, true, execution.ActiveTurnPosition).
 				Updates(map[string]any{"pending": false, "processed_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
 			execution.ActiveTurnMessageID = nil
+			execution.ActiveTurnPosition = 0
 		}
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
@@ -1310,12 +1317,15 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 			execution.Status = model.ExecutionStatusIdle
 			execution.WaitingOnExecutionID = nil
 			execution.NotificationCutoff = nil
-			if execution.ActiveTurnMessageID != nil {
-				if err := tx.Model(&model.Message{}).Where("id = ?", *execution.ActiveTurnMessageID).
+			if execution.ActiveTurnPosition > 0 {
+				if err := tx.Model(&model.Message{}).
+					Where("parent_execution_id = ? AND role = ? AND pending = ? AND event_position <= ?",
+						execution.ID, model.MessageRoleUser, true, execution.ActiveTurnPosition).
 					Updates(map[string]any{"pending": false, "processed_at": time.Now().UTC()}).Error; err != nil {
 					return err
 				}
 				execution.ActiveTurnMessageID = nil
+				execution.ActiveTurnPosition = 0
 			}
 		} else {
 			payload, err := json.Marshal(map[string]any{
@@ -1404,8 +1414,10 @@ func (s *ExecutionService) InterruptRun(ctx context.Context, runID string, inter
 			return nil
 		}
 		now := time.Now().UTC()
-		if root.ActiveTurnMessageID != nil {
-			if err := tx.Model(&model.Message{}).Where("id = ?", *root.ActiveTurnMessageID).
+		if root.ActiveTurnPosition > 0 {
+			if err := tx.Model(&model.Message{}).
+				Where("parent_execution_id = ? AND role = ? AND pending = ? AND event_position <= ?",
+					root.ID, model.MessageRoleUser, true, root.ActiveTurnPosition).
 				Updates(map[string]any{"pending": false, "processed_at": now}).Error; err != nil {
 				return err
 			}
@@ -1429,6 +1441,7 @@ func (s *ExecutionService) InterruptRun(ctx context.Context, runID string, inter
 		root.Status = model.ExecutionStatusIdle
 		root.CompletedAt = nil
 		root.ActiveTurnMessageID = nil
+		root.ActiveTurnPosition = 0
 		root.NotificationCutoff = nil
 		root.ClaimedBy = ""
 		root.ClaimedAt = nil

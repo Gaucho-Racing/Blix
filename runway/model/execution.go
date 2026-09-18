@@ -33,6 +33,7 @@ type AgentExecution struct {
 	Result               datatypes.JSON `json:"result,omitempty" gorm:"type:jsonb"`
 	WaitingOnExecutionID *string        `json:"waiting_on_execution_id,omitempty" gorm:"index"`
 	ActiveTurnMessageID  *string        `json:"active_turn_message_id,omitempty" gorm:"index"`
+	ActiveTurnPosition   uint64         `json:"active_turn_position,omitempty"`
 	NotificationCutoff   *time.Time     `json:"notification_cutoff,omitempty"`
 	CompletedAt          *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt            time.Time      `json:"created_at" gorm:"autoCreateTime"`
