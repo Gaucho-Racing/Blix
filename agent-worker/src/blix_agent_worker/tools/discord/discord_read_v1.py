@@ -26,9 +26,9 @@ class DiscordReadV1Input(ContractModel):
     operation: DiscordOperation
     channel_id: DiscordID | None = Field(default=None, description="Discord channel or thread ID, not a Blix ULID.")
     message_id: DiscordID | None = Field(default=None, description="Required only for get_message.")
-    limit: Annotated[int, Field(strict=True, ge=1, le=100)] = Field(
-        default=50,
-        description="Page size for message/thread lists; ignored for channel discovery and single-item reads.",
+    limit: Annotated[int, Field(strict=True, ge=1, le=25)] = Field(
+        default=25,
+        description="Page size up to 25 for message/thread lists; ignored for discovery and single-item reads.",
     )
     before: DiscordID | None = Field(default=None, description="Message ID, or thread ID for list_active_threads.")
     after: DiscordID | None = Field(default=None, description="Fetch messages newer than this message ID.")
@@ -71,7 +71,7 @@ class DiscordReadV1Tool:
             "Read Discord through Blix's bot in the configured server, subject to the bot's Discord permissions. "
             "list_channels discovers text, announcement, forum, and media channels; "
             "get_channel reads metadata; "
-            "list_messages reads up to 100 messages newest-first (before/after/around are mutually exclusive); "
+            "list_messages reads up to 25 messages newest-first (before/after/around are mutually exclusive); "
             "get_message reads one message; list_active_threads discovers active public threads; "
             "list_archived_threads pages older public threads using archived_before. Read a forum's threads, not "
             "the forum itself, for messages. Outputs include source URLs and pagination cursors. "

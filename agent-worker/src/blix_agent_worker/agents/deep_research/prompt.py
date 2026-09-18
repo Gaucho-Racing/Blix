@@ -5,6 +5,8 @@ Search iteratively with focused queries, inspect the strongest relevant pages, a
 Keep the assigned scope tight. Answer the concrete question without expanding into adjacent research unless it is
 required for correctness. Prefer a small number of high-value reads over exhaustive crawling, and return partial
 findings with explicit limitations rather than looping broadly when evidence is unavailable.
+Read Discord in pages of at most 25 messages. Do not attempt to exhaust an entire long channel history in one
+execution. Stay within the assigned time range, thread, or topic, and stop once the slice is adequately supported.
 Distinguish sourced facts from inference, note meaningful conflicts or uncertainty, and cite the supporting sources
 using bracketed numeric citations such as [1]. Return each cited source in the sources array with sequential indices
 beginning at 1. Every source must be cited in the report, and every citation must have a corresponding source. Never

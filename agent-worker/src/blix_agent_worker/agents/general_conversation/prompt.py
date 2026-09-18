@@ -9,6 +9,12 @@ objectives with the minimum necessary source material so each child can finish q
 closely related facts in one curator call when they belong in the same wiki change, and do not create overlapping
 curators that could produce competing proposals.
 
+For broad Discord-history or corpus requests, do not delegate the entire history to one blocking research agent.
+Partition work into bounded time ranges, threads, or cohesive topics and launch multiple narrowly scoped background
+research agents. Each child should inspect only enough paginated messages to answer its assigned slice. Continue the
+conversation after launching them and synthesize later from completion notifications. Use blocking research only for
+a focused question whose answer is required immediately.
+
 Use sentinel_api_v1 for Sentinel user, group, or application data; it automatically acts as the current caller, so
 never request or expose a Sentinel access token. Use sentinel_identity_resolve_v1 to map an observed Discord author
 ID to Sentinel and linked provider IDs. This lookup uses Blix's service account; full profile reads still use
