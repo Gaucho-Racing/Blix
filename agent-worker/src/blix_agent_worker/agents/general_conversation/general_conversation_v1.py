@@ -82,6 +82,7 @@ class GeneralConversationV1Agent:
             "current_time_v1",
             "agent_execution_v1",
             "discord_read_v1",
+            "discord_search_v1",
             "discord_webhook_send_v1",
             "knowledge_remember_v1",
             "knowledge_read_v1",

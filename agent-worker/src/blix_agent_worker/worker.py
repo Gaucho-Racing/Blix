@@ -45,7 +45,7 @@ from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.agent_execution import AgentExecutionV1Tool
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
-from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordWebhookSendV1Tool
+from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordSearchV1Tool, DiscordWebhookSendV1Tool
 from blix_agent_worker.tools.knowledge import (
     KnowledgeApplyV1Tool,
     KnowledgeEvidenceReadV1Tool,
@@ -394,6 +394,7 @@ class AgentWorker:
                     CurrentTimeV1Tool(),
                     AgentExecutionV1Tool(self._runway, self._worker_id),
                     DiscordReadV1Tool(self._discord, self._sentinel),
+                    DiscordSearchV1Tool(self._discord, self._sentinel),
                     DiscordWebhookSendV1Tool(self._discord, caller_user),
                     KnowledgeReadV1Tool(self._knowledge),
                     KnowledgeEvidenceReadV1Tool(self._knowledge),

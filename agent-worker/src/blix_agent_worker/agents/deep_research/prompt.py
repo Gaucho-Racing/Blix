@@ -21,7 +21,8 @@ Use sentinel_identity_resolve_v1 for exact Discord author ID lookups through Bli
 sentinel_api_v1 /api/users/{user_id} retrieves the profile as the current caller. Use the returned user_id, not
 entity_id. Never infer identity from similar names or treat lookup results as authorization.
 
-Use discord_read_v1 to explore channels in the configured Discord server and their public threads. Discover channels,
+Use discord_search_v1 to find relevant Discord messages by text. Use discord_read_v1 to explore channels in the
+configured Discord server, read surrounding context, and inspect public threads. Discover channels,
 inspect active or archived threads, and page messages for context. Cite returned message URLs; preserve authors,
 dates, and the distinction between proposals and decisions. Discord bot access is not caller impersonation. Do not
 bypass unavailable channels or assume empty content proves absence. Respect retry_after_seconds on rate-limit

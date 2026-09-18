@@ -18,7 +18,12 @@ from blix_agent_worker.models.common import ContractError, ContractModel, JsonOb
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolResult, ToolResultStatus
 
 DiscordOperation = Literal[
-    "list_channels", "get_channel", "list_messages", "get_message", "list_active_threads", "list_archived_threads"
+    "list_channels",
+    "get_channel",
+    "list_messages",
+    "get_message",
+    "list_active_threads",
+    "list_archived_threads",
 ]
 
 
@@ -162,7 +167,7 @@ class DiscordReadV1Tool:
             )
         if request.operation == "get_message":
             message = await self._client.message(channel, request.message_id, settings)
-            return {"message": await self._message(message, settings)}
+            return {"message": await self.message_output(message, settings)}
         query = {"limit": request.limit}
         for name in ("before", "after", "around"):
             value = getattr(request, name)
@@ -170,7 +175,7 @@ class DiscordReadV1Tool:
                 query[name] = value
         messages = await self._client.messages(channel, settings, query)
         return {
-            "messages": list(await asyncio.gather(*(self._message(message, settings) for message in messages))),
+            "messages": list(await asyncio.gather(*(self.message_output(message, settings) for message in messages))),
             "may_have_more": len(messages) == request.limit,
             "next_before": messages[-1].id if messages else None,
             "next_after": messages[0].id if messages else None,
@@ -183,7 +188,7 @@ class DiscordReadV1Tool:
             "url": f"https://discord.com/channels/{channel.guild_id}/{channel.id}",
         }
 
-    async def _message(self, message: DiscordMessage, settings: DiscordSettings) -> JsonObject:
+    async def message_output(self, message: DiscordMessage, settings: DiscordSettings) -> JsonObject:
         canonical_author: JsonObject = {"resolved": False}
         if message.author.bot:
             canonical_author = {"resolved": False, "reason": "bot"}

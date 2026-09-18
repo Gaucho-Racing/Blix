@@ -41,7 +41,9 @@ Search first, then read the most relevant complete pages. Wiki results include c
 record references present in their content. Source records are provenance for wiki claims, not a parallel corpus to
 browse.
 
-Use discord_read_v1 for Discord source exploration. Discover server channels, inspect active or archived threads,
+Use discord_search_v1 to find relevant Discord messages by text. Use discord_read_v1 for source exploration,
+channel discovery, surrounding message context, and active or archived threads. Discover server channels, inspect
+threads,
 and page message history to find surrounding context. Put returned message URLs in Sources and preserve author
 attribution, dates, and uncertainty; a discussion or suggestion is not automatically a team decision. Discord uses
 the bot's permissions in the configured server, not the caller's Discord identity. Never try to bypass unavailable

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, Validat
 from blix_agent_worker.models.common import JsonObject
 
 DiscordID = Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,19}$")]
+type DiscordQueryValue = str | int | tuple[str, ...]
 ROOT_CHANNEL_TYPES = frozenset({0, 5, 15, 16})
 PUBLIC_THREAD_TYPES = frozenset({10, 11})
 logger = logging.getLogger(__name__)
@@ -129,6 +130,15 @@ class DiscordMessage(BaseModel):
     message_reference: JsonObject | None = None
 
 
+class DiscordMessageSearch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    doing_deep_historical_index: bool
+    documents_indexed: int | None = None
+    total_results: int
+    messages: tuple[tuple[DiscordMessage, ...], ...]
+
+
 class DiscordClient:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
         http_logger = logging.getLogger("httpx")
@@ -194,6 +204,19 @@ class DiscordClient:
             raise self._invalid_response()
         return message
 
+    async def search_messages(
+        self, settings: DiscordSettings, query: dict[str, DiscordQueryValue]
+    ) -> DiscordMessageSearch:
+        body = await self._get(f"guilds/{settings.guild_id}/messages/search", settings, query)
+        if not isinstance(body, dict):
+            raise self._invalid_response()
+        result = DiscordMessageSearch.model_validate(body)
+        for group in result.messages:
+            for message in group:
+                if message.guild_id not in {None, settings.guild_id}:
+                    raise self._invalid_response()
+        return result
+
     async def active_threads(self, settings: DiscordSettings) -> tuple[DiscordChannel, ...]:
         parents = {channel.id for channel in await self.channels(settings)}
         body = await self._get(f"guilds/{settings.guild_id}/threads/active", settings)
@@ -234,7 +257,9 @@ class DiscordClient:
             raise self._invalid_response()
         return threads, body["has_more"]
 
-    async def _get(self, path: str, settings: DiscordSettings, query: dict[str, str | int] | None = None) -> JsonValue:
+    async def _get(
+        self, path: str, settings: DiscordSettings, query: dict[str, DiscordQueryValue] | None = None
+    ) -> JsonValue:
         return await self._request("GET", path, settings, query=query)
 
     async def _webhook_footer(self, settings: DiscordSettings) -> str:
@@ -351,7 +376,7 @@ class DiscordClient:
         path: str,
         settings: DiscordSettings,
         *,
-        query: dict[str, str | int] | None = None,
+        query: dict[str, DiscordQueryValue] | None = None,
         body: JsonObject | None = None,
         authenticate: bool = True,
         audit_reason: str | None = None,
@@ -387,6 +412,18 @@ class DiscordClient:
                 raise DiscordClientError(
                     "discord_rate_limited",
                     "Discord rate limited the request; retry after the supplied delay.",
+                    retryable=True,
+                    retry_after=delay,
+                )
+            if response.status_code == 202:
+                try:
+                    indexing = response.json()
+                    delay = self._retry_delay(indexing.get("retry_after", 1))
+                except (ValueError, AttributeError):
+                    delay = 1.0
+                raise DiscordClientError(
+                    "discord_search_indexing",
+                    "Discord is indexing message history; retry the search after the supplied delay.",
                     retryable=True,
                     retry_after=delay,
                 )

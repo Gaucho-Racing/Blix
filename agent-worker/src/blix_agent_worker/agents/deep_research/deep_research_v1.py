@@ -70,6 +70,7 @@ class DeepResearchV1Agent(ToolAgent):
         tool_ids=(
             "current_time_v1",
             "discord_read_v1",
+            "discord_search_v1",
             "knowledge_read_v1",
             "sentinel_api_v1",
             "sentinel_identity_resolve_v1",
