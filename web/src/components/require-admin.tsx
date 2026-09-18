@@ -17,9 +17,9 @@ export function RequireAdmin() {
     return (
       <AdminAccessScreen
         action="Sign in again"
-        description="Blix could not verify your current Sentinel session."
+        description="You must be a member of the BlixAdmins group to access this page."
         onAction={auth.logout}
-        title="Identity verification failed"
+        title="Unauthorized"
       />
     )
   }
@@ -30,9 +30,9 @@ export function RequireAdmin() {
     return (
       <AdminAccessScreen
         action="Sign in with another account"
-        description="Your Sentinel identity must be an active member of the BlixAdmins group."
+        description="You must be a member of the BlixAdmins group to access this page."
         onAction={auth.logout}
-        title="Admin access required"
+        title="Unauthorized"
       />
     )
   }
