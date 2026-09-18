@@ -428,7 +428,7 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		if err := tx.Where("parent_execution_id = ?", execution.ID).Order("event_position ASC").Find(&messages).Error; err != nil {
 			return err
 		}
-		var notifications []model.ExecutionNotification
+		notifications := []model.ExecutionNotification{}
 		if execution.ParentExecutionID == nil {
 			if err := tx.Where("root_execution_id = ? AND delivered_at IS NULL AND created_at <= ?", execution.ID, now).
 				Order("created_at ASC").Find(&notifications).Error; err != nil {

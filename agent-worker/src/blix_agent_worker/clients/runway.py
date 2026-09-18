@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Self
+from typing import Annotated, Self
 
 import httpx
-from pydantic import ConfigDict, Field
+from pydantic import BeforeValidator, ConfigDict, Field
 
 from blix_agent_worker.models.agent import AgentExecutionState, AgentResult, AgentTask, AgentUsage
 from blix_agent_worker.models.common import (
@@ -62,7 +62,10 @@ class ExecutionContext(ContractModel):
     lease_expires_at: datetime
     lease_renew_after_ms: int = Field(gt=0)
     messages: tuple[RunwayMessage, ...]
-    notifications: tuple[ExecutionNotification, ...] = ()
+    notifications: Annotated[
+        tuple[ExecutionNotification, ...],
+        BeforeValidator(lambda value: () if value is None else value),
+    ] = ()
 
 
 class VersionResponse(ContractModel):
