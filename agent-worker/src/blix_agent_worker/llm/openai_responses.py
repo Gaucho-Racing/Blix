@@ -58,6 +58,7 @@ class _StreamEvent(_ResponseModel):
     type: str
     response: JsonObject | None = None
     message: str | None = None
+    delta: str | None = None
 
 
 class OpenAIResponsesModel:
@@ -244,8 +245,7 @@ class OpenAIResponsesModel:
                 raise ModelClientError("invalid_model_response", "The completed model stream omitted its response.")
             return event.response, None
         if event_type == "response.output_text.delta":
-            delta = event.model_extra.get("delta") if event.model_extra else None
-            return None, delta if isinstance(delta, str) and delta else None
+            return None, event.delta
         if event_type in {"response.failed", "response.incomplete", "error"}:
             raise ModelClientError(
                 "model_request_failed",
