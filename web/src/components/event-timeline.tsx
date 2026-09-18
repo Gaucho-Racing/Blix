@@ -19,7 +19,7 @@ import {
   eventLabel,
   formatIdentifiersInJSON,
   formatTimestamp,
-  readNumber,
+  modelEventSummary,
   readString,
 } from "@/lib/format"
 import type { ExecutionEvent } from "@/lib/types"
@@ -28,6 +28,8 @@ const icons: Record<string, ComponentType<{ size?: number }>> = {
   "message.user_v1": UserRound,
   "message.assistant_v1": MessageSquareText,
   "model.response_v1": BrainCircuit,
+  "model.call_v1": BrainCircuit,
+  "model.failure_v1": CircleAlert,
   "tool.call_v1": Wrench,
   "tool.result_v1": CheckCircle2,
   "agent.call_v1": CornerDownRight,
@@ -44,12 +46,7 @@ function eventSummary(event: ExecutionEvent): string {
   const content = readString(event.payload, "content")
   if (content) return content
 
-  if (event.type === "model.response_v1") {
-    const model = readString(event.payload, "model") ?? "model"
-    const input = readNumber(event.payload, "input_tokens") ?? 0
-    const output = readNumber(event.payload, "output_tokens") ?? 0
-    return `${model} · ${input.toLocaleString()} in / ${output.toLocaleString()} out`
-  }
+  if (event.type.startsWith("model.")) return modelEventSummary(event)
 
   if (event.type === "caller.verified_v1") {
     return `${readString(event.payload, "required_group") ?? "required group"} membership confirmed`
@@ -98,6 +95,7 @@ export function EventTimeline({ events }: EventTimelineProps) {
                   <code>#{event.position}</code>
                   <code>{event.event_id}</code>
                   <code>{event.execution_id}</code>
+                  {event.type.startsWith("model.") && <code>{event.entity_id}</code>}
                 </span>
               </span>
             </summary>

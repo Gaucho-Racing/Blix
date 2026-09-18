@@ -1,9 +1,17 @@
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from blix_agent_worker.models.common import ContractModel, Identifier, JsonObject, NonEmptyText, VersionedIdentifier
+from blix_agent_worker.models.common import (
+    ContractError,
+    ContractModel,
+    Identifier,
+    JsonObject,
+    ModelCallID,
+    NonEmptyText,
+    VersionedIdentifier,
+)
 
 
 class ModelMessageRole(StrEnum):
@@ -102,6 +110,7 @@ class ModelContinuation(ContractModel):
 
 
 class ModelRequest(ContractModel):
+    sequence: Annotated[int, Field(ge=1)] = 1
     messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
     callables: tuple[ModelCallableDefinition, ...] = ()
     output_format: ModelOutputFormat | None = None
@@ -120,6 +129,9 @@ class ModelRequest(ContractModel):
 
 
 class ModelResponse(ContractModel):
+    call_id: ModelCallID | None = None
+    attempt: Annotated[int, Field(ge=1)] = 1
+    elapsed_ms: Annotated[int, Field(ge=0)] = 0
     message: ModelMessage
     usage: ModelUsage = Field(default_factory=ModelUsage)
     continuation: ModelContinuation | None = None
@@ -129,3 +141,17 @@ class ModelResponse(ContractModel):
         if self.message.role is not ModelMessageRole.ASSISTANT:
             raise ValueError("a model response must contain an assistant message")
         return self
+
+
+class ModelAttemptEvent(ContractModel):
+    type: Literal["model.call_v1", "model.failure_v1"]
+    call_id: ModelCallID
+    model: NonEmptyText
+    sequence: Annotated[int, Field(ge=1)]
+    attempt: Annotated[int, Field(ge=1)]
+    max_attempts: Annotated[int, Field(ge=1)]
+    request: JsonObject = Field(default_factory=dict)
+    elapsed_ms: Annotated[int, Field(ge=0)] = 0
+    error: ContractError | None = None
+    http_status: int | None = None
+    retry_in_seconds: Annotated[float, Field(ge=0)] | None = None

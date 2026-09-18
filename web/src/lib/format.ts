@@ -1,4 +1,4 @@
-import type { RunSummary } from "@/lib/types"
+import type { ExecutionEvent, RunSummary } from "@/lib/types"
 
 const staleRunThresholdMilliseconds = 2 * 60 * 60 * 1000
 
@@ -53,6 +53,28 @@ export function formatCompactNumber(value: number): string {
 
 export function eventLabel(type: string): string {
   return type.replace(/_v\d+$/, "").replaceAll(".", " ").replaceAll("_", " ")
+}
+
+export function modelEventSummary(event: ExecutionEvent): string {
+  const model = readString(event.payload, "model") ?? "model"
+  const sequence = readNumber(event.payload, "sequence") ?? 1
+  const attempt = readNumber(event.payload, "attempt") || 1
+  const prefix = `${model} · call ${sequence} · attempt ${attempt}`
+  if (event.type === "model.call_v1") return `${prefix} · request sent`
+  const elapsed = readNumber(event.payload, "elapsed_ms")
+  const duration = elapsed === undefined ? "" : ` · ${(elapsed / 1000).toFixed(1)}s`
+  if (event.type === "model.failure_v1") {
+    const error = event.payload.error
+    const message = error && typeof error === "object" && !Array.isArray(error)
+      ? readString(error as Record<string, unknown>, "message") ?? "Request failed"
+      : "Request failed"
+    const status = readNumber(event.payload, "http_status")
+    const retry = readNumber(event.payload, "retry_in_seconds")
+    return `${prefix}${duration} · ${status ? `HTTP ${status} · ` : ""}${message} · ${retry === undefined ? "no further retry" : `retry in ${retry.toFixed(1)}s`}`
+  }
+  const input = readNumber(event.payload, "input_tokens") ?? 0
+  const output = readNumber(event.payload, "output_tokens") ?? 0
+  return `${prefix}${duration} · ${input.toLocaleString()} in / ${output.toLocaleString()} out`
 }
 
 export function formatIdentifiersInJSON(value: unknown): unknown {

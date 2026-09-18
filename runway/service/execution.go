@@ -109,6 +109,9 @@ type ToolCheckpoint struct {
 }
 
 type ModelCheckpoint struct {
+	CallID          string          `json:"call_id"`
+	Attempt         uint64          `json:"attempt"`
+	ElapsedMS       uint64          `json:"elapsed_ms"`
 	WorkerID        string          `json:"worker_id"`
 	ExpectedVersion uint64          `json:"expected_version"`
 	Model           string          `json:"model"`
@@ -809,6 +812,9 @@ func (s *ExecutionService) CheckpointModel(
 		checkpoint.Sequence == 0 {
 		return 0, fmt.Errorf("%w: model, turn_message_id, and a positive sequence are required", ErrInvalid)
 	}
+	if checkpoint.CallID != "" && (!identifier.IsValid(checkpoint.CallID, identifier.ModelCall) || checkpoint.Attempt == 0) {
+		return 0, fmt.Errorf("%w: invalid model call or attempt", ErrInvalid)
+	}
 	state, err := decodeExecutionState(checkpoint.State)
 	if err != nil {
 		return 0, err
@@ -818,6 +824,9 @@ func (s *ExecutionService) CheckpointModel(
 	}
 	payload, err := json.Marshal(map[string]any{
 		"model":           checkpoint.Model,
+		"call_id":         checkpoint.CallID,
+		"attempt":         checkpoint.Attempt,
+		"elapsed_ms":      checkpoint.ElapsedMS,
 		"turn_message_id": checkpoint.TurnMessageID,
 		"sequence":        checkpoint.Sequence,
 		"input_tokens":    checkpoint.InputTokens,
@@ -870,6 +879,9 @@ func (s *ExecutionService) CheckpointModel(
 			fmt.Sprintf("%d", checkpoint.Sequence),
 		).First(&existing)
 		if lookup.Error == nil {
+			if checkpoint.CallID != "" && existing.EntityID != checkpoint.CallID {
+				return ErrConflict
+			}
 			version = execution.Version
 			return nil
 		}
@@ -879,7 +891,14 @@ func (s *ExecutionService) CheckpointModel(
 		if execution.Version != checkpoint.ExpectedVersion {
 			return ErrConflict
 		}
-		modelCallID := identifier.New(identifier.ModelCall)
+		modelCallID := checkpoint.CallID
+		if modelCallID == "" {
+			modelCallID = identifier.New(identifier.ModelCall)
+		} else if err := validateModelAttemptResult(
+			tx, execution.ID, modelCallID, checkpoint.Model, checkpoint.TurnMessageID, checkpoint.Sequence, checkpoint.Attempt,
+		); err != nil {
+			return err
+		}
 		if err := s.appendEvent(
 			tx,
 			execution.RunID,

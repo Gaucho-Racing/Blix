@@ -254,6 +254,7 @@ class GeneralConversationV1Agent:
                 try:
                     response = await self._model.complete(
                         ModelRequest(
+                            sequence=model_calls,
                             messages=tuple(messages),
                             callables=catalog.definitions,
                             continuation=continuation,

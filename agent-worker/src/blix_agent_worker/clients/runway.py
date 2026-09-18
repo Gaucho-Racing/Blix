@@ -15,7 +15,7 @@ from blix_agent_worker.models.common import (
     WorkerID,
 )
 from blix_agent_worker.models.context import CallerContext
-from blix_agent_worker.models.llm import ModelResponse
+from blix_agent_worker.models.llm import ModelAttemptEvent, ModelResponse
 from blix_agent_worker.models.message import ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 
@@ -158,6 +158,25 @@ class RunwayClient:
         )
         return VersionResponse.model_validate(body).version
 
+    async def record_model_attempt(
+        self,
+        execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        turn_message_id: str,
+        event: ModelAttemptEvent,
+    ) -> int:
+        body = await self._post(
+            f"internal/v1/executions/{execution_id}/model-attempts",
+            {
+                **event.model_dump(mode="json"),
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "turn_message_id": turn_message_id,
+            },
+        )
+        return VersionResponse.model_validate(body).version
+
     async def checkpoint_model(
         self,
         execution_id: str,
@@ -177,6 +196,9 @@ class RunwayClient:
                 "model": model,
                 "turn_message_id": turn_message_id,
                 "sequence": sequence,
+                "call_id": response.call_id,
+                "attempt": response.attempt,
+                "elapsed_ms": response.elapsed_ms,
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
                 "callable_ids": [request.callable_id for request in response.message.call_requests],

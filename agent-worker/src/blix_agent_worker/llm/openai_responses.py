@@ -1,5 +1,8 @@
 import json
+import math
 import os
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Literal, Self, cast
 
 import httpx
@@ -126,12 +129,25 @@ class OpenAIResponsesModel:
         try:
             response = await self._client.post("responses", json=payload)
         except httpx.RequestError as error:
-            raise ModelClientError("model_unavailable", "The model gateway is unavailable.", retryable=True) from error
+            retryable = isinstance(
+                error, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)
+            )
+            raise ModelClientError(
+                "model_unavailable", "The model gateway is unavailable.", retryable=retryable
+            ) from error
 
         if not response.is_success:
             message = self._error_message(response)
-            retryable = response.status_code == 429 or response.status_code >= 500
-            raise ModelClientError("model_request_failed", message, retryable=retryable)
+            retryable = response.status_code in {408, 429} or (
+                response.status_code >= 500 and response.status_code not in {501, 505}
+            )
+            raise ModelClientError(
+                "model_request_failed",
+                message,
+                retryable=retryable,
+                http_status=response.status_code,
+                retry_after_seconds=self._retry_after(response),
+            )
 
         try:
             body = response.json()
@@ -307,6 +323,21 @@ class OpenAIResponsesModel:
         if not isinstance(output, list) or not output or not all(isinstance(item, dict) for item in output):
             raise ValueError("model response does not contain output items")
         return cast(list[JsonObject], output)
+
+    @staticmethod
+    def _retry_after(response: httpx.Response) -> float | None:
+        value = response.headers.get("Retry-After")
+        if value is None:
+            return None
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                deadline = parsedate_to_datetime(value)
+                seconds = (deadline - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                return None
+        return max(0.0, seconds) if math.isfinite(seconds) else None
 
     @staticmethod
     def _error_message(response: httpx.Response) -> str:

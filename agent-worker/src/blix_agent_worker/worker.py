@@ -28,6 +28,7 @@ from blix_agent_worker.clients import (
 from blix_agent_worker.clients.discord import DiscordClient
 from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.llm import OpenAIResponsesModel
+from blix_agent_worker.llm.retrying import RetryingModel
 from blix_agent_worker.models.agent import (
     AgentExecutionState,
     AgentResult,
@@ -38,7 +39,7 @@ from blix_agent_worker.models.agent import (
 )
 from blix_agent_worker.models.common import ContractError, EventID, ExecutionID, RunID, new_ulid
 from blix_agent_worker.models.context import EntityType
-from blix_agent_worker.models.llm import ModelResponse
+from blix_agent_worker.models.llm import ModelAttemptEvent, ModelResponse
 from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
@@ -133,6 +134,15 @@ class AgentWorker:
         state = ExecutionState(version=execution.version)
         turn_message_id = execution.messages[-1].message_id if execution.messages else execution.execution_id
 
+        async def record_model_attempt(event: ModelAttemptEvent) -> None:
+            state.version = await self._runway.record_model_attempt(
+                execution.execution_id,
+                self._worker_id,
+                state.version,
+                turn_message_id,
+                event,
+            )
+
         async def checkpoint(call: ToolCall, result: ToolResult, execution_state: AgentExecutionState) -> None:
             state.version = await self._runway.checkpoint_tool(
                 execution.execution_id,
@@ -183,6 +193,7 @@ class AgentWorker:
                 caller_user,
                 checkpoint,
                 checkpoint_model,
+                record_model_attempt,
                 resume_result,
             )
             if isinstance(outcome, AgentSuspension):
@@ -319,8 +330,10 @@ class AgentWorker:
         caller_user: SentinelUser,
         checkpoint: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]],
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
+        record_model_attempt: Callable[[ModelAttemptEvent], Awaitable[None]],
         resume_result: AgentResult | None,
     ) -> AgentRunOutcome:
+        model = RetryingModel(self._model, self._model.model, record_model_attempt)
         messages = tuple(
             ConversationMessage(
                 message_id=message.message_id,
@@ -355,13 +368,13 @@ class AgentWorker:
             )
         )
         deep_research = DeepResearchV1Agent(
-            model=self._model,
+            model=model,
             tool_runner=tool_runner,
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
         )
         knowledge_curator = KnowledgeCuratorV1Agent(
-            model=self._model,
+            model=model,
             tool_runner=tool_runner,
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
@@ -391,7 +404,7 @@ class AgentWorker:
 
         agent_input = GeneralConversationV1Input(messages=messages)
         agent = GeneralConversationV1Agent(
-            model=self._model,
+            model=model,
             tool_runner=tool_runner,
             agent_runner=AgentRunner(agent_registry),
             on_tool_result=checkpoint,

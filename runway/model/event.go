@@ -13,6 +13,8 @@ const (
 	EventTypeToolCall           = "tool.call_v1"
 	EventTypeToolResult         = "tool.result_v1"
 	EventTypeModelResponse      = "model.response_v1"
+	EventTypeModelCall          = "model.call_v1"
+	EventTypeModelFailure       = "model.failure_v1"
 	EventTypeAgentCall          = "agent.call_v1"
 	EventTypeAgentResult        = "agent.result_v1"
 	EventTypeExecutionClaimed   = "execution.claimed_v1"
