@@ -52,7 +52,7 @@ func (h *Handler) CreateSource(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, source)
+	c.JSON(http.StatusOK, source)
 }
 
 func (h *Handler) ListSources(c *gin.Context) {
@@ -61,12 +61,77 @@ func (h *Handler) ListSources(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	sources, err := h.sources.ListSources(c.Request.Context(), limit)
+	sources, err := h.sources.FindSources(c.Request.Context(), service.SourceQuery{
+		Limit: limit, Kind: c.Query("kind"), ExternalID: c.Query("external_id"), Before: c.Query("before"),
+	})
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"sources": sources})
+	next := ""
+	if len(sources) > limit {
+		sources = sources[:limit]
+		next = sources[len(sources)-1].ID
+	}
+	c.JSON(http.StatusOK, gin.H{"sources": sources, "next_before": next})
+}
+
+func (h *Handler) GetSource(c *gin.Context) {
+	source, err := h.sources.GetSource(c.Request.Context(), c.Param("sourceID"))
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, source)
+}
+
+func (h *Handler) ListSourceRecords(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	records, err := h.sources.ListSourceRecords(c.Request.Context(), service.SourceRecordQuery{
+		SourceID: c.Param("sourceID"), Limit: limit, ExternalID: c.Query("external_id"), Before: c.Query("before"),
+	})
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	next := ""
+	if len(records) > limit {
+		records = records[:limit]
+		next = records[len(records)-1].ID
+	}
+	summaries := make([]gin.H, 0, len(records))
+	for _, record := range records {
+		summaries = append(summaries, gin.H{
+			"source_record_id": record.ID, "source_id": record.SourceID, "external_id": record.ExternalID,
+			"external_version": record.ExternalVersion, "record_type": record.RecordType,
+			"external_url": record.ExternalURL, "evidence_type": record.EvidenceType, "capture_method": record.CaptureMethod,
+			"occurred_at": record.OccurredAt, "ingested_at": record.IngestedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"records": summaries, "next_before": next})
+}
+
+func (h *Handler) CaptureSourceRecord(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8*1024*1024)
+	var request service.CaptureSourceRecordInput
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	ingested, err := h.sources.CaptureSourceRecord(c.Request.Context(), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	status := http.StatusOK
+	if ingested.Created {
+		status = http.StatusCreated
+	}
+	c.JSON(status, ingested)
 }
 
 func (h *Handler) IngestSourceRecord(c *gin.Context) {
@@ -107,7 +172,7 @@ func (h *Handler) IngestSourceRecord(c *gin.Context) {
 }
 
 func (h *Handler) GetSourceRecord(c *gin.Context) {
-	record, err := h.sources.GetSourceRecord(c.Request.Context(), c.Param("sourceRecordID"))
+	record, err := h.sources.ReadSourceRecord(c.Request.Context(), c.Param("sourceRecordID"))
 	if err != nil {
 		respondError(c, err)
 		return

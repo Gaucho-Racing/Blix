@@ -47,6 +47,19 @@ type PageRevision struct {
 	Content   string `json:"content"`
 }
 
+type SearchResult struct {
+	Path        string `json:"path"`
+	BlobSHA     string `json:"blob_sha"`
+	Excerpt     string `json:"excerpt"`
+	Score       int    `json:"score"`
+	PageContent string `json:"-"`
+}
+
+type SearchResults struct {
+	CommitSHA string         `json:"commit_sha"`
+	Results   []SearchResult `json:"results"`
+}
+
 func (w *Wiki) PageAt(ctx context.Context, commitSHA, pagePath string) (PageRevision, error) {
 	if !ValidCommit(commitSHA) || !ValidPagePath(pagePath) {
 		return PageRevision{}, ErrInvalid
@@ -219,6 +232,109 @@ func (w *Wiki) Pages(ctx context.Context, pagePath string, prefix string) (Snaps
 	}
 	sort.Slice(result.Pages, func(i, j int) bool { return result.Pages[i].Path < result.Pages[j].Path })
 	return result, nil
+}
+
+func (w *Wiki) Search(ctx context.Context, query string, limit int) (SearchResults, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 256 || limit < 1 || limit > 20 {
+		return SearchResults{}, ErrInvalid
+	}
+	terms := strings.Fields(strings.ToLower(query))
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	if w.repository == nil {
+		return SearchResults{}, ErrUnavailable
+	}
+	if err := w.syncToRemote(ctx); err != nil {
+		return SearchResults{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	head, err := w.headSHA()
+	if err != nil {
+		return SearchResults{}, err
+	}
+	results := SearchResults{CommitSHA: head, Results: []SearchResult{}}
+	if head == "" {
+		return results, nil
+	}
+	commit, err := w.repository.CommitObject(plumbing.NewHash(head))
+	if err != nil {
+		return SearchResults{}, err
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return SearchResults{}, err
+	}
+	err = tree.Files().ForEach(func(file *object.File) error {
+		if !ValidPagePath(file.Name) || file.Size > MaxPageBytes || file.Mode != filemode.Regular && file.Mode != filemode.Executable {
+			return nil
+		}
+		content, err := file.Contents()
+		if err != nil {
+			return err
+		}
+		pathText := strings.ToLower(file.Name)
+		bodyText := strings.ToLower(content)
+		score := 0
+		firstMatch := -1
+		for _, term := range terms {
+			pathMatches := strings.Count(pathText, term)
+			bodyMatches := strings.Count(bodyText, term)
+			if pathMatches == 0 && bodyMatches == 0 {
+				return nil
+			}
+			score += pathMatches*20 + bodyMatches
+			if index := strings.Index(bodyText, term); firstMatch < 0 || index >= 0 && index < firstMatch {
+				firstMatch = index
+			}
+		}
+		if strings.Contains(bodyText, strings.ToLower(query)) {
+			score += 10
+		}
+		results.Results = append(results.Results, SearchResult{
+			Path: file.Name, BlobSHA: file.Hash.String(), Excerpt: searchExcerpt(content, firstMatch), Score: score,
+			PageContent: content,
+		})
+		return nil
+	})
+	if err != nil {
+		return SearchResults{}, err
+	}
+	sort.Slice(results.Results, func(i, j int) bool {
+		if results.Results[i].Score == results.Results[j].Score {
+			return results.Results[i].Path < results.Results[j].Path
+		}
+		return results.Results[i].Score > results.Results[j].Score
+	})
+	if len(results.Results) > limit {
+		results.Results = results.Results[:limit]
+	}
+	return results, nil
+}
+
+func searchExcerpt(content string, match int) string {
+	const excerptBytes = 800
+	if len(content) <= excerptBytes {
+		return content
+	}
+	if match < 0 {
+		match = 0
+	}
+	start := max(0, match-excerptBytes/3)
+	end := min(len(content), start+excerptBytes)
+	for start > 0 && !utf8.RuneStart(content[start]) {
+		start--
+	}
+	for end < len(content) && !utf8.RuneStart(content[end]) {
+		end--
+	}
+	excerpt := content[start:end]
+	if start > 0 {
+		excerpt = "…" + excerpt
+	}
+	if end < len(content) {
+		excerpt += "…"
+	}
+	return excerpt
 }
 
 func (w *Wiki) Prepare(ctx context.Context, base string, changesetID string, summary string, edits []Edit, when time.Time) (string, error) {

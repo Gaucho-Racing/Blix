@@ -52,3 +52,13 @@ type ChangesetFile struct {
 func (ChangesetFile) TableName() string {
 	return "knowledge_changeset_file"
 }
+
+type ChangesetSourceRecord struct {
+	ChangesetID    string    `json:"changeset_id" gorm:"primaryKey"`
+	SourceRecordID string    `json:"source_record_id" gorm:"primaryKey;index"`
+	CreatedAt      time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+func (ChangesetSourceRecord) TableName() string {
+	return "knowledge_changeset_source_record"
+}

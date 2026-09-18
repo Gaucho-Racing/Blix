@@ -22,12 +22,26 @@ func (h *Handler) ReadWikiPage(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.wiki.Pages(c.Request.Context(), c.Query("path"), "")
+	result, err := h.pages.ReadPage(c.Request.Context(), c.Query("path"))
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"commit_sha": result.CommitSHA, "page": result.Pages[0]})
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) SearchWiki(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "8"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.pages.Search(c.Request.Context(), c.Query("q"), limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *Handler) CreateWikiChangeset(c *gin.Context) {

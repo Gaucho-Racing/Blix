@@ -64,7 +64,8 @@ func (s *SourceService) IngestChatRecord(ctx context.Context, input IngestChatRe
 		ingested, err = NewSourceService(tx).IngestSourceRecord(ctx, stored.ID, IngestSourceRecordInput{
 			ExternalID: input.MessageID, ExternalVersion: "1", RecordType: "chat_message",
 			ParentExternalID: input.RunID, Content: input.Content, Metadata: metadata, OccurredAt: input.OccurredAt,
-			Author: &SourceIdentityInput{Provider: "sentinel", ExternalID: input.EntityID},
+			Author: &SourceIdentityInput{Provider: "sentinel", ExternalID: input.EntityID}, EvidenceType: "human_statement",
+			CaptureMethod: "runtime_chat", CaptureRunID: input.RunID, CaptureExecutionID: input.ExecutionID,
 		})
 		return err
 	})

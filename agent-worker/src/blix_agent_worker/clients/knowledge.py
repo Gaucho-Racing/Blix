@@ -52,7 +52,14 @@ class KnowledgeClient:
             }.get(response.status_code, "knowledge_request_failed")
             message = f"The knowledge service returned HTTP {response.status_code}."
             if response.status_code == 409:
-                message += " Read the latest wiki revision and propose a new changeset; do not force the write."
+                if path == "source-records" or path.startswith("sources"):
+                    message += (
+                        " The source may be disabled or an existing record version has different content. "
+                        "Read the source/record first; do not overwrite evidence or invent a version "
+                        "to bypass a conflict."
+                    )
+                else:
+                    message += " Read the latest wiki revision and propose a new changeset; do not force the write."
             raise KnowledgeClientError(
                 code, message, retryable=response.status_code == 429 or response.status_code >= 500
             )

@@ -22,6 +22,7 @@ import (
 var seedPages embed.FS
 
 var seasonPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var sourceRecordReferencePattern = regexp.MustCompile(`sourcerecord_[0-9a-hjkmnp-tv-z]{26}`)
 
 type WikiService struct {
 	database *gorm.DB
@@ -30,28 +31,138 @@ type WikiService struct {
 }
 
 type wikiRepository interface {
+	Pages(context.Context, string, string) (repository.Snapshot, error)
+	Search(context.Context, string, int) (repository.SearchResults, error)
 	Prepare(context.Context, string, string, string, []repository.Edit, time.Time) (string, error)
 	Publish(context.Context, string, string) error
 	Refresh(context.Context) (string, error)
 }
 
+type Citation struct {
+	SourceRecordID string    `json:"source_record_id"`
+	SourceName     string    `json:"source_name"`
+	RecordType     string    `json:"record_type"`
+	ExternalURL    string    `json:"external_url"`
+	Author         string    `json:"author,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
+type WikiPageResult struct {
+	CommitSHA string              `json:"commit_sha"`
+	Page      repository.Page     `json:"page"`
+	Citations map[string]Citation `json:"citations"`
+}
+
+type WikiSearchResult struct {
+	CommitSHA string                    `json:"commit_sha"`
+	Results   []repository.SearchResult `json:"results"`
+	Citations map[string]Citation       `json:"citations"`
+}
+
 type CreateChangesetInput struct {
-	RunID         string            `json:"run_id"`
-	ExecutionID   string            `json:"execution_id"`
-	SeasonSlug    string            `json:"season_slug"`
-	Type          string            `json:"type"`
-	Summary       string            `json:"summary"`
-	BaseCommitSHA *string           `json:"base_commit_sha"`
-	Files         []repository.Edit `json:"files"`
+	RunID           string            `json:"run_id"`
+	ExecutionID     string            `json:"execution_id"`
+	SeasonSlug      string            `json:"season_slug"`
+	Type            string            `json:"type"`
+	Summary         string            `json:"summary"`
+	BaseCommitSHA   *string           `json:"base_commit_sha"`
+	SourceRecordIDs []string          `json:"source_record_ids"`
+	Files           []repository.Edit `json:"files"`
 }
 
 type ChangesetDetails struct {
-	Changeset model.Changeset       `json:"changeset"`
-	Files     []model.ChangesetFile `json:"files"`
+	Changeset       model.Changeset       `json:"changeset"`
+	Files           []model.ChangesetFile `json:"files"`
+	SourceRecordIDs []string              `json:"source_record_ids"`
 }
 
 func NewWikiService(database *gorm.DB, wiki wikiRepository) *WikiService {
 	return &WikiService{database: database, wiki: wiki}
+}
+
+func (s *WikiService) ReadPage(ctx context.Context, path string) (WikiPageResult, error) {
+	snapshot, err := s.wiki.Pages(ctx, path, "")
+	if err != nil {
+		return WikiPageResult{}, err
+	}
+	if len(snapshot.Pages) != 1 {
+		return WikiPageResult{}, ErrNotFound
+	}
+	citations, err := s.resolveCitations(ctx, []string{snapshot.Pages[0].Content})
+	return WikiPageResult{CommitSHA: snapshot.CommitSHA, Page: snapshot.Pages[0], Citations: citations}, err
+}
+
+func (s *WikiService) Search(ctx context.Context, query string, limit int) (WikiSearchResult, error) {
+	results, err := s.wiki.Search(ctx, query, limit)
+	if err != nil {
+		return WikiSearchResult{}, err
+	}
+	contents := make([]string, 0, len(results.Results))
+	for _, result := range results.Results {
+		contents = append(contents, result.PageContent)
+	}
+	citations, err := s.resolveCitations(ctx, contents)
+	return WikiSearchResult{CommitSHA: results.CommitSHA, Results: results.Results, Citations: citations}, err
+}
+
+func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (map[string]Citation, error) {
+	ids := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, content := range contents {
+		for _, id := range sourceRecordReferencePattern.FindAllString(content, -1) {
+			if _, exists := seen[id]; !exists {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+		}
+	}
+	citations := make(map[string]Citation, len(ids))
+	if len(ids) == 0 {
+		return citations, nil
+	}
+	var records []model.SourceRecord
+	if err := s.database.WithContext(ctx).Where("id IN ?", ids).Find(&records).Error; err != nil {
+		return nil, err
+	}
+	sourceIDs := make([]string, 0, len(records))
+	identityIDs := make([]string, 0, len(records))
+	for _, record := range records {
+		sourceIDs = append(sourceIDs, record.SourceID)
+		if record.AuthorSourceIdentityID != nil {
+			identityIDs = append(identityIDs, *record.AuthorSourceIdentityID)
+		}
+	}
+	var sources []model.Source
+	if err := s.database.WithContext(ctx).Where("id IN ?", sourceIDs).Find(&sources).Error; err != nil {
+		return nil, err
+	}
+	var identities []model.SourceIdentity
+	if len(identityIDs) > 0 {
+		if err := s.database.WithContext(ctx).Where("id IN ?", identityIDs).Find(&identities).Error; err != nil {
+			return nil, err
+		}
+	}
+	sourceNames := make(map[string]string, len(sources))
+	for _, source := range sources {
+		sourceNames[source.ID] = source.Name
+	}
+	authors := make(map[string]string, len(identities))
+	for _, identity := range identities {
+		author := identity.DisplayName
+		if author == "" {
+			author = identity.Username
+		}
+		authors[identity.ID] = author
+	}
+	for _, record := range records {
+		citation := Citation{SourceRecordID: record.ID, SourceName: sourceNames[record.SourceID], RecordType: record.RecordType,
+			ExternalURL: record.ExternalURL, OccurredAt: record.OccurredAt}
+		if record.AuthorSourceIdentityID != nil {
+			citation.Author = authors[*record.AuthorSourceIdentityID]
+		}
+		citations[record.ID] = citation
+	}
+	return citations, nil
 }
 
 func (s *WikiService) CreateChangeset(ctx context.Context, input CreateChangesetInput) (ChangesetDetails, error) {
@@ -78,6 +189,34 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 	if err := repository.ValidateEdits(input.Files); err != nil {
 		return ChangesetDetails{}, err
 	}
+	if origin == "agent" && (len(input.SourceRecordIDs) == 0 || len(input.SourceRecordIDs) > 100) {
+		return ChangesetDetails{}, fmt.Errorf("%w: provide between 1 and 100 source_record_ids", ErrInvalid)
+	}
+	seenSources := make(map[string]struct{}, len(input.SourceRecordIDs))
+	for _, sourceRecordID := range input.SourceRecordIDs {
+		if !identifier.IsValid(sourceRecordID, identifier.SourceRecord) {
+			return ChangesetDetails{}, fmt.Errorf("%w: invalid source_record_id", ErrInvalid)
+		}
+		if _, exists := seenSources[sourceRecordID]; exists {
+			return ChangesetDetails{}, fmt.Errorf("%w: duplicate source_record_id", ErrInvalid)
+		}
+		seenSources[sourceRecordID] = struct{}{}
+	}
+	for _, edit := range input.Files {
+		if edit.Operation != "upsert" || origin != "agent" {
+			continue
+		}
+		hasCitation := false
+		for sourceRecordID := range seenSources {
+			if strings.Contains(edit.Content, sourceRecordID) {
+				hasCitation = true
+				break
+			}
+		}
+		if !hasCitation {
+			return ChangesetDetails{}, fmt.Errorf("%w: every upserted page must cite a supplied source record", ErrInvalid)
+		}
+	}
 	changeset := model.Changeset{ID: identifier.New(identifier.Changeset), Origin: origin, RunID: input.RunID, ExecutionID: input.ExecutionID,
 		SeasonSlug: input.SeasonSlug, Type: input.Type, Status: model.ChangesetStatusProposed, Summary: input.Summary, BaseCommitSHA: *input.BaseCommitSHA}
 	files := make([]model.ChangesetFile, 0, len(input.Files))
@@ -85,13 +224,32 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 		files = append(files, model.ChangesetFile{ID: identifier.New(identifier.ChangesetFile), ChangesetID: changeset.ID,
 			Operation: edit.Operation, Path: edit.Path, Content: edit.Content, ContentHash: hashBytes([]byte(edit.Content))})
 	}
+	links := make([]model.ChangesetSourceRecord, 0, len(input.SourceRecordIDs))
+	for _, sourceRecordID := range input.SourceRecordIDs {
+		links = append(links, model.ChangesetSourceRecord{ChangesetID: changeset.ID, SourceRecordID: sourceRecordID})
+	}
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(input.SourceRecordIDs) > 0 {
+			var count int64
+			if err := tx.Model(&model.SourceRecord{}).Where("id IN ?", input.SourceRecordIDs).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != int64(len(input.SourceRecordIDs)) {
+				return fmt.Errorf("%w: source record not found", ErrNotFound)
+			}
+		}
 		if err := tx.Create(&changeset).Error; err != nil {
 			return err
 		}
-		return tx.Create(&files).Error
+		if err := tx.Create(&files).Error; err != nil {
+			return err
+		}
+		if len(links) > 0 {
+			return tx.Create(&links).Error
+		}
+		return nil
 	})
-	return ChangesetDetails{Changeset: changeset, Files: files}, err
+	return ChangesetDetails{Changeset: changeset, Files: files, SourceRecordIDs: input.SourceRecordIDs}, err
 }
 
 func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDetails, error) {
@@ -103,6 +261,16 @@ func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDet
 		return result, mapDatabaseError(err)
 	}
 	err := s.database.WithContext(ctx).Where("changeset_id = ?", id).Order("path ASC").Find(&result.Files).Error
+	if err != nil {
+		return result, err
+	}
+	var links []model.ChangesetSourceRecord
+	if err := s.database.WithContext(ctx).Where("changeset_id = ?", id).Order("source_record_id ASC").Find(&links).Error; err != nil {
+		return result, err
+	}
+	for _, link := range links {
+		result.SourceRecordIDs = append(result.SourceRecordIDs, link.SourceRecordID)
+	}
 	return result, err
 }
 

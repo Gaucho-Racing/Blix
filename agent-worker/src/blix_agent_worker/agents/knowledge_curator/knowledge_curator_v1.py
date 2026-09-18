@@ -13,15 +13,19 @@ from blix_agent_worker.models.common import ChangesetID, ContractModel, NonEmpty
 from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole
 from blix_agent_worker.models.tool import ToolDefinition, ToolResult, ToolResultStatus
 from blix_agent_worker.tools.knowledge._shared import CommitSHA, PagePath
+from blix_agent_worker.tools.knowledge._sources import SourceRecordCapture
 
 
 class KnowledgeCuratorV1Input(ContractModel):
-    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=100)]
+    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(max_length=100)] = ()
+    source_material: Annotated[tuple[SourceRecordCapture, ...], Field(max_length=20)] = ()
     mode: Literal["propose", "apply"] = "propose"
     season_hint: Annotated[str, Field(max_length=64)] = ""
 
     @model_validator(mode="after")
     def unique_sources(self) -> Self:
+        if not self.source_record_ids and not self.source_material:
+            raise ValueError("provide source_record_ids or source_material")
         if len(set(self.source_record_ids)) != len(self.source_record_ids):
             raise ValueError("source_record_ids must be unique")
         return self
@@ -69,13 +73,22 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         description=(
             "Curate stored source records into Blix's Markdown wiki with citations. Supports shared services, "
             "administration, and car-specific knowledge without requiring a season. Pass existing "
-            "sourcerecord_ IDs. Defaults to propose-only; use mode=apply to publish GitHub changesets."
+            "sourcerecord_ IDs or source_material containing text and attribution already read by the caller. "
+            "Can capture supplied material without fetching providers. Defaults to propose-only; "
+            "use mode=apply to publish GitHub changesets."
         ),
         instructions=KNOWLEDGE_CURATOR_V1_SYSTEM_PROMPT,
         input_schema=KnowledgeCuratorV1Input.model_json_schema(),
         output_schema=KnowledgeCuratorV1Output.model_json_schema(),
         model_profile="knowledge_curator",
-        tool_ids=("knowledge_read_v1", "knowledge_propose_v1", "knowledge_apply_v1"),
+        tool_ids=(
+            "knowledge_read_v1",
+            "knowledge_evidence_read_v1",
+            "knowledge_source_create_v1",
+            "knowledge_source_record_create_v1",
+            "knowledge_propose_v1",
+            "knowledge_apply_v1",
+        ),
     )
 
     def initial_messages(self, task: AgentTask, agent_input: ContractModel) -> list[ModelMessage]:
@@ -96,9 +109,10 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         return self._tool_runner.registry.definitions(ids)
 
     def validate_output(self, task: AgentTask, output: KnowledgeCuratorV1Output, messages: list[ModelMessage]) -> None:
-        expected_sources = set(KnowledgeCuratorV1Input.model_validate(task.input).source_record_ids)
-        if set(output.source_record_ids) != expected_sources or len(output.source_record_ids) != len(expected_sources):
-            raise ValueError("result must identify exactly the supplied source records")
+        agent_input = KnowledgeCuratorV1Input.model_validate(task.input)
+        expected_sources = set(agent_input.source_record_ids)
+        pending_material = {material.model_dump_json() for material in agent_input.source_material}
+        calls = {request.ref: request for message in messages for request in message.call_requests}
         receipts = {}
         read_sources = set()
         for message in messages:
@@ -107,11 +121,23 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             result = ToolResult.model_validate_json(message.content)
             if result.status is not ToolResultStatus.SUCCEEDED or not isinstance(result.output, dict):
                 continue
-            if isinstance(result.output.get("source_record_id"), str):
+            request = calls.get(message.call_request_ref)
+            if request is None or result.run_id != task.run_id or result.parent_execution_id != task.execution_id:
+                continue
+            record_id = result.output.get("source_record_id")
+            if request.callable_id == "knowledge_source_record_create_v1" and isinstance(record_id, str):
+                expected_sources.add(record_id)
+                material = SourceRecordCapture.model_validate(request.arguments)
+                pending_material.discard(material.model_dump_json())
+            if request.callable_id == "knowledge_evidence_read_v1" and isinstance(record_id, str):
                 read_sources.add(result.output["source_record_id"])
             changeset = result.output.get("changeset")
             if isinstance(changeset, dict):
                 receipts[changeset.get("changeset_id")] = result.output
+        if set(output.source_record_ids) != expected_sources or len(output.source_record_ids) != len(expected_sources):
+            raise ValueError("result must identify exactly the supplied and captured source records")
+        if output.outcome in {"proposed", "committed"} and pending_material:
+            raise ValueError("the curator must capture all supplied source material before reporting completion")
         if output.outcome != "blocked" and not expected_sources.issubset(read_sources):
             raise ValueError("the curator must read its source records before reporting completion")
         for reported in output.changesets:

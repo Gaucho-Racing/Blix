@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
@@ -24,29 +26,33 @@ type SourceService struct {
 }
 
 type CreateSourceInput struct {
-	Kind       string
-	ExternalID string
-	Name       string
-	Metadata   json.RawMessage
+	Kind       string          `json:"kind"`
+	ExternalID string          `json:"external_id"`
+	Name       string          `json:"name"`
+	Metadata   json.RawMessage `json:"metadata"`
 }
 
 type SourceIdentityInput struct {
-	Provider    string
-	ExternalID  string
-	DisplayName string
-	Username    string
+	Provider    string `json:"provider"`
+	ExternalID  string `json:"external_id"`
+	DisplayName string `json:"display_name"`
+	Username    string `json:"username"`
 }
 
 type IngestSourceRecordInput struct {
-	ExternalID       string
-	ExternalVersion  string
-	RecordType       string
-	ParentExternalID string
-	ExternalURL      string
-	Content          string
-	Metadata         json.RawMessage
-	OccurredAt       time.Time
-	Author           *SourceIdentityInput
+	ExternalID         string               `json:"external_id"`
+	ExternalVersion    string               `json:"external_version"`
+	RecordType         string               `json:"record_type"`
+	ParentExternalID   string               `json:"parent_external_id"`
+	ExternalURL        string               `json:"external_url"`
+	Content            string               `json:"content"`
+	Metadata           json.RawMessage      `json:"metadata"`
+	OccurredAt         time.Time            `json:"occurred_at"`
+	Author             *SourceIdentityInput `json:"author"`
+	EvidenceType       string               `json:"evidence_type"`
+	CaptureMethod      string               `json:"capture_method"`
+	CaptureRunID       string               `json:"capture_run_id"`
+	CaptureExecutionID string               `json:"capture_execution_id"`
 }
 
 type IngestedSourceRecord struct {
@@ -62,7 +68,7 @@ func (s *SourceService) CreateSource(ctx context.Context, input CreateSourceInpu
 	input.Kind = strings.TrimSpace(input.Kind)
 	input.ExternalID = strings.TrimSpace(input.ExternalID)
 	input.Name = strings.TrimSpace(input.Name)
-	if !sourceKindPattern.MatchString(input.Kind) || input.ExternalID == "" || input.Name == "" {
+	if !sourceKindPattern.MatchString(input.Kind) || len(input.Kind) > 64 || input.ExternalID == "" || len(input.ExternalID) > 512 || input.Name == "" || len(input.Name) > 512 {
 		return model.Source{}, fmt.Errorf("%w: kind, external_id, or name is invalid", ErrInvalid)
 	}
 	metadata, err := normalizeMetadata(input.Metadata)
@@ -77,10 +83,19 @@ func (s *SourceService) CreateSource(ctx context.Context, input CreateSourceInpu
 		Status:     model.SourceStatusActive,
 		Metadata:   metadata,
 	}
-	if err := s.database.WithContext(ctx).Create(&source).Error; err != nil {
+	if err := s.database.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "kind"}, {Name: "external_id"}}, DoNothing: true,
+	}).Create(&source).Error; err != nil {
 		return model.Source{}, mapDatabaseError(err)
 	}
-	return source, nil
+	var stored model.Source
+	if err := s.database.WithContext(ctx).Where("kind = ? AND external_id = ?", input.Kind, input.ExternalID).First(&stored).Error; err != nil {
+		return model.Source{}, mapDatabaseError(err)
+	}
+	if stored.Status != model.SourceStatusActive {
+		return model.Source{}, fmt.Errorf("%w: source is disabled", ErrConflict)
+	}
+	return stored, nil
 }
 
 func (s *SourceService) ListSources(ctx context.Context, limit int) ([]model.Source, error) {
@@ -119,6 +134,16 @@ func (s *SourceService) IngestSourceRecord(
 	if input.ExternalID == "" || !sourceKindPattern.MatchString(input.RecordType) || input.OccurredAt.IsZero() {
 		return IngestedSourceRecord{}, fmt.Errorf("%w: external_id, record_type, or occurred_at is invalid", ErrInvalid)
 	}
+	if len(input.ExternalID) > 512 || len(input.ExternalVersion) > 512 || len(input.ParentExternalID) > 512 || len(input.RecordType) > 64 ||
+		len(input.Content) > 1024*1024 || !utf8.ValidString(input.Content) || strings.ContainsRune(input.Content, 0) {
+		return IngestedSourceRecord{}, fmt.Errorf("%w: invalid record size or text encoding", ErrInvalid)
+	}
+	if input.ExternalURL != "" {
+		parsed, err := url.Parse(input.ExternalURL)
+		if err != nil || len(input.ExternalURL) > 4096 || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+			return IngestedSourceRecord{}, fmt.Errorf("%w: external_url must be an HTTP(S) URL without credentials", ErrInvalid)
+		}
+	}
 	metadata, err := normalizeMetadata(input.Metadata)
 	if err != nil {
 		return IngestedSourceRecord{}, err
@@ -155,6 +180,10 @@ func (s *SourceService) IngestSourceRecord(
 			AuthorSourceIdentityID: authorID,
 			ExternalURL:            input.ExternalURL,
 			Content:                input.Content,
+			EvidenceType:           input.EvidenceType,
+			CaptureMethod:          input.CaptureMethod,
+			CaptureRunID:           input.CaptureRunID,
+			CaptureExecutionID:     input.CaptureExecutionID,
 			ContentHash:            contentHash,
 			RecordHash:             recordHash,
 			Metadata:               metadata,
@@ -236,6 +265,9 @@ func upsertSourceIdentity(
 }
 
 func normalizeMetadata(value json.RawMessage) (datatypes.JSON, error) {
+	if len(value) > 65536 {
+		return nil, fmt.Errorf("%w: metadata exceeds 64 KiB", ErrInvalid)
+	}
 	if len(value) == 0 || string(value) == "null" {
 		return datatypes.JSON([]byte("{}")), nil
 	}
@@ -259,6 +291,8 @@ func hashRecord(input IngestSourceRecordInput, metadata datatypes.JSON, authorID
 		Content          string          `json:"content"`
 		Metadata         json.RawMessage `json:"metadata"`
 		OccurredAt       time.Time       `json:"occurred_at"`
+		EvidenceType     string          `json:"evidence_type,omitempty"`
+		CaptureMethod    string          `json:"capture_method,omitempty"`
 	}{
 		RecordType:       input.RecordType,
 		ParentExternalID: input.ParentExternalID,
@@ -267,6 +301,8 @@ func hashRecord(input IngestSourceRecordInput, metadata datatypes.JSON, authorID
 		Content:          input.Content,
 		Metadata:         json.RawMessage(metadata),
 		OccurredAt:       input.OccurredAt.UTC(),
+		EvidenceType:     input.EvidenceType,
+		CaptureMethod:    input.CaptureMethod,
 	}
 	encoded, err := json.Marshal(fingerprint)
 	if err != nil {

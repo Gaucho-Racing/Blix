@@ -64,8 +64,6 @@ class KnowledgeProposeV1Tool(KnowledgeTool):
     )
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeProposeV1Input, url: str) -> JsonObject:
-        for source_id in arguments.source_record_ids:
-            await self._client.request(url, "GET", f"source-records/{source_id}")
-        payload = arguments.model_dump(mode="json", exclude={"source_record_ids"})
+        payload = arguments.model_dump(mode="json")
         payload.update(run_id=call.run_id, execution_id=call.parent_execution_id)
         return await self._client.request(url, "POST", "changesets", payload=payload)

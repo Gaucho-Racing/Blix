@@ -47,9 +47,12 @@ from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
 from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordWebhookSendV1Tool
 from blix_agent_worker.tools.knowledge import (
     KnowledgeApplyV1Tool,
+    KnowledgeEvidenceReadV1Tool,
     KnowledgeProposeV1Tool,
     KnowledgeReadV1Tool,
     KnowledgeRememberV1Tool,
+    KnowledgeSourceCreateV1Tool,
+    KnowledgeSourceRecordCreateV1Tool,
 )
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_identity import SentinelIdentityResolveV1Tool
@@ -352,6 +355,9 @@ class AgentWorker:
                     DiscordReadV1Tool(self._discord),
                     DiscordWebhookSendV1Tool(self._discord, caller_user),
                     KnowledgeReadV1Tool(self._knowledge),
+                    KnowledgeEvidenceReadV1Tool(self._knowledge),
+                    KnowledgeSourceCreateV1Tool(self._knowledge),
+                    KnowledgeSourceRecordCreateV1Tool(self._knowledge),
                     KnowledgeProposeV1Tool(self._knowledge),
                     KnowledgeApplyV1Tool(self._knowledge),
                     KnowledgeRememberV1Tool(

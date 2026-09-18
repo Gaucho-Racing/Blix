@@ -45,6 +45,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.EpisodeParticipant{},
 		&model.Changeset{},
 		&model.ChangesetFile{},
+		&model.ChangesetSourceRecord{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
