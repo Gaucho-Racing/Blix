@@ -43,6 +43,7 @@ from blix_agent_worker.models.llm import ModelAttemptEvent, ModelResponse
 from blix_agent_worker.models.message import ConversationMessage
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
+from blix_agent_worker.tools.agent_execution import AgentExecutionV1Tool
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
 from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordWebhookSendV1Tool
 from blix_agent_worker.tools.knowledge import (
@@ -135,7 +136,11 @@ class AgentWorker:
 
     async def _handle_claimed(self, execution: ExecutionContext, relinquishing_lease: asyncio.Event) -> None:
         state = ExecutionState(version=execution.version)
-        turn_message_id = execution.messages[-1].message_id if execution.messages else execution.execution_id
+        turn_message_id = (
+            execution.execution_id
+            if execution.notifications
+            else execution.messages[-1].message_id if execution.messages else execution.execution_id
+        )
 
         async def record_model_attempt(event: ModelAttemptEvent) -> None:
             state.version = await self._runway.record_model_attempt(
@@ -365,6 +370,7 @@ class AgentWorker:
             ToolRegistry(
                 [
                     CurrentTimeV1Tool(),
+                    AgentExecutionV1Tool(self._runway, self._worker_id),
                     DiscordReadV1Tool(self._discord),
                     DiscordWebhookSendV1Tool(self._discord, caller_user),
                     KnowledgeReadV1Tool(self._knowledge),
@@ -421,7 +427,10 @@ class AgentWorker:
             task = execution.task.model_copy(update={"context": task_context})
             return await agent.run(task, state=execution.state, resume_result=resume_result)
 
-        agent_input = GeneralConversationV1Input(messages=messages)
+        agent_input = GeneralConversationV1Input(
+            messages=messages,
+            notifications=tuple(notification.model_dump(mode="json") for notification in execution.notifications),
+        )
         agent = GeneralConversationV1Agent(
             model=model,
             tool_runner=tool_runner,

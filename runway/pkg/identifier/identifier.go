@@ -14,6 +14,7 @@ const (
 	Worker         Prefix = "worker"
 	Outbox         Prefix = "outbox"
 	Job            Prefix = "job"
+	Notification   Prefix = "notification"
 	Entity         Prefix = "ent"
 	User           Prefix = "usr"
 	ServiceAccount Prefix = "sa"

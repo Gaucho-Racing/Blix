@@ -40,6 +40,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.Run{},
 		&model.AgentWorker{},
 		&model.AgentExecution{},
+		&model.ExecutionNotification{},
 		&model.ExecutionEvent{},
 		&model.Message{},
 		&model.ToolCall{},

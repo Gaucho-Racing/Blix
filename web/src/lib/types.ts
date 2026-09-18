@@ -101,6 +101,7 @@ export interface ExecutionSummary {
   execution_id: string
   run_id: string
   parent_execution_id: string | null
+  detached: boolean
   agent_id: string
   status: ExecutionStatus
   version: number

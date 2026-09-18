@@ -32,6 +32,7 @@ type AgentExecution struct {
 	State                datatypes.JSON `json:"state,omitempty" gorm:"type:jsonb"`
 	Result               datatypes.JSON `json:"result,omitempty" gorm:"type:jsonb"`
 	WaitingOnExecutionID *string        `json:"waiting_on_execution_id,omitempty" gorm:"index"`
+	NotificationCutoff   *time.Time     `json:"notification_cutoff,omitempty"`
 	CompletedAt          *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt            time.Time      `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt            time.Time      `json:"updated_at" gorm:"autoUpdateTime"`

@@ -54,7 +54,7 @@ interface PendingSubmission {
 }
 
 interface ConversationTurn {
-  user: ExecutionEvent
+  user?: ExecutionEvent
   assistant?: ExecutionEvent
   activity: ExecutionEvent[]
   failure?: ExecutionEvent
@@ -68,7 +68,17 @@ function conversationTurns(events: ExecutionEvent[], rootExecutionID: string): C
   )
 
   return rootMessages.flatMap((event, index): ConversationTurn[] => {
-    if (event.type !== "message.user_v1") return []
+    if (event.type === "message.assistant_v1") {
+      const previous = rootMessages[index - 1]
+      if (!previous || previous.type === "message.assistant_v1") {
+        const priorPosition = previous?.position ?? 0
+        return [{ assistant: event, activity: sortedEvents.filter(
+          (candidate) => candidate.position > priorPosition && candidate.position < event.position &&
+            candidate.type !== "message.user_v1" && candidate.type !== "message.assistant_v1",
+        ) }]
+      }
+      return []
+    }
     const nextUser = rootMessages.slice(index + 1).find((candidate) => candidate.type === "message.user_v1")
     const assistant = rootMessages
       .slice(index + 1)
@@ -330,14 +340,14 @@ export function ChatPage() {
                   {turns.map((turn, index) => {
                     const isLast = index === turns.length - 1
                     return (
-                      <div className="chat-turn" key={turn.user.event_id}>
-                        <ChatMessage content={eventContent(turn.user)} role="user" userAvatarURL={auth.user?.avatar_url} />
+                      <div className="chat-turn" key={turn.user?.event_id ?? turn.assistant?.event_id}>
+                        {turn.user && <ChatMessage content={eventContent(turn.user)} role="user" userAvatarURL={auth.user?.avatar_url} />}
                         <ChatActivity
                           active={isLast && turnActive && !turn.assistant && !turn.failure}
                           completedAt={turn.assistant?.created_at ?? turn.failure?.created_at}
                           events={turn.activity}
                           executions={executions}
-                          startedAt={turn.user.created_at}
+                          startedAt={turn.user?.created_at ?? turn.activity.at(0)?.created_at}
                         />
                         {turn.assistant && <ChatMessage content={eventContent(turn.assistant)} role="assistant" />}
                         {turn.failure && <div className="chat-response-error"><TriangleAlert size={15} /><span>{failureContent(turn.failure)}</span></div>}

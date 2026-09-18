@@ -38,6 +38,16 @@ class RunwayMessage(ContractModel):
     created_at: datetime
 
 
+class ExecutionNotification(ContractModel):
+    notification_id: str
+    run_id: RunID
+    root_execution_id: ExecutionID
+    child_execution_id: ExecutionID
+    status: str
+    result: dict[str, object]
+    created_at: datetime
+
+
 class ExecutionContext(ContractModel):
     run_id: RunID
     caller_entity_id: EntityID
@@ -52,6 +62,7 @@ class ExecutionContext(ContractModel):
     lease_expires_at: datetime
     lease_renew_after_ms: int = Field(gt=0)
     messages: tuple[RunwayMessage, ...]
+    notifications: tuple[ExecutionNotification, ...] = ()
 
 
 class VersionResponse(ContractModel):

@@ -124,6 +124,9 @@ func validateModelTurn(tx *gorm.DB, execution model.AgentExecution, turnMessageI
 		}
 		return nil
 	}
+	if turnMessageID == execution.ID && execution.NotificationCutoff != nil {
+		return nil
+	}
 	var count int64
 	if err := tx.Model(&model.Message{}).Where(
 		"id = ? AND parent_execution_id = ? AND role = ?", turnMessageID, execution.ID, model.MessageRoleUser,

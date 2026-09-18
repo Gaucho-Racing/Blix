@@ -48,19 +48,20 @@ type AppendedMessage struct {
 }
 
 type ExecutionContext struct {
-	RunID                string              `json:"run_id"`
-	CallerEntityID       string              `json:"caller_entity_id"`
-	CallerContext        model.CallerContext `json:"caller_context"`
-	ExecutionID          string              `json:"execution_id"`
-	ParentExecutionID    *string             `json:"parent_execution_id"`
-	AgentID              string              `json:"agent_id"`
-	Version              uint64              `json:"version"`
-	Task                 json.RawMessage     `json:"task,omitempty"`
-	State                json.RawMessage     `json:"state,omitempty"`
-	WaitingOnExecutionID *string             `json:"waiting_on_execution_id,omitempty"`
-	LeaseExpiresAt       *time.Time          `json:"lease_expires_at"`
-	LeaseRenewAfterMS    uint64              `json:"lease_renew_after_ms"`
-	Messages             []model.Message     `json:"messages"`
+	RunID                string                        `json:"run_id"`
+	CallerEntityID       string                        `json:"caller_entity_id"`
+	CallerContext        model.CallerContext           `json:"caller_context"`
+	ExecutionID          string                        `json:"execution_id"`
+	ParentExecutionID    *string                       `json:"parent_execution_id"`
+	AgentID              string                        `json:"agent_id"`
+	Version              uint64                        `json:"version"`
+	Task                 json.RawMessage               `json:"task,omitempty"`
+	State                json.RawMessage               `json:"state,omitempty"`
+	WaitingOnExecutionID *string                       `json:"waiting_on_execution_id,omitempty"`
+	LeaseExpiresAt       *time.Time                    `json:"lease_expires_at"`
+	LeaseRenewAfterMS    uint64                        `json:"lease_renew_after_ms"`
+	Messages             []model.Message               `json:"messages"`
+	Notifications        []model.ExecutionNotification `json:"notifications"`
 }
 
 type Heartbeat struct {
@@ -427,6 +428,17 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 		if err := tx.Where("parent_execution_id = ?", execution.ID).Order("event_position ASC").Find(&messages).Error; err != nil {
 			return err
 		}
+		var notifications []model.ExecutionNotification
+		if execution.ParentExecutionID == nil {
+			if err := tx.Where("root_execution_id = ? AND delivered_at IS NULL AND created_at <= ?", execution.ID, now).
+				Order("created_at ASC").Find(&notifications).Error; err != nil {
+				return err
+			}
+			execution.NotificationCutoff = &now
+			if err := tx.Model(&execution).Update("notification_cutoff", now).Error; err != nil {
+				return err
+			}
+		}
 		var run model.Run
 		if err := tx.Select("caller_entity_id", "caller_context").First(&run, "id = ?", execution.RunID).Error; err != nil {
 			return mapDatabaseError(err)
@@ -445,6 +457,7 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			LeaseExpiresAt:       execution.LeaseExpiresAt,
 			LeaseRenewAfterMS:    uint64((s.leaseDuration / 3).Milliseconds()),
 			Messages:             messages,
+			Notifications:        notifications,
 		}
 		return nil
 	})
@@ -788,6 +801,9 @@ func (s *ExecutionService) GetExecutionResult(
 		!hasActiveLease(parent, time.Now().UTC()) {
 		return ExecutionResult{}, ErrConflict
 	}
+	if !child.Detached && (parent.WaitingOnExecutionID == nil || *parent.WaitingOnExecutionID != child.ID) {
+		return ExecutionResult{}, ErrConflict
+	}
 	return ExecutionResult{Status: child.Status, Result: json.RawMessage(child.Result)}, nil
 }
 
@@ -940,19 +956,21 @@ func (s *ExecutionService) CheckpointModel(
 			return ErrConflict
 		}
 		if execution.ParentExecutionID == nil {
-			var messageCount int64
-			if err := tx.Model(&model.Message{}).
-				Where(
-					"id = ? AND parent_execution_id = ? AND role = ?",
-					checkpoint.TurnMessageID,
-					execution.ID,
-					model.MessageRoleUser,
-				).
-				Count(&messageCount).Error; err != nil {
-				return err
-			}
-			if messageCount == 0 {
-				return ErrConflict
+			if checkpoint.TurnMessageID != execution.ID || execution.NotificationCutoff == nil {
+				var messageCount int64
+				if err := tx.Model(&model.Message{}).
+					Where(
+						"id = ? AND parent_execution_id = ? AND role = ?",
+						checkpoint.TurnMessageID,
+						execution.ID,
+						model.MessageRoleUser,
+					).
+					Count(&messageCount).Error; err != nil {
+					return err
+				}
+				if messageCount == 0 {
+					return ErrConflict
+				}
 			}
 		} else if checkpoint.TurnMessageID != execution.ID {
 			return ErrConflict
@@ -1077,6 +1095,32 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
+		if execution.NotificationCutoff != nil {
+			if err := tx.Model(&model.ExecutionNotification{}).
+				Where("root_execution_id = ? AND delivered_at IS NULL AND created_at <= ?", execution.ID, *execution.NotificationCutoff).
+				Update("delivered_at", time.Now().UTC()).Error; err != nil {
+				return err
+			}
+		}
+		execution.NotificationCutoff = nil
+		if err := tx.Model(&execution).Update("notification_cutoff", nil).Error; err != nil {
+			return err
+		}
+		var pendingNotifications int64
+		if err := tx.Model(&model.ExecutionNotification{}).
+			Where("root_execution_id = ? AND delivered_at IS NULL", execution.ID).Count(&pendingNotifications).Error; err != nil {
+			return err
+		}
+		if pendingNotifications > 0 {
+			execution.Status = model.ExecutionStatusQueued
+			execution.NotificationCutoff = nil
+			if err := tx.Save(&execution).Error; err != nil {
+				return err
+			}
+			if err := s.createDispatch(tx, execution); err != nil {
+				return err
+			}
+		}
 		appended = AppendedMessage{Message: message, EventPosition: event.Position, Version: execution.Version}
 		return nil
 	})
@@ -1142,7 +1186,7 @@ func (s *ExecutionService) CompleteAgentExecution(
 			return err
 		}
 		if execution.Detached {
-			return nil
+			return s.notifyDetachedCompletion(tx, execution)
 		}
 		return s.resumeParent(tx, execution)
 	})
@@ -1214,12 +1258,48 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
-		if isChild && !execution.Detached {
+		if execution.Detached {
+			return s.notifyDetachedCompletion(tx, execution)
+		}
+		if isChild {
 			return s.resumeParent(tx, execution)
 		}
 		return nil
 	})
 	return event, err
+}
+
+func (s *ExecutionService) notifyDetachedCompletion(tx *gorm.DB, child model.AgentExecution) error {
+	if child.ParentExecutionID == nil || !child.Detached {
+		return ErrConflict
+	}
+	notification := model.ExecutionNotification{
+		ID: identifier.New(identifier.Notification), RunID: child.RunID, RootExecutionID: *child.ParentExecutionID,
+		ChildExecutionID: child.ID, Status: child.Status, Result: child.Result,
+	}
+	created := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "child_execution_id"}}, DoNothing: true}).
+		Create(&notification)
+	if created.Error != nil || created.RowsAffected == 0 {
+		return created.Error
+	}
+	var root model.AgentExecution
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, "id = ?", *child.ParentExecutionID).Error; err != nil {
+		return mapDatabaseError(err)
+	}
+	if root.ParentExecutionID != nil {
+		return ErrConflict
+	}
+	if root.Status != model.ExecutionStatusIdle {
+		return nil
+	}
+	root.Status = model.ExecutionStatusQueued
+	root.Version++
+	root.State = nil
+	root.NotificationCutoff = nil
+	if err := tx.Save(&root).Error; err != nil {
+		return err
+	}
+	return s.createDispatch(tx, root)
 }
 
 func (s *ExecutionService) resumeParent(tx *gorm.DB, child model.AgentExecution) error {
