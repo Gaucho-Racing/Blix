@@ -625,13 +625,48 @@ func (m *tuiModel) reconcileQueuedEvent(event executionEvent) {
 		if cutoff == 0 {
 			return
 		}
+		activated := make([]transcriptBlock, 0)
 		for index := range m.blocks {
 			block := &m.blocks[index]
 			if block.queued && block.eventPosition > 0 && block.eventPosition <= cutoff {
 				block.queued = false
+				activated = append(activated, *block)
 			}
 		}
+		m.moveMessagesBeforeActiveTurn(activated)
 	}
+}
+
+func (m *tuiModel) moveMessagesBeforeActiveTurn(messages []transcriptBlock) {
+	if len(messages) == 0 || m.activeTurn == nil {
+		return
+	}
+	messageIDs := make(map[uint64]bool, len(messages))
+	for _, message := range messages {
+		messageIDs[message.queueID] = true
+	}
+	remaining := make([]transcriptBlock, 0, len(m.blocks)-len(messages))
+	turnIndex := -1
+	for _, block := range m.blocks {
+		if messageIDs[block.queueID] {
+			continue
+		}
+		if block.kind == transcriptTurn && block.turn == m.activeTurn {
+			turnIndex = len(remaining)
+		}
+		remaining = append(remaining, block)
+	}
+	if turnIndex < 0 {
+		return
+	}
+	sort.SliceStable(messages, func(left, right int) bool {
+		return messages[left].eventPosition < messages[right].eventPosition
+	})
+	reordered := make([]transcriptBlock, 0, len(m.blocks))
+	reordered = append(reordered, remaining[:turnIndex]...)
+	reordered = append(reordered, messages...)
+	reordered = append(reordered, remaining[turnIndex:]...)
+	m.blocks = reordered
 }
 
 func (m *tuiModel) syncTranscript(forceBottom bool) {
