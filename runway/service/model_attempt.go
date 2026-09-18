@@ -37,6 +37,59 @@ type ModelAttemptError struct {
 	Retryable bool   `json:"retryable"`
 }
 
+type ModelDelta struct {
+	WorkerID        string `json:"worker_id"`
+	ExpectedVersion uint64 `json:"expected_version"`
+	TurnMessageID   string `json:"turn_message_id"`
+	CallID          string `json:"call_id"`
+	Sequence        uint64 `json:"sequence"`
+	Attempt         uint64 `json:"attempt"`
+	Delta           string `json:"delta"`
+}
+
+func (s *ExecutionService) RecordModelDelta(ctx context.Context, executionID string, delta ModelDelta) (uint64, error) {
+	if !identifier.IsValid(executionID, identifier.Execution) ||
+		!identifier.IsValid(delta.WorkerID, identifier.Worker) ||
+		!identifier.IsValid(delta.CallID, identifier.ModelCall) ||
+		!identifier.IsOneOf(delta.TurnMessageID, identifier.Message, identifier.Execution, identifier.Notification) ||
+		delta.Sequence == 0 || delta.Attempt == 0 || delta.Delta == "" || len(delta.Delta) > 64*1024 {
+		return 0, ErrInvalid
+	}
+	payload, err := json.Marshal(map[string]any{
+		"call_id": delta.CallID, "turn_message_id": delta.TurnMessageID, "sequence": delta.Sequence,
+		"attempt": delta.Attempt, "delta": delta.Delta,
+	})
+	if err != nil {
+		return 0, err
+	}
+	var version uint64
+	err = s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var execution model.AgentExecution
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", executionID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if execution.Status != model.ExecutionStatusRunning || execution.ClaimedBy != delta.WorkerID ||
+			!hasActiveLease(execution, time.Now().UTC()) || execution.Version != delta.ExpectedVersion {
+			return ErrConflict
+		}
+		if err := validateModelTurn(tx, execution, delta.TurnMessageID); err != nil {
+			return err
+		}
+		if err := s.appendEvent(tx, execution.RunID, execution.ID, model.EventTypeModelOutputDelta, delta.CallID, payload); err != nil {
+			return err
+		}
+		execution.Version++
+		expires := time.Now().UTC().Add(s.leaseDuration)
+		execution.LeaseExpiresAt = &expires
+		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		version = execution.Version
+		return nil
+	})
+	return version, err
+}
+
 func (s *ExecutionService) RecordModelAttempt(ctx context.Context, executionID string, attempt ModelAttempt) (uint64, error) {
 	attempt.Model = strings.TrimSpace(attempt.Model)
 	if !identifier.IsValid(executionID, identifier.Execution) ||

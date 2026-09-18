@@ -437,7 +437,15 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 				m.backgroundExecutions[event.EntityID] = true
 			}
 		}
+		if event.ExecutionID == m.activeTurn.rootExecutionID && event.Type == "model.call_v1" {
+			m.activeTurn.response = ""
+		}
 		content, activity, done, err := applyEvent(event, m.activeTurn.toolIDs, m.activeTurn.tree)
+		if event.ExecutionID == m.activeTurn.rootExecutionID && event.Type == "model.output.delta_v1" && content != "" {
+			m.activeTurn.response += content
+			m.syncTranscript(true)
+			continue
+		}
 		if activity != nil {
 			m.activeTurn.upsertActivity(*activity)
 		}
@@ -453,7 +461,9 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 }
 
 func (m *tuiModel) finishTurn(content string, err error, after uint64) tea.Cmd {
-	m.activeTurn.response = content
+	if content != "" {
+		m.activeTurn.response = content
+	}
 	m.activeTurn.err = err
 	m.activeTurn.finishedAt = time.Now()
 	m.activeTurn.completedExecutions[m.activeTurn.rootExecutionID] = true

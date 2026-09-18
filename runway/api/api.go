@@ -116,6 +116,7 @@ func InitializeRoutes(
 	router.GET("/internal/v1/executions/:executionID/result", handler.GetExecutionResult)
 	router.POST("/internal/v1/executions/:executionID/model-checkpoints", handler.CheckpointModel)
 	router.POST("/internal/v1/executions/:executionID/model-attempts", handler.RecordModelAttempt)
+	router.POST("/internal/v1/executions/:executionID/model-deltas", handler.RecordModelDelta)
 	router.POST("/internal/v1/executions/:executionID/tool-checkpoints", handler.CheckpointTool)
 	router.POST("/internal/v1/executions/:executionID/complete", handler.CompleteExecution)
 	router.POST("/internal/v1/executions/:executionID/agent-complete", handler.CompleteAgentExecution)

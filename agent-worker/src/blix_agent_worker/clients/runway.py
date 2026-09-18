@@ -197,6 +197,31 @@ class RunwayClient:
         )
         return VersionResponse.model_validate(body).version
 
+    async def record_model_delta(
+        self,
+        execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        turn_message_id: str,
+        call_id: str,
+        sequence: int,
+        attempt: int,
+        delta: str,
+    ) -> int:
+        body = await self._post(
+            f"internal/v1/executions/{execution_id}/model-deltas",
+            {
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "turn_message_id": turn_message_id,
+                "call_id": call_id,
+                "sequence": sequence,
+                "attempt": attempt,
+                "delta": delta,
+            },
+        )
+        return VersionResponse.model_validate(body).version
+
     async def checkpoint_model(
         self,
         execution_id: str,

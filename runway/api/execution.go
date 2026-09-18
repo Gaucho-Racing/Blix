@@ -136,6 +136,20 @@ func (h *Handler) RecordModelAttempt(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"version": version})
 }
 
+func (h *Handler) RecordModelDelta(c *gin.Context) {
+	var request service.ModelDelta
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	version, err := h.executions.RecordModelDelta(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"version": version})
+}
+
 func (h *Handler) CheckpointModel(c *gin.Context) {
 	var request service.ModelCheckpoint
 	if err := c.ShouldBindJSON(&request); err != nil {

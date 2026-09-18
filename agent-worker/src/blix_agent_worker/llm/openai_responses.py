@@ -2,6 +2,7 @@ import json
 import math
 import os
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Literal, Self, cast
@@ -126,7 +127,12 @@ class OpenAIResponsesModel:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def complete(self, request: ModelRequest) -> ModelResponse:
+    async def complete(
+        self,
+        request: ModelRequest,
+        *,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> ModelResponse:
         try:
             input_items = self._input_items(request)
             payload = self._request_payload(request, input_items)
@@ -134,7 +140,7 @@ class OpenAIResponsesModel:
             raise ModelClientError("invalid_model_request", str(error)) from error
 
         try:
-            body, first_event_ms = await self._stream_response(payload)
+            body, first_event_ms = await self._stream_response(payload, on_text_delta)
         except httpx.RequestError as error:
             retryable = isinstance(
                 error, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)
@@ -170,7 +176,11 @@ class OpenAIResponsesModel:
             first_event_ms=first_event_ms,
         )
 
-    async def _stream_response(self, payload: JsonObject) -> tuple[JsonObject, int | None]:
+    async def _stream_response(
+        self,
+        payload: JsonObject,
+        on_text_delta: Callable[[str], Awaitable[None]] | None,
+    ) -> tuple[JsonObject, int | None]:
         started = time.monotonic()
         first_event_ms: int | None = None
         async with self._client.stream("POST", "responses", json={**payload, "stream": True}) as response:
@@ -188,6 +198,7 @@ class OpenAIResponsesModel:
                 )
             event_name = ""
             data_lines: list[str] = []
+            delta_buffer = ""
             async for line in response.aiter_lines():
                 if first_event_ms is None and line:
                     first_event_ms = round((time.monotonic() - started) * 1000)
@@ -196,20 +207,31 @@ class OpenAIResponsesModel:
                 elif line.startswith("data:"):
                     data_lines.append(line[5:].lstrip())
                 elif line == "" and data_lines:
-                    completed = self._parse_stream_event(event_name, "\n".join(data_lines))
+                    completed, delta = self._parse_stream_event(event_name, "\n".join(data_lines))
                     event_name, data_lines = "", []
+                    if delta:
+                        delta_buffer += delta
+                    if on_text_delta is not None and (len(delta_buffer) >= 256 or "\n" in delta_buffer):
+                        await on_text_delta(delta_buffer)
+                        delta_buffer = ""
                     if completed is not None:
+                        if delta_buffer and on_text_delta is not None:
+                            await on_text_delta(delta_buffer)
                         return completed, first_event_ms
             if data_lines:
-                completed = self._parse_stream_event(event_name, "\n".join(data_lines))
+                completed, delta = self._parse_stream_event(event_name, "\n".join(data_lines))
+                if delta and on_text_delta is not None:
+                    delta_buffer += delta
+                if delta_buffer and on_text_delta is not None:
+                    await on_text_delta(delta_buffer)
                 if completed is not None:
                     return completed, first_event_ms
         raise ModelClientError("invalid_model_response", "The model stream ended before response.completed.")
 
     @staticmethod
-    def _parse_stream_event(event_name: str, data: str) -> JsonObject | None:
+    def _parse_stream_event(event_name: str, data: str) -> tuple[JsonObject | None, str | None]:
         if data == "[DONE]":
-            return None
+            return None, None
         try:
             event = _StreamEvent.model_validate(json.loads(data))
         except (json.JSONDecodeError, ValidationError) as error:
@@ -220,14 +242,17 @@ class OpenAIResponsesModel:
         if event_type == "response.completed":
             if event.response is None:
                 raise ModelClientError("invalid_model_response", "The completed model stream omitted its response.")
-            return event.response
+            return event.response, None
+        if event_type == "response.output_text.delta":
+            delta = event.model_extra.get("delta") if event.model_extra else None
+            return None, delta if isinstance(delta, str) and delta else None
         if event_type in {"response.failed", "response.incomplete", "error"}:
             raise ModelClientError(
                 "model_request_failed",
                 event.message or f"The model stream ended with {event_type}.",
                 retryable=event_type == "error",
             )
-        return None
+        return None, None
 
     def _request_payload(self, request: ModelRequest, input_items: list[JsonObject]) -> JsonObject:
         payload: JsonObject = {

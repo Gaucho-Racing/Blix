@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from blix_agent_worker.models.llm import ModelRequest, ModelResponse
@@ -21,4 +22,9 @@ class ModelClientError(Exception):
 
 
 class LanguageModel(Protocol):
-    async def complete(self, request: ModelRequest) -> ModelResponse: ...
+    async def complete(
+        self,
+        request: ModelRequest,
+        *,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> ModelResponse: ...

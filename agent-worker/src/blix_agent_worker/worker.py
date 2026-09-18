@@ -159,6 +159,18 @@ class AgentWorker:
                 event,
             )
 
+        async def record_model_delta(call_id: str, sequence: int, attempt: int, delta: str) -> None:
+            state.version = await self._runway.record_model_delta(
+                execution.execution_id,
+                self._worker_id,
+                state.version,
+                turn_message_id,
+                call_id,
+                sequence,
+                attempt,
+                delta,
+            )
+
         async def checkpoint(call: ToolCall, result: ToolResult, execution_state: AgentExecutionState) -> None:
             state.version = await self._runway.checkpoint_tool(
                 execution.execution_id,
@@ -221,8 +233,9 @@ class AgentWorker:
                 checkpoint,
                 checkpoint_model,
                 record_model_attempt,
-                start_background_agent,
-                resume_result,
+            start_background_agent,
+            record_model_delta,
+            resume_result,
             )
             if isinstance(outcome, AgentSuspension):
                 relinquishing_lease.set()
@@ -360,9 +373,10 @@ class AgentWorker:
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
         record_model_attempt: Callable[[ModelAttemptEvent], Awaitable[None]],
         start_background_agent: Callable[[AgentTask, str], Awaitable[str]],
+        record_model_delta: Callable[[str, int, int, str], Awaitable[None]],
         resume_result: AgentResult | None,
     ) -> AgentRunOutcome:
-        model = RetryingModel(self._model, self._model.model, record_model_attempt)
+        model = RetryingModel(self._model, self._model.model, record_model_attempt, record_model_delta)
         messages = tuple(
             ConversationMessage(
                 message_id=message.message_id,

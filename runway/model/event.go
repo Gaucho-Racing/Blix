@@ -15,6 +15,7 @@ const (
 	EventTypeModelResponse      = "model.response_v1"
 	EventTypeModelCall          = "model.call_v1"
 	EventTypeModelFailure       = "model.failure_v1"
+	EventTypeModelOutputDelta   = "model.output.delta_v1"
 	EventTypeAgentCall          = "agent.call_v1"
 	EventTypeAgentResult        = "agent.result_v1"
 	EventTypeExecutionClaimed   = "execution.claimed_v1"

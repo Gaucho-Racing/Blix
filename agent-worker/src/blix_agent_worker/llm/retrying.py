@@ -20,10 +20,12 @@ class RetryingModel:
         model: LanguageModel,
         model_name: str,
         on_attempt: Callable[[ModelAttemptEvent], Awaitable[None]],
+        on_text_delta: Callable[[str, int, int, str], Awaitable[None]] | None = None,
     ) -> None:
         self._model = model
         self._model_name = model_name
         self._on_attempt = on_attempt
+        self._on_text_delta = on_text_delta
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         for attempt in range(1, self.MAX_ATTEMPTS + 1):
@@ -44,7 +46,11 @@ class RetryingModel:
             await self._on_attempt(call)
             started = time.monotonic()
             try:
-                response = await self._model.complete(request)
+                async def relay(delta: str) -> None:
+                    if self._on_text_delta is not None:
+                        await self._on_text_delta(call.call_id, request.sequence, attempt, delta)
+
+                response = await self._model.complete(request, on_text_delta=relay)
             except ModelClientError as error:
                 delay = None
                 if error.retryable and attempt < self.MAX_ATTEMPTS:

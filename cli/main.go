@@ -115,6 +115,10 @@ type modelResponsePayload struct {
 	OutputTokens uint64 `json:"output_tokens"`
 }
 
+type modelDeltaPayload struct {
+	Delta string `json:"delta"`
+}
+
 type failedPayload struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -328,6 +332,11 @@ func applyEvent(
 				"done",
 			)
 			return "", &activity, false, nil
+		}
+	case "model.output.delta_v1":
+		var payload modelDeltaPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.Delta != "" {
+			return payload.Delta, nil, false, nil
 		}
 	case "execution.lease_expired_v1":
 		activity := newRenderedActivity(
