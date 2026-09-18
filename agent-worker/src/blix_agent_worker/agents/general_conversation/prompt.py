@@ -57,6 +57,12 @@ wiki and pending proposals for the intended claim. Pending proposals are not par
 proposal already covers the request, report its changeset ID and paths instead of capturing the statement or creating
 another proposal. Repeated wording does not require a second proposal or a different page.
 
+Delegate knowledge_curator_v1 with background=true when saving knowledge does not need to block the current response.
+After it starts, tell the user that the memory update is running in the background and include its execution ID. Do
+not claim that a proposal was created or published before the background agent finishes. Continue helping the user
+without waiting for the curator. Use blocking delegation only when its result is required to answer the current
+request.
+
 When asked to remember team knowledge from this conversation, call knowledge_remember_v1 to preserve the original
 user message with runtime attribution. Use message_id from the conversation message index for an earlier statement
 or transcript; omit it only when the latest message itself contains the evidence. If the user agrees to your offer

@@ -100,12 +100,14 @@ class GeneralConversationV1Agent:
         agent_runner: AgentRunner,
         on_tool_result: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]] | None = None,
         on_model_response: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]] | None = None,
+        on_background_agent: Callable[[AgentTask, str], Awaitable[str]] | None = None,
     ) -> None:
         self._model = model
         self._tool_runner = tool_runner
         self._agent_runner = agent_runner
         self._on_tool_result = on_tool_result
         self._on_model_response = on_model_response
+        self._on_background_agent = on_background_agent
 
     async def run(
         self,
@@ -328,10 +330,51 @@ class GeneralConversationV1Agent:
                     )
                     next_call_index += 1
                     continue
+                child_task, background = prepared
+                if background:
+                    if self._on_background_agent is None:
+                        return self._failure(
+                            task,
+                            "background_delegation_unavailable",
+                            "Background agent execution is unavailable.",
+                            usage=usage,
+                        )
+                    try:
+                        child_execution_id = await self._on_background_agent(child_task, model_call_request.ref)
+                    except Exception as error:
+                        return self._failure(
+                            task,
+                            "background_delegation_failed",
+                            str(error) or "The background agent could not be started.",
+                            retryable=True,
+                            usage=usage,
+                        )
+                    messages.append(
+                        ModelMessage(
+                            role=ModelMessageRole.CALL_OUTPUT,
+                            content=json.dumps(
+                                {
+                                    "status": "started",
+                                    "execution_id": child_execution_id,
+                                    "agent_id": child_task.agent_id,
+                                    "background": True,
+                                },
+                                separators=(",", ":"),
+                            ),
+                            call_request_ref=model_call_request.ref,
+                        )
+                    )
+                    next_call_index += 1
+                    phase = (
+                        AgentExecutionPhase.PROCESSING_CALLS
+                        if next_call_index < len(call_batch.call_requests)
+                        else AgentExecutionPhase.READY_FOR_MODEL
+                    )
+                    continue
                 pending = PendingAgentCall(
                     request_ref=model_call_request.ref,
                     request_index=next_call_index,
-                    task=prepared,
+                    task=child_task,
                 )
                 suspension_state = self._state(
                     messages,
@@ -341,7 +384,7 @@ class GeneralConversationV1Agent:
                     next_call_index,
                     pending,
                 )
-                return AgentSuspension(state=suspension_state, child_task=prepared)
+                return AgentSuspension(state=suspension_state, child_task=child_task)
 
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(

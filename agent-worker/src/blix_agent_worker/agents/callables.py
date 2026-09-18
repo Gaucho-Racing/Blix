@@ -83,6 +83,11 @@ class CallableCatalog:
             "properties": {
                 "objective": {"type": "string", "minLength": 1},
                 "input": agent_input_schema,
+                "background": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Start the agent without waiting when its result is not needed for this response.",
+                },
             },
             "required": ["objective", "input"],
             "additionalProperties": False,

@@ -111,6 +111,7 @@ func InitializeRoutes(
 	router.POST("/internal/v1/executions/:executionID/heartbeat", handler.HeartbeatExecution)
 	router.POST("/internal/v1/executions/:executionID/caller-checkpoints", handler.CheckpointCaller)
 	router.POST("/internal/v1/executions/:executionID/delegations", handler.DelegateExecution)
+	router.POST("/internal/v1/executions/:executionID/background-delegations", handler.DelegateBackgroundExecution)
 	router.GET("/internal/v1/executions/:executionID/result", handler.GetExecutionResult)
 	router.POST("/internal/v1/executions/:executionID/model-checkpoints", handler.CheckpointModel)
 	router.POST("/internal/v1/executions/:executionID/model-attempts", handler.RecordModelAttempt)

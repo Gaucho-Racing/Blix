@@ -228,6 +228,25 @@ class RunwayClient:
         )
         return DelegatedExecution.model_validate(body)
 
+    async def delegate_background_execution(
+        self,
+        parent_execution_id: str,
+        worker_id: str,
+        expected_version: int,
+        request_ref: str,
+        task: AgentTask,
+    ) -> DelegatedExecution:
+        body = await self._post(
+            f"internal/v1/executions/{parent_execution_id}/background-delegations",
+            {
+                "worker_id": worker_id,
+                "expected_version": expected_version,
+                "request_ref": request_ref,
+                "task": task.model_dump(mode="json"),
+            },
+        )
+        return DelegatedExecution.model_validate(body)
+
     async def get_execution_result(
         self,
         execution_id: str,

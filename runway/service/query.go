@@ -34,6 +34,7 @@ type ExecutionSummary struct {
 	ExecutionID          string     `json:"execution_id"`
 	RunID                string     `json:"run_id"`
 	ParentExecutionID    *string    `json:"parent_execution_id"`
+	Detached             bool       `json:"detached"`
 	AgentID              string     `json:"agent_id"`
 	Status               string     `json:"status"`
 	Version              uint64     `json:"version"`
@@ -220,6 +221,7 @@ func summarizeExecution(execution model.AgentExecution) ExecutionSummary {
 		ExecutionID:          execution.ID,
 		RunID:                execution.RunID,
 		ParentExecutionID:    execution.ParentExecutionID,
+		Detached:             execution.Detached,
 		AgentID:              execution.AgentID,
 		Status:               execution.Status,
 		Version:              execution.Version,

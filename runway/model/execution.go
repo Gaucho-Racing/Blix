@@ -20,6 +20,8 @@ type AgentExecution struct {
 	ID                   string         `json:"execution_id" gorm:"primaryKey"`
 	RunID                string         `json:"run_id" gorm:"index;not null"`
 	ParentExecutionID    *string        `json:"parent_execution_id" gorm:"index"`
+	DelegationRef        string         `json:"delegation_ref,omitempty" gorm:"index"`
+	Detached             bool           `json:"detached" gorm:"index;not null;default:false"`
 	AgentID              string         `json:"agent_id" gorm:"index;not null"`
 	Status               string         `json:"status" gorm:"index;not null"`
 	Version              uint64         `json:"version" gorm:"not null"`

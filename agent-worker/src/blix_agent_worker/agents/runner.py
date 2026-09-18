@@ -18,6 +18,7 @@ from blix_agent_worker.models.llm import ModelCallRequest
 class AgentDelegationInput(ContractModel):
     objective: NonEmptyText
     input: JsonObject
+    background: bool = False
 
 
 class AgentRunner:
@@ -38,7 +39,7 @@ class AgentRunner:
         parent_task: AgentTask,
         request: ModelCallRequest,
         allowed_agent_ids: Collection[str],
-    ) -> AgentTask | AgentResult:
+    ) -> tuple[AgentTask, bool] | AgentResult:
         execution_id = new_ulid("execution")
         if request.callable_id not in allowed_agent_ids:
             return self._emit(
@@ -93,7 +94,7 @@ class AgentRunner:
         )
         if self._on_start is not None:
             self._on_start(task)
-        return task
+        return task, delegation.background
 
     def validate_result(self, task: AgentTask, result: AgentResult) -> AgentResult:
         if (

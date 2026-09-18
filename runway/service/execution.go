@@ -90,10 +90,19 @@ type Delegation struct {
 	State           json.RawMessage `json:"state"`
 }
 
+type BackgroundDelegation struct {
+	WorkerID        string          `json:"worker_id"`
+	ExpectedVersion uint64          `json:"expected_version"`
+	RequestRef      string          `json:"request_ref"`
+	Task            json.RawMessage `json:"task"`
+}
+
 type DelegatedExecution struct {
 	ExecutionID   string `json:"execution_id"`
 	ParentVersion uint64 `json:"parent_version"`
 }
+
+const maxActiveBackgroundExecutions = 8
 
 type ExecutionResult struct {
 	Status string          `json:"status"`
@@ -674,6 +683,84 @@ func (s *ExecutionService) DelegateExecution(
 	return delegated, err
 }
 
+func (s *ExecutionService) DelegateBackgroundExecution(
+	ctx context.Context,
+	parentExecutionID string,
+	delegation BackgroundDelegation,
+) (DelegatedExecution, error) {
+	if !identifier.IsValid(parentExecutionID, identifier.Execution) ||
+		!identifier.IsValid(strings.TrimSpace(delegation.WorkerID), identifier.Worker) ||
+		strings.TrimSpace(delegation.RequestRef) == "" || len(delegation.RequestRef) > 512 {
+		return DelegatedExecution{}, fmt.Errorf("%w: parent execution, worker, or request reference is invalid", ErrInvalid)
+	}
+	var task agentTaskPayload
+	if err := json.Unmarshal(delegation.Task, &task); err != nil {
+		return DelegatedExecution{}, fmt.Errorf("%w: task is invalid: %v", ErrInvalid, err)
+	}
+	if task.SchemaVersion != 1 || !identifier.IsValid(task.RunID, identifier.Run) ||
+		!identifier.IsValid(task.ExecutionID, identifier.Execution) || task.ExecutionID == parentExecutionID ||
+		task.ParentExecutionID == nil || *task.ParentExecutionID != parentExecutionID ||
+		!versionedIdentifierPattern.MatchString(task.AgentID) || strings.TrimSpace(task.Objective) == "" ||
+		!validJSONObject(task.Input) {
+		return DelegatedExecution{}, fmt.Errorf("%w: background task is invalid", ErrInvalid)
+	}
+
+	var delegated DelegatedExecution
+	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var parent model.AgentExecution
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, "id = ?", parentExecutionID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if parent.Status != model.ExecutionStatusRunning || parent.ClaimedBy != delegation.WorkerID ||
+			!hasActiveLease(parent, time.Now().UTC()) {
+			return ErrConflict
+		}
+		var existing model.AgentExecution
+		err := tx.Where("parent_execution_id = ? AND delegation_ref = ?", parent.ID, delegation.RequestRef).First(&existing).Error
+		if err == nil {
+			delegated = DelegatedExecution{ExecutionID: existing.ID, ParentVersion: parent.Version}
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if parent.Version != delegation.ExpectedVersion || task.RunID != parent.RunID {
+			return ErrConflict
+		}
+		var activeCount int64
+		if err := tx.Model(&model.AgentExecution{}).
+			Where("parent_execution_id = ? AND detached = ? AND status IN ?", parent.ID, true,
+				[]string{model.ExecutionStatusQueued, model.ExecutionStatusRunning, model.ExecutionStatusWaiting}).
+			Count(&activeCount).Error; err != nil {
+			return err
+		}
+		if activeCount >= maxActiveBackgroundExecutions {
+			return fmt.Errorf("%w: too many active background executions", ErrConflict)
+		}
+		child := model.AgentExecution{
+			ID: task.ExecutionID, RunID: parent.RunID, ParentExecutionID: &parent.ID,
+			DelegationRef: delegation.RequestRef, Detached: true, AgentID: task.AgentID,
+			Status: model.ExecutionStatusQueued, Version: 1, Task: datatypes.JSON(delegation.Task),
+		}
+		if err := tx.Create(&child).Error; err != nil {
+			return err
+		}
+		if err := s.appendEvent(tx, parent.RunID, parent.ID, model.EventTypeAgentCall, child.ID, delegation.Task); err != nil {
+			return err
+		}
+		parent.Version++
+		if err := tx.Save(&parent).Error; err != nil {
+			return err
+		}
+		if err := s.createDispatch(tx, child); err != nil {
+			return err
+		}
+		delegated = DelegatedExecution{ExecutionID: child.ID, ParentVersion: parent.Version}
+		return nil
+	})
+	return delegated, err
+}
+
 func (s *ExecutionService) GetExecutionResult(
 	ctx context.Context,
 	executionID string,
@@ -1054,6 +1141,9 @@ func (s *ExecutionService) CompleteAgentExecution(
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
+		if execution.Detached {
+			return nil
+		}
 		return s.resumeParent(tx, execution)
 	})
 	return event, err
@@ -1124,7 +1214,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
-		if isChild {
+		if isChild && !execution.Detached {
 			return s.resumeParent(tx, execution)
 		}
 		return nil

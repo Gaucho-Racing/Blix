@@ -172,6 +172,17 @@ class AgentWorker:
                 execution_state,
             )
 
+        async def start_background_agent(task: AgentTask, request_ref: str) -> str:
+            delegated = await self._runway.delegate_background_execution(
+                execution.execution_id,
+                self._worker_id,
+                state.version,
+                request_ref,
+                task,
+            )
+            state.version = delegated.parent_version
+            return delegated.execution_id
+
         try:
             caller_user = await self._resolve_caller(execution)
             state.version = await self._runway.checkpoint_caller(
@@ -197,6 +208,7 @@ class AgentWorker:
                 checkpoint,
                 checkpoint_model,
                 record_model_attempt,
+                start_background_agent,
                 resume_result,
             )
             if isinstance(outcome, AgentSuspension):
@@ -334,6 +346,7 @@ class AgentWorker:
         checkpoint: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]],
         checkpoint_model: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]],
         record_model_attempt: Callable[[ModelAttemptEvent], Awaitable[None]],
+        start_background_agent: Callable[[AgentTask, str], Awaitable[str]],
         resume_result: AgentResult | None,
     ) -> AgentRunOutcome:
         model = RetryingModel(self._model, self._model.model, record_model_attempt)
@@ -415,6 +428,7 @@ class AgentWorker:
             agent_runner=AgentRunner(agent_registry),
             on_tool_result=checkpoint,
             on_model_response=checkpoint_model,
+            on_background_agent=start_background_agent,
         )
         task = AgentTask(
             run_id=execution.run_id,

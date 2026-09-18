@@ -80,6 +80,20 @@ func (h *Handler) DelegateExecution(c *gin.Context) {
 	c.JSON(http.StatusAccepted, delegated)
 }
 
+func (h *Handler) DelegateBackgroundExecution(c *gin.Context) {
+	var request service.BackgroundDelegation
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	delegated, err := h.executions.DelegateBackgroundExecution(c.Request.Context(), c.Param("executionID"), request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, delegated)
+}
+
 func (h *Handler) GetExecutionResult(c *gin.Context) {
 	result, err := h.executions.GetExecutionResult(
 		c.Request.Context(),
