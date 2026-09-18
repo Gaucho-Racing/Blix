@@ -33,10 +33,13 @@ type CreateSourceInput struct {
 }
 
 type SourceIdentityInput struct {
-	Provider    string `json:"provider"`
-	ExternalID  string `json:"external_id"`
-	DisplayName string `json:"display_name"`
-	Username    string `json:"username"`
+	Provider      string  `json:"provider"`
+	ExternalID    string  `json:"external_id"`
+	DisplayName   string  `json:"display_name"`
+	Username      string  `json:"username"`
+	EntityID      *string `json:"entity_id"`
+	UserID        *string `json:"user_id"`
+	CanonicalName string  `json:"canonical_name"`
 }
 
 type IngestSourceRecordInput struct {
@@ -233,8 +236,27 @@ func upsertSourceIdentity(
 	input.ExternalID = strings.TrimSpace(input.ExternalID)
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
 	input.Username = strings.TrimSpace(input.Username)
+	input.CanonicalName = strings.TrimSpace(input.CanonicalName)
 	if !sourceKindPattern.MatchString(input.Provider) || input.ExternalID == "" {
 		return nil, fmt.Errorf("%w: author provider or external_id is invalid", ErrInvalid)
+	}
+	resolved := input.EntityID != nil || input.UserID != nil || input.CanonicalName != ""
+	if resolved && (input.EntityID == nil || input.UserID == nil || input.CanonicalName == "" ||
+		!identifier.IsValid(*input.EntityID, identifier.Entity) || !identifier.IsValid(*input.UserID, identifier.User)) {
+		return nil, fmt.Errorf("%w: resolved author identity is incomplete or invalid", ErrInvalid)
+	}
+	if input.Provider == "discord" && !resolved {
+		return nil, fmt.Errorf("%w: Discord authors require a resolved Sentinel user", ErrInvalid)
+	}
+	resolutionStatus := model.IdentityResolutionUnresolved
+	resolutionMethod := ""
+	var resolvedAt *time.Time
+	if resolved {
+		now := time.Now().UTC()
+		resolvedAt = &now
+		resolutionStatus = model.IdentityResolutionResolved
+		resolutionMethod = "sentinel_external_identity"
+		input.DisplayName = input.CanonicalName
 	}
 	identity := model.SourceIdentity{
 		ID:               identifier.New(identifier.SourceIdentity),
@@ -242,17 +264,25 @@ func upsertSourceIdentity(
 		ExternalID:       input.ExternalID,
 		DisplayName:      input.DisplayName,
 		Username:         input.Username,
-		ResolutionStatus: model.IdentityResolutionUnresolved,
-		ResolutionMethod: "",
+		EntityID:         input.EntityID,
+		UserID:           input.UserID,
+		ResolutionStatus: resolutionStatus,
+		ResolutionMethod: resolutionMethod,
+		ResolvedAt:       resolvedAt,
 		LastObservedAt:   observedAt.UTC(),
 	}
 	if err := tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "provider"}, {Name: "external_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"display_name":     identity.DisplayName,
-			"username":         identity.Username,
-			"last_observed_at": identity.LastObservedAt,
-			"updated_at":       time.Now().UTC(),
+			"display_name":      identity.DisplayName,
+			"username":          identity.Username,
+			"entity_id":         identity.EntityID,
+			"user_id":           identity.UserID,
+			"resolution_status": identity.ResolutionStatus,
+			"resolution_method": identity.ResolutionMethod,
+			"resolved_at":       identity.ResolvedAt,
+			"last_observed_at":  identity.LastObservedAt,
+			"updated_at":        time.Now().UTC(),
 		}),
 	}).Create(&identity).Error; err != nil {
 		return nil, err

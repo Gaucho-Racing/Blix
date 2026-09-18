@@ -35,6 +35,7 @@ class SentinelIdentityResolveV1Output(ContractModel):
     user_id: UserID | None = None
     service_account_id: ServiceAccountID | None = None
     linked_ids: tuple[LinkedProviderID, ...] = ()
+    full_name: str | None = None
 
 
 class SentinelIdentityResolveV1Tool:
@@ -98,6 +99,14 @@ class SentinelIdentityResolveV1Tool:
                 provider=request.provider,
                 external_id=request.external_id,
             )
+            canonical = None
+            if identity is not None and identity.type is EntityType.USER:
+                canonical = await self._client.resolve_external_user(
+                    sentinel_url=str(url).rstrip("/"),
+                    service_account_token=token,
+                    provider=request.provider,
+                    external_id=request.external_id,
+                )
         except SentinelClientError as error:
             return self._failure(
                 call,
@@ -119,6 +128,7 @@ class SentinelIdentityResolveV1Tool:
                     LinkedProviderID(provider=item.provider.lower(), external_id=item.external_id)
                     for item in identity.external_auths
                 ),
+                full_name=canonical.full_name if canonical else None,
             )
         return ToolResult(
             run_id=call.run_id,

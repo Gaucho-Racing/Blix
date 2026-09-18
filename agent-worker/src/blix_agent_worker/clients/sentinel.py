@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
@@ -108,6 +109,14 @@ class SentinelLinkedIdentity(BaseModel):
         return self
 
 
+class SentinelCanonicalUser(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    entity_id: EntityID
+    user_id: UserID
+    full_name: str = Field(min_length=1)
+
+
 class SentinelEntity(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -148,6 +157,8 @@ class SentinelClient:
         )
         self._credentials: dict[str, SentinelCredential] = {}
         self._application_ids: dict[tuple[str, str], str] = {}
+        self._canonical_users: dict[tuple[str, str, str], SentinelCanonicalUser | None] = {}
+        self._canonical_user_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
 
     async def __aenter__(self) -> Self:
         return self
@@ -158,6 +169,8 @@ class SentinelClient:
     async def aclose(self) -> None:
         self._credentials.clear()
         self._application_ids.clear()
+        self._canonical_users.clear()
+        self._canonical_user_locks.clear()
         await self._client.aclose()
 
     async def get_entity(
@@ -239,6 +252,60 @@ class SentinelClient:
                 "invalid_sentinel_response",
                 "Sentinel returned an invalid linked identity.",
             ) from None
+
+    async def resolve_external_user(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        provider: str,
+        external_id: str,
+    ) -> SentinelCanonicalUser | None:
+        cache_key = (sentinel_url.rstrip("/"), provider.casefold(), external_id)
+        if cache_key in self._canonical_users:
+            return self._canonical_users[cache_key]
+        lock = self._canonical_user_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            if cache_key in self._canonical_users:
+                return self._canonical_users[cache_key]
+            user = await self._resolve_external_user(
+                sentinel_url=sentinel_url,
+                service_account_token=service_account_token,
+                provider=provider,
+                external_id=external_id,
+            )
+            self._canonical_users[cache_key] = user
+            return user
+
+    async def _resolve_external_user(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        provider: str,
+        external_id: str,
+    ) -> SentinelCanonicalUser | None:
+        identity = await self.resolve_external_identity(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            provider=provider,
+            external_id=external_id,
+        )
+        if identity is None:
+            return None
+        if identity.type is not EntityType.USER or identity.user is None:
+            raise SentinelClientError("sentinel_identity_not_user", "The linked identity is not a Sentinel user.")
+        entity = await self.get_entity(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            entity_id=identity.id,
+        )
+        if entity.user is None or entity.user.id != identity.user.id:
+            raise SentinelClientError("invalid_sentinel_response", "Sentinel returned a mismatched user profile.")
+        full_name = " ".join(part.strip() for part in (entity.user.first_name, entity.user.last_name) if part.strip())
+        if not full_name:
+            raise SentinelClientError("sentinel_name_unavailable", "The Sentinel user has no canonical full name.")
+        return SentinelCanonicalUser(entity_id=identity.id, user_id=identity.user.id, full_name=full_name)
 
     async def impersonate(
         self,

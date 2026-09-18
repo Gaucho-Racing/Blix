@@ -371,12 +371,12 @@ class AgentWorker:
                 [
                     CurrentTimeV1Tool(),
                     AgentExecutionV1Tool(self._runway, self._worker_id),
-                    DiscordReadV1Tool(self._discord),
+                    DiscordReadV1Tool(self._discord, self._sentinel),
                     DiscordWebhookSendV1Tool(self._discord, caller_user),
                     KnowledgeReadV1Tool(self._knowledge),
                     KnowledgeEvidenceReadV1Tool(self._knowledge),
                     KnowledgeSourceCreateV1Tool(self._knowledge),
-                    KnowledgeSourceRecordCreateV1Tool(self._knowledge),
+                    KnowledgeSourceRecordCreateV1Tool(self._knowledge, self._sentinel),
                     KnowledgeProposeV1Tool(self._knowledge),
                     KnowledgeApplyV1Tool(self._knowledge),
                     KnowledgeRememberV1Tool(

@@ -16,6 +16,7 @@ type SourceIdentity struct {
 	DisplayName      string     `json:"display_name" gorm:"type:text;not null"`
 	Username         string     `json:"username" gorm:"type:text;not null"`
 	EntityID         *string    `json:"entity_id,omitempty" gorm:"index"`
+	UserID           *string    `json:"user_id,omitempty" gorm:"index"`
 	ResolutionStatus string     `json:"resolution_status" gorm:"index;not null"`
 	ResolutionMethod string     `json:"resolution_method" gorm:"type:text;not null"`
 	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`

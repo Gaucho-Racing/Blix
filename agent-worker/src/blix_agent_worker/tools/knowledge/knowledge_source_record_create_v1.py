@@ -1,6 +1,9 @@
+import os
+
 from pydantic import ValidationError
 
 from blix_agent_worker.clients.knowledge import KnowledgeClientError
+from blix_agent_worker.clients.sentinel import SentinelClient, SentinelClientError
 from blix_agent_worker.models.common import JsonObject
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact
 from blix_agent_worker.tools.knowledge._shared import KnowledgeTool
@@ -20,6 +23,8 @@ class KnowledgeSourceRecordCreateV1Tool(KnowledgeTool):
             "not the original message ID. Omit external_version to derive a content/metadata fingerprint. "
             "Identical captures deduplicate; a changed explicit version conflicts rather than overwriting. "
             "One Discord channel per source, one message per record; keep thread ID in parent_external_id. "
+            "Discord authors are resolved to canonical Sentinel identity by the runtime; unlinked authors cannot "
+            "be captured. "
             "For Blix user chat use knowledge_remember_v1 when available. Do not store secrets or unnecessary "
             "personal data. Returns source_record_id for the curator; capturing alone does not update the wiki."
         ),
@@ -28,8 +33,38 @@ class KnowledgeSourceRecordCreateV1Tool(KnowledgeTool):
         idempotent=True,
     )
 
+    def __init__(self, client, sentinel: SentinelClient) -> None:
+        super().__init__(client)
+        self._sentinel = sentinel
+
     async def _execute(self, call: ToolCall, arguments: SourceRecordCapture, url: str) -> JsonObject:
         payload = arguments.model_dump(mode="json", exclude_none=True)
+        if arguments.author is not None and arguments.author.provider == "discord":
+            sentinel_url = os.environ.get("SENTINEL_URL", "").strip() or "https://sso.gauchoracing.com"
+            token = os.environ.get("SENTINEL_SERVICE_ACCOUNT_TOKEN", "").strip()
+            if not token:
+                raise KnowledgeClientError("tool_not_configured", "Sentinel identity resolution is required.")
+            try:
+                canonical = await self._sentinel.resolve_external_user(
+                    sentinel_url=sentinel_url,
+                    service_account_token=token,
+                    provider="discord",
+                    external_id=arguments.author.external_id,
+                )
+            except SentinelClientError as error:
+                raise KnowledgeClientError(error.code, str(error), retryable=error.retryable) from error
+            if canonical is None:
+                raise KnowledgeClientError(
+                    "discord_identity_unresolved",
+                    "The Discord author must be linked to a Sentinel user before this evidence can be captured.",
+                )
+            payload["author"] = {
+                **arguments.author.model_dump(mode="json", exclude_none=True),
+                "display_name": canonical.full_name,
+                "canonical_name": canonical.full_name,
+                "entity_id": canonical.entity_id,
+                "user_id": canonical.user_id,
+            }
         payload.update({
             "capture_method": "agent_relay",
             "capture_run_id": call.run_id,

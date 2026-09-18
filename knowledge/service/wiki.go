@@ -44,6 +44,7 @@ type Citation struct {
 	RecordType     string    `json:"record_type"`
 	ExternalURL    string    `json:"external_url"`
 	Author         string    `json:"author,omitempty"`
+	AuthorEntityID string    `json:"author_entity_id,omitempty"`
 	OccurredAt     time.Time `json:"occurred_at"`
 }
 
@@ -146,19 +147,22 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 	for _, source := range sources {
 		sourceNames[source.ID] = source.Name
 	}
-	authors := make(map[string]string, len(identities))
+	authors := make(map[string]model.SourceIdentity, len(identities))
 	for _, identity := range identities {
-		author := identity.DisplayName
-		if author == "" {
-			author = identity.Username
-		}
-		authors[identity.ID] = author
+		authors[identity.ID] = identity
 	}
 	for _, record := range records {
 		citation := Citation{SourceRecordID: record.ID, SourceName: sourceNames[record.SourceID], RecordType: record.RecordType,
 			ExternalURL: record.ExternalURL, OccurredAt: record.OccurredAt}
 		if record.AuthorSourceIdentityID != nil {
-			citation.Author = authors[*record.AuthorSourceIdentityID]
+			identity := authors[*record.AuthorSourceIdentityID]
+			citation.Author = identity.DisplayName
+			if citation.Author == "" {
+				citation.Author = identity.Username
+			}
+			if identity.EntityID != nil {
+				citation.AuthorEntityID = *identity.EntityID
+			}
 		}
 		citations[record.ID] = citation
 	}
@@ -237,6 +241,9 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 			if count != int64(len(input.SourceRecordIDs)) {
 				return fmt.Errorf("%w: source record not found", ErrNotFound)
 			}
+			if err := validateDiscordAttribution(tx, input.SourceRecordIDs, input.Files); err != nil {
+				return err
+			}
 		}
 		if err := tx.Create(&changeset).Error; err != nil {
 			return err
@@ -250,6 +257,34 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 		return nil
 	})
 	return ChangesetDetails{Changeset: changeset, Files: files, SourceRecordIDs: input.SourceRecordIDs}, err
+}
+
+func validateDiscordAttribution(tx *gorm.DB, sourceRecordIDs []string, edits []repository.Edit) error {
+	var identities []model.SourceIdentity
+	if err := tx.Distinct("knowledge_source_identity.*").
+		Table("knowledge_source_identity").
+		Joins("JOIN knowledge_source_record ON knowledge_source_record.author_source_identity_id = knowledge_source_identity.id").
+		Where("knowledge_source_record.id IN ? AND knowledge_source_identity.provider = ?", sourceRecordIDs, "discord").
+		Find(&identities).Error; err != nil {
+		return err
+	}
+	content := ""
+	for _, edit := range edits {
+		if edit.Operation == "upsert" {
+			content += "\n" + edit.Content
+		}
+	}
+	for _, identity := range identities {
+		if identity.ResolutionStatus != model.IdentityResolutionResolved || identity.EntityID == nil ||
+			strings.TrimSpace(identity.DisplayName) == "" {
+			return fmt.Errorf("%w: Discord evidence has an unresolved Sentinel author", ErrInvalid)
+		}
+		reference := identity.DisplayName + " (" + *identity.EntityID + ")"
+		if !strings.Contains(content, reference) {
+			return fmt.Errorf("%w: wiki changes must cite Discord authors as %s", ErrInvalid, reference)
+		}
+	}
+	return nil
 }
 
 func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDetails, error) {
