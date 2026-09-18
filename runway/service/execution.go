@@ -125,6 +125,7 @@ type ModelCheckpoint struct {
 	CallID          string          `json:"call_id"`
 	Attempt         uint64          `json:"attempt"`
 	ElapsedMS       uint64          `json:"elapsed_ms"`
+	FirstEventMS    *uint64         `json:"first_event_ms"`
 	WorkerID        string          `json:"worker_id"`
 	ExpectedVersion uint64          `json:"expected_version"`
 	Model           string          `json:"model"`
@@ -985,6 +986,7 @@ func (s *ExecutionService) CheckpointModel(
 		"call_id":         checkpoint.CallID,
 		"attempt":         checkpoint.Attempt,
 		"elapsed_ms":      checkpoint.ElapsedMS,
+		"first_event_ms":  checkpoint.FirstEventMS,
 		"turn_message_id": checkpoint.TurnMessageID,
 		"sequence":        checkpoint.Sequence,
 		"input_tokens":    checkpoint.InputTokens,

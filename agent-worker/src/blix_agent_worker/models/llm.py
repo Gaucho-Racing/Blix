@@ -132,6 +132,7 @@ class ModelResponse(ContractModel):
     call_id: ModelCallID | None = None
     attempt: Annotated[int, Field(ge=1)] = 1
     elapsed_ms: Annotated[int, Field(ge=0)] = 0
+    first_event_ms: Annotated[int, Field(ge=0)] | None = None
     message: ModelMessage
     usage: ModelUsage = Field(default_factory=ModelUsage)
     continuation: ModelContinuation | None = None

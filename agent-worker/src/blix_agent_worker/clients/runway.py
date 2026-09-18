@@ -219,6 +219,7 @@ class RunwayClient:
                 "call_id": response.call_id,
                 "attempt": response.attempt,
                 "elapsed_ms": response.elapsed_ms,
+                "first_event_ms": response.first_event_ms,
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
                 "callable_ids": [request.callable_id for request in response.message.call_requests],

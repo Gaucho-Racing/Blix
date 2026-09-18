@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import time
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Literal, Self, cast
@@ -50,6 +51,12 @@ class _Response(_ResponseModel):
     status: str
     output: tuple[_OutputItem, ...]
     usage: _Usage | None = None
+
+
+class _StreamEvent(_ResponseModel):
+    type: str
+    response: JsonObject | None = None
+    message: str | None = None
 
 
 class OpenAIResponsesModel:
@@ -127,7 +134,7 @@ class OpenAIResponsesModel:
             raise ModelClientError("invalid_model_request", str(error)) from error
 
         try:
-            response = await self._client.post("responses", json=payload)
+            body, first_event_ms = await self._stream_response(payload)
         except httpx.RequestError as error:
             retryable = isinstance(
                 error, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError)
@@ -136,21 +143,7 @@ class OpenAIResponsesModel:
                 "model_unavailable", "The model gateway is unavailable.", retryable=retryable
             ) from error
 
-        if not response.is_success:
-            message = self._error_message(response)
-            retryable = response.status_code in {408, 429} or (
-                response.status_code >= 500 and response.status_code not in {501, 505}
-            )
-            raise ModelClientError(
-                "model_request_failed",
-                message,
-                retryable=retryable,
-                http_status=response.status_code,
-                retry_after_seconds=self._retry_after(response),
-            )
-
         try:
-            body = response.json()
             parsed = _Response.model_validate(body)
             if parsed.status != "completed":
                 raise ValueError(f"model response has terminal status {parsed.status!r}")
@@ -174,7 +167,67 @@ class OpenAIResponsesModel:
                 output_tokens=usage.output_tokens,
             ),
             continuation=continuation,
+            first_event_ms=first_event_ms,
         )
+
+    async def _stream_response(self, payload: JsonObject) -> tuple[JsonObject, int | None]:
+        started = time.monotonic()
+        first_event_ms: int | None = None
+        async with self._client.stream("POST", "responses", json={**payload, "stream": True}) as response:
+            if not response.is_success:
+                await response.aread()
+                retryable = response.status_code in {408, 429} or (
+                    response.status_code >= 500 and response.status_code not in {501, 505}
+                )
+                raise ModelClientError(
+                    "model_request_failed",
+                    self._error_message(response),
+                    retryable=retryable,
+                    http_status=response.status_code,
+                    retry_after_seconds=self._retry_after(response),
+                )
+            event_name = ""
+            data_lines: list[str] = []
+            async for line in response.aiter_lines():
+                if first_event_ms is None and line:
+                    first_event_ms = round((time.monotonic() - started) * 1000)
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+                elif line == "" and data_lines:
+                    completed = self._parse_stream_event(event_name, "\n".join(data_lines))
+                    event_name, data_lines = "", []
+                    if completed is not None:
+                        return completed, first_event_ms
+            if data_lines:
+                completed = self._parse_stream_event(event_name, "\n".join(data_lines))
+                if completed is not None:
+                    return completed, first_event_ms
+        raise ModelClientError("invalid_model_response", "The model stream ended before response.completed.")
+
+    @staticmethod
+    def _parse_stream_event(event_name: str, data: str) -> JsonObject | None:
+        if data == "[DONE]":
+            return None
+        try:
+            event = _StreamEvent.model_validate(json.loads(data))
+        except (json.JSONDecodeError, ValidationError) as error:
+            raise ModelClientError(
+                "invalid_model_response", "The model gateway returned invalid stream data."
+            ) from error
+        event_type = event.type or event_name
+        if event_type == "response.completed":
+            if event.response is None:
+                raise ModelClientError("invalid_model_response", "The completed model stream omitted its response.")
+            return event.response
+        if event_type in {"response.failed", "response.incomplete", "error"}:
+            raise ModelClientError(
+                "model_request_failed",
+                event.message or f"The model stream ended with {event_type}.",
+                retryable=event_type == "error",
+            )
+        return None
 
     def _request_payload(self, request: ModelRequest, input_items: list[JsonObject]) -> JsonObject:
         payload: JsonObject = {
