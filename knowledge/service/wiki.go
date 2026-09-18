@@ -279,6 +279,48 @@ type ChangesetPage struct {
 	NextCursor string            `json:"next_cursor"`
 }
 
+type PendingChangesetMatch struct {
+	Changeset       model.Changeset `json:"changeset"`
+	Paths           []string        `json:"paths"`
+	SourceRecordIDs []string        `json:"source_record_ids"`
+}
+
+func (s *WikiService) SearchPendingChangesets(ctx context.Context, query string, limit int) ([]PendingChangesetMatch, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 256 || limit < 1 || limit > 20 {
+		return nil, ErrInvalid
+	}
+	db := s.database.WithContext(ctx).Model(&model.Changeset{}).
+		Where("status IN ?", []string{model.ChangesetStatusProposed, model.ChangesetStatusPrepared, model.ChangesetStatusFailed})
+	for _, term := range strings.Fields(strings.ToLower(query)) {
+		pattern := "%" + term + "%"
+		db = db.Where(`LOWER(summary) LIKE ? OR EXISTS (
+			SELECT 1 FROM knowledge_changeset_file
+			WHERE knowledge_changeset_file.changeset_id = knowledge_changeset.id
+			AND LOWER(knowledge_changeset_file.path || ' ' || knowledge_changeset_file.content) LIKE ?
+		)`, pattern, pattern)
+	}
+	var changesets []model.Changeset
+	if err := db.Order("created_at DESC").Limit(limit).Find(&changesets).Error; err != nil {
+		return nil, err
+	}
+	matches := make([]PendingChangesetMatch, 0, len(changesets))
+	for _, changeset := range changesets {
+		details, err := s.GetChangeset(ctx, changeset.ID)
+		if err != nil {
+			return nil, err
+		}
+		paths := make([]string, 0, len(details.Files))
+		for _, file := range details.Files {
+			paths = append(paths, file.Path)
+		}
+		matches = append(matches, PendingChangesetMatch{
+			Changeset: changeset, Paths: paths, SourceRecordIDs: details.SourceRecordIDs,
+		})
+	}
+	return matches, nil
+}
+
 func (s *WikiService) ListChangesets(ctx context.Context, limit int, status, before string) (ChangesetPage, error) {
 	if limit < 1 || limit > 100 {
 		return ChangesetPage{}, ErrInvalid

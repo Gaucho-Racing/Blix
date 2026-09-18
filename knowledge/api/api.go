@@ -72,6 +72,7 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.GET("/search", handler.SearchWiki)
 	internal.POST("/changesets", handler.CreateWikiChangeset)
 	internal.GET("/changesets", handler.ListWikiChangesets)
+	internal.GET("/changesets/search", handler.SearchPendingWikiChangesets)
 	internal.GET("/changesets/:changesetID", handler.GetWikiChangeset)
 	internal.GET("/changesets/:changesetID/base", handler.GetWikiChangesetBase)
 	internal.POST("/changesets/:changesetID/apply", handler.ApplyWikiChangeset)

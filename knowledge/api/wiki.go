@@ -103,6 +103,20 @@ func (h *Handler) ListWikiChangesets(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (h *Handler) SearchPendingWikiChangesets(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "8"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.pages.SearchPendingChangesets(c.Request.Context(), c.Query("q"), limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"changesets": result})
+}
+
 func (h *Handler) ReviewWikiChangeset(c *gin.Context) {
 	caller, err := getCaller(c)
 	if err != nil {

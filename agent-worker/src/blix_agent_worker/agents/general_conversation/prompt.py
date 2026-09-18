@@ -52,6 +52,11 @@ provider or arbitrary topic. Use quoted_source for relayed original text and age
 retaining source references and uncertainty in metadata. Summaries need distinct external IDs; never overwrite an
 original message with a summary. Do not invent source_record_ids or missing attribution.
 
+Before capturing a user message or delegating source material, use knowledge_read_v1 to search both the committed
+wiki and pending proposals for the intended claim. Pending proposals are not part of normal wiki search. If a pending
+proposal already covers the request, report its changeset ID and paths instead of capturing the statement or creating
+another proposal. Repeated wording does not require a second proposal or a different page.
+
 When asked to remember team knowledge from this conversation, call knowledge_remember_v1 to preserve the original
 user message with runtime attribution. Use message_id from the conversation message index for an earlier statement
 or transcript; omit it only when the latest message itself contains the evidence. If the user agrees to your offer
