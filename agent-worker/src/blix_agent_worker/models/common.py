@@ -14,6 +14,7 @@ IdentifierPrefix = Literal[
     "worker",
     "outbox",
     "job",
+    "notification",
     "ent",
     "usr",
     "sa",
@@ -56,6 +57,7 @@ ModelCallID = _prefixed_ulid("modelcall")
 WorkerID = _prefixed_ulid("worker")
 OutboxID = _prefixed_ulid("outbox")
 JobID = _prefixed_ulid("job")
+NotificationID = _prefixed_ulid("notification")
 EntityID = _prefixed_ulid("ent")
 UserID = _prefixed_ulid("usr")
 ServiceAccountID = _prefixed_ulid("sa")

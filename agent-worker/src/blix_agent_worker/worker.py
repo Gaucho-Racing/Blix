@@ -40,7 +40,7 @@ from blix_agent_worker.models.agent import (
 from blix_agent_worker.models.common import ContractError, EventID, ExecutionID, RunID, new_ulid
 from blix_agent_worker.models.context import EntityType
 from blix_agent_worker.models.llm import ModelAttemptEvent, ModelResponse
-from blix_agent_worker.models.message import ConversationMessage
+from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.agent_execution import AgentExecutionV1Tool
@@ -136,10 +136,11 @@ class AgentWorker:
 
     async def _handle_claimed(self, execution: ExecutionContext, relinquishing_lease: asyncio.Event) -> None:
         state = ExecutionState(version=execution.version)
+        latest_message = execution.messages[-1] if execution.messages else None
         turn_message_id = (
-            execution.execution_id
-            if execution.notifications
-            else execution.messages[-1].message_id if execution.messages else execution.execution_id
+            latest_message.message_id
+            if latest_message is not None and latest_message.role is ConversationMessageRole.USER
+            else execution.notification_turn_id or execution.execution_id
         )
 
         async def record_model_attempt(event: ModelAttemptEvent) -> None:

@@ -42,7 +42,7 @@ func (s *ExecutionService) RecordModelAttempt(ctx context.Context, executionID s
 	if !identifier.IsValid(executionID, identifier.Execution) ||
 		!identifier.IsValid(attempt.WorkerID, identifier.Worker) ||
 		!identifier.IsValid(attempt.CallID, identifier.ModelCall) ||
-		!identifier.IsOneOf(attempt.TurnMessageID, identifier.Message, identifier.Execution) ||
+		!identifier.IsOneOf(attempt.TurnMessageID, identifier.Message, identifier.Execution, identifier.Notification) ||
 		attempt.Model == "" || attempt.Sequence == 0 || attempt.Attempt == 0 || attempt.Attempt > attempt.MaxAttempts {
 		return 0, fmt.Errorf("%w: invalid model attempt identifiers or sequence", ErrInvalid)
 	}
@@ -124,8 +124,18 @@ func validateModelTurn(tx *gorm.DB, execution model.AgentExecution, turnMessageI
 		}
 		return nil
 	}
-	if turnMessageID == execution.ID && execution.NotificationCutoff != nil {
-		return nil
+	if identifier.IsValid(turnMessageID, identifier.Notification) && execution.NotificationCutoff != nil {
+		var count int64
+		if err := tx.Model(&model.ExecutionNotification{}).Where(
+			"id = ? AND root_execution_id = ? AND delivered_at IS NULL AND created_at <= ?",
+			turnMessageID, execution.ID, *execution.NotificationCutoff,
+		).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 1 {
+			return nil
+		}
+		return ErrConflict
 	}
 	var count int64
 	if err := tx.Model(&model.Message{}).Where(

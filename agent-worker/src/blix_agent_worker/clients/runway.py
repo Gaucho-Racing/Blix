@@ -11,6 +11,7 @@ from blix_agent_worker.models.common import (
     EntityID,
     ExecutionID,
     MessageID,
+    NotificationID,
     RunID,
     WorkerID,
 )
@@ -39,7 +40,7 @@ class RunwayMessage(ContractModel):
 
 
 class ExecutionNotification(ContractModel):
-    notification_id: str
+    notification_id: NotificationID
     run_id: RunID
     root_execution_id: ExecutionID
     child_execution_id: ExecutionID
@@ -66,6 +67,7 @@ class ExecutionContext(ContractModel):
         tuple[ExecutionNotification, ...],
         BeforeValidator(lambda value: () if value is None else value),
     ] = ()
+    notification_turn_id: NotificationID | None = None
 
 
 class VersionResponse(ContractModel):

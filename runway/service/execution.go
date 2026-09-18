@@ -62,6 +62,7 @@ type ExecutionContext struct {
 	LeaseRenewAfterMS    uint64                        `json:"lease_renew_after_ms"`
 	Messages             []model.Message               `json:"messages"`
 	Notifications        []model.ExecutionNotification `json:"notifications"`
+	NotificationTurnID   string                        `json:"notification_turn_id,omitempty"`
 }
 
 type Heartbeat struct {
@@ -458,6 +459,9 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			LeaseRenewAfterMS:    uint64((s.leaseDuration / 3).Milliseconds()),
 			Messages:             messages,
 			Notifications:        notifications,
+		}
+		if len(notifications) > 0 {
+			claimed.NotificationTurnID = notifications[0].ID
 		}
 		return nil
 	})
@@ -920,7 +924,7 @@ func (s *ExecutionService) CheckpointModel(
 	if !identifier.IsValid(executionID, identifier.Execution) ||
 		!identifier.IsValid(strings.TrimSpace(checkpoint.WorkerID), identifier.Worker) ||
 		checkpoint.Model == "" ||
-		!identifier.IsOneOf(checkpoint.TurnMessageID, identifier.Message, identifier.Execution) ||
+		!identifier.IsOneOf(checkpoint.TurnMessageID, identifier.Message, identifier.Execution, identifier.Notification) ||
 		checkpoint.Sequence == 0 {
 		return 0, fmt.Errorf("%w: model, turn_message_id, and a positive sequence are required", ErrInvalid)
 	}
@@ -965,7 +969,18 @@ func (s *ExecutionService) CheckpointModel(
 			return ErrConflict
 		}
 		if execution.ParentExecutionID == nil {
-			if checkpoint.TurnMessageID != execution.ID || execution.NotificationCutoff == nil {
+			if identifier.IsValid(checkpoint.TurnMessageID, identifier.Notification) && execution.NotificationCutoff != nil {
+				var notificationCount int64
+				if err := tx.Model(&model.ExecutionNotification{}).Where(
+					"id = ? AND root_execution_id = ? AND delivered_at IS NULL AND created_at <= ?",
+					checkpoint.TurnMessageID, execution.ID, *execution.NotificationCutoff,
+				).Count(&notificationCount).Error; err != nil {
+					return err
+				}
+				if notificationCount != 1 {
+					return ErrConflict
+				}
+			} else {
 				var messageCount int64
 				if err := tx.Model(&model.Message{}).
 					Where(
@@ -1229,6 +1244,7 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 			}
 			execution.Status = model.ExecutionStatusIdle
 			execution.WaitingOnExecutionID = nil
+			execution.NotificationCutoff = nil
 		} else {
 			payload, err := json.Marshal(map[string]any{
 				"run_id":              execution.RunID,
