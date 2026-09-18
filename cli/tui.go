@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image/color"
@@ -46,27 +47,29 @@ type turnView struct {
 }
 
 type tuiModel struct {
-	ctx          context.Context
-	api          *client
-	current      *createdRun
-	caller       *callerContext
-	user         *currentUser
-	startupError error
-	viewport     viewport.Model
-	input        textinput.Model
-	spinner      spinner.Model
-	blocks       []transcriptBlock
-	history      []string
-	historyIndex int
-	historyDraft string
-	activeTurn   *turnView
-	activeTurnID uint64
-	nextTurnID   uint64
-	width        int
-	height       int
-	initialized  bool
-	busy         bool
-	operation    string
+	ctx                  context.Context
+	api                  *client
+	current              *createdRun
+	caller               *callerContext
+	user                 *currentUser
+	startupError         error
+	viewport             viewport.Model
+	input                textinput.Model
+	spinner              spinner.Model
+	blocks               []transcriptBlock
+	history              []string
+	historyIndex         int
+	historyDraft         string
+	activeTurn           *turnView
+	activeTurnID         uint64
+	nextTurnID           uint64
+	backgroundCursor     uint64
+	backgroundExecutions map[string]bool
+	width                int
+	height               int
+	initialized          bool
+	busy                 bool
+	operation            string
 }
 
 type sessionLoadedMsg struct {
@@ -93,6 +96,13 @@ type messageAppendedMsg struct {
 
 type executionEventsMsg struct {
 	turnID uint64
+	after  uint64
+	events []executionEvent
+	err    error
+}
+
+type backgroundEventsMsg struct {
+	runID  string
 	after  uint64
 	events []executionEvent
 	err    error
@@ -135,14 +145,15 @@ func newTUIModel(ctx context.Context, api *client) *tuiModel {
 	loader.Style = pinkStyle
 
 	return &tuiModel{
-		ctx:          ctx,
-		api:          api,
-		viewport:     view,
-		input:        input,
-		spinner:      loader,
-		historyIndex: 0,
-		busy:         true,
-		operation:    "Connecting to Blix",
+		ctx:                  ctx,
+		api:                  api,
+		viewport:             view,
+		input:                input,
+		spinner:              loader,
+		historyIndex:         0,
+		backgroundExecutions: make(map[string]bool),
+		busy:                 true,
+		operation:            "Connecting to Blix",
 	}
 }
 
@@ -173,6 +184,8 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleMessageAppended(message)
 	case executionEventsMsg:
 		return m, m.handleExecutionEvents(message)
+	case backgroundEventsMsg:
+		return m, m.handleBackgroundEvents(message)
 	}
 
 	var command tea.Cmd
@@ -334,6 +347,10 @@ func (m *tuiModel) handleSessionLoaded(message sessionLoadedMsg) tea.Cmd {
 		m.api = message.api
 	}
 	m.current = message.current
+	if message.clearBlocks {
+		m.backgroundCursor = 0
+		m.backgroundExecutions = make(map[string]bool)
+	}
 	m.caller = message.caller
 	m.user = message.user
 	m.startupError = message.startupError
@@ -343,6 +360,9 @@ func (m *tuiModel) handleSessionLoaded(message sessionLoadedMsg) tea.Cmd {
 	m.input.Focus()
 	m.resizeInput()
 	m.syncTranscript(true)
+	if m.current != nil {
+		return pollBackgroundEventsCmd(m.ctx, m.api, m.current.Run.ID, 0)
+	}
 	return nil
 }
 
@@ -356,9 +376,11 @@ func (m *tuiModel) handleRunCreated(message runCreatedMsg) tea.Cmd {
 	}
 	m.current = &message.current
 	m.blocks = nil
+	m.backgroundCursor = 0
+	m.backgroundExecutions = make(map[string]bool)
 	m.input.Focus()
 	m.syncTranscript(true)
-	return nil
+	return pollBackgroundEventsCmd(m.ctx, m.api, message.current.Run.ID, 0)
 }
 
 func (m *tuiModel) handleMessageAppended(message messageAppendedMsg) tea.Cmd {
@@ -366,8 +388,7 @@ func (m *tuiModel) handleMessageAppended(message messageAppendedMsg) tea.Cmd {
 		return nil
 	}
 	if message.err != nil {
-		m.finishTurn("", message.err)
-		return nil
+		return m.finishTurn("", message.err, 0)
 	}
 	m.current = &message.current
 	return pollEventsCmd(m.ctx, m.api, message.turnID, message.current.Run.ID, message.result.EventPosition)
@@ -378,13 +399,19 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 		return nil
 	}
 	if message.err != nil {
-		m.finishTurn("", message.err)
-		return nil
+		return m.finishTurn("", message.err, message.after)
 	}
 
 	position := message.after
 	for _, event := range message.events {
 		position = event.Position
+		m.backgroundCursor = max(m.backgroundCursor, event.Position)
+		if event.Type == "agent.call_v1" {
+			var payload agentCallPayload
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Background {
+				m.backgroundExecutions[event.EntityID] = true
+			}
+		}
 		content, activity, done, err := applyEvent(event, m.activeTurn.toolIDs, m.activeTurn.tree)
 		if activity != nil {
 			m.activeTurn.upsertActivity(*activity)
@@ -393,15 +420,14 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 			m.activeTurn.completedExecutions[event.EntityID] = true
 		}
 		if done {
-			m.finishTurn(content, err)
-			return nil
+			return m.finishTurn(content, err, position)
 		}
 	}
 	m.syncTranscript(true)
 	return pollEventsCmd(m.ctx, m.api, message.turnID, m.current.Run.ID, position)
 }
 
-func (m *tuiModel) finishTurn(content string, err error) {
+func (m *tuiModel) finishTurn(content string, err error, after uint64) tea.Cmd {
 	m.activeTurn.response = content
 	m.activeTurn.err = err
 	m.activeTurn.finishedAt = time.Now()
@@ -411,6 +437,55 @@ func (m *tuiModel) finishTurn(content string, err error) {
 	m.operation = ""
 	m.input.Focus()
 	m.syncTranscript(true)
+	return nil
+}
+
+func (m *tuiModel) handleBackgroundEvents(message backgroundEventsMsg) tea.Cmd {
+	if m.current == nil || m.current.Run.ID != message.runID {
+		return nil
+	}
+	if m.activeTurn != nil {
+		return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, max(message.after, m.backgroundCursor))
+	}
+	if message.err != nil {
+		return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, message.after)
+	}
+	position := max(message.after, m.backgroundCursor)
+	for _, event := range message.events {
+		if event.Position <= m.backgroundCursor {
+			continue
+		}
+		position = event.Position
+		m.backgroundCursor = event.Position
+		switch event.Type {
+		case "agent.call_v1":
+			var payload agentCallPayload
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Background {
+				m.backgroundExecutions[event.EntityID] = true
+				m.appendBlock(transcriptNotice, fmt.Sprintf("Background agent started  %s\n%s", payload.AgentID, event.EntityID), nil)
+			}
+		case "agent.result_v1":
+			if !m.backgroundExecutions[event.EntityID] {
+				continue
+			}
+			var payload agentResultPayload
+			if json.Unmarshal(event.Payload, &payload) == nil {
+				kind := transcriptNotice
+				if payload.Status == "failed" {
+					kind = transcriptError
+				}
+				m.appendBlock(kind, fmt.Sprintf("Background agent %s  %s\n%s", payload.Status, payload.AgentID, event.EntityID), nil)
+			}
+		case "message.assistant_v1":
+			var payload assistantPayload
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Content != "" {
+				turn := &turnView{startedAt: time.Now(), finishedAt: time.Now(), response: payload.Content}
+				m.blocks = append(m.blocks, transcriptBlock{kind: transcriptTurn, turn: turn})
+				m.syncTranscript(true)
+			}
+		}
+	}
+	return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, position)
 }
 
 func (m *tuiModel) setBusy(operation string) {
@@ -693,6 +768,20 @@ func pollEventsCmd(ctx context.Context, api *client, turnID uint64, runID string
 			}
 		}
 		return executionEventsMsg{turnID: turnID, after: after, events: events}
+	}
+}
+
+func pollBackgroundEventsCmd(ctx context.Context, api *client, runID string, after uint64) tea.Cmd {
+	return func() tea.Msg {
+		timer := time.NewTimer(500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return backgroundEventsMsg{runID: runID, after: after, err: ctx.Err()}
+		case <-timer.C:
+		}
+		events, err := api.listEvents(ctx, runID, after)
+		return backgroundEventsMsg{runID: runID, after: after, events: events, err: err}
 	}
 }
 

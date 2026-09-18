@@ -206,7 +206,9 @@ function graphElements(
         kind: "execution",
         category: "agent",
         title: execution.agent_id,
-        summary: execution.parent_execution_id ? "Delegated agent execution" : "Root agent execution",
+        summary: execution.detached
+          ? "Background agent execution · parent notified on completion"
+          : execution.parent_execution_id ? "Delegated agent execution" : "Root agent execution",
         identifier: execution.execution_id,
         executionID: execution.execution_id,
         status: execution.status,

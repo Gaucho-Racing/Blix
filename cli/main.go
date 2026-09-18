@@ -96,7 +96,8 @@ type toolResultPayload struct {
 }
 
 type agentCallPayload struct {
-	AgentID string `json:"agent_id"`
+	AgentID    string `json:"agent_id"`
+	Background bool   `json:"background"`
 }
 
 type agentResultPayload struct {
@@ -259,7 +260,11 @@ func applyEvent(
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			depth := tree.agentCall(event.ExecutionID, event.EntityID, payload.AgentID)
-			activity := newRenderedActivity("agent:"+event.EntityID, event.EntityID, depth, "agent", payload.AgentID, "queued")
+			label := payload.AgentID
+			if payload.Background {
+				label += " · background"
+			}
+			activity := newRenderedActivity("agent:"+event.EntityID, event.EntityID, depth, "agent", label, "queued")
 			return "", &activity, false, nil
 		}
 	case "execution.claimed_v1":

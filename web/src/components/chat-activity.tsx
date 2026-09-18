@@ -38,6 +38,7 @@ function activityItems(events: ExecutionEvent[], executions: ExecutionSummary[])
       .map((event) => [event.entity_id, event]),
   )
   const agentsByExecutionID = new Map(executions.map((execution) => [execution.execution_id, execution.agent_id]))
+  const executionsByID = new Map(executions.map((execution) => [execution.execution_id, execution]))
 
   return events.flatMap((event): ActivityItem[] => {
     if (event.type === "model.response_v1") {
@@ -63,12 +64,29 @@ function activityItems(events: ExecutionEvent[], executions: ExecutionSummary[])
 
     if (event.type === "agent.call_v1") {
       const result = resultsByCallID.get(event.entity_id)
+      const execution = executionsByID.get(event.entity_id)
+      const background = execution?.detached || event.payload.background === true
       return [{
         eventID: event.event_id,
         label: readString(event.payload, "agent_id") ?? "Delegated agent",
-        detail: "Agent",
-        status: result ? readString(result.payload, "status") ?? "completed" : "queued",
+        detail: background ? "Background agent" : "Agent",
+        status: result
+          ? readString(result.payload, "status") ?? "completed"
+          : execution?.status ?? "queued",
         icon: Bot,
+      }]
+    }
+
+    if (event.type === "agent.result_v1") {
+      const execution = executionsByID.get(event.entity_id)
+      if (!execution?.detached) return []
+      return [{
+        eventID: event.event_id,
+        label: execution.agent_id,
+        detail: "Background agent finished",
+        status: readString(event.payload, "status") ?? execution.status,
+        icon: Bot,
+        danger: execution.status === "failed",
       }]
     }
 

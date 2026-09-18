@@ -1,4 +1,4 @@
-import { Bot, CornerDownRight } from "lucide-react"
+import { Bot, CornerDownRight, Radio } from "lucide-react"
 
 import { StatusBadge } from "@/components/status-badge"
 import type { ExecutionSummary } from "@/lib/types"
@@ -37,10 +37,11 @@ export function ExecutionList({ executions, selectedID, onSelect }: ExecutionLis
             type="button"
           >
             <span className="execution-icon">
-              {depth > 0 ? <CornerDownRight size={15} /> : <Bot size={15} />}
+              {execution.detached ? <Radio size={15} /> : depth > 0 ? <CornerDownRight size={15} /> : <Bot size={15} />}
             </span>
             <span className="execution-copy">
               <strong>{execution.agent_id}</strong>
+              {execution.detached && <span className="execution-mode">Background</span>}
               <code>{execution.execution_id}</code>
             </span>
             <StatusBadge status={execution.status} />

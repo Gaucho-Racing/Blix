@@ -758,7 +758,16 @@ func (s *ExecutionService) DelegateBackgroundExecution(
 		if err := tx.Create(&child).Error; err != nil {
 			return err
 		}
-		if err := s.appendEvent(tx, parent.RunID, parent.ID, model.EventTypeAgentCall, child.ID, delegation.Task); err != nil {
+		var callPayload map[string]any
+		if err := json.Unmarshal(delegation.Task, &callPayload); err != nil {
+			return err
+		}
+		callPayload["background"] = true
+		encodedCall, err := json.Marshal(callPayload)
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(tx, parent.RunID, parent.ID, model.EventTypeAgentCall, child.ID, encodedCall); err != nil {
 			return err
 		}
 		parent.Version++

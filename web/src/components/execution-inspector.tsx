@@ -34,6 +34,8 @@ export function ExecutionInspector({ executionID }: ExecutionInspectorProps) {
         <div><dt>Updated</dt><dd>{formatTimestamp(details.execution.updated_at)}</dd></div>
         <div><dt>Worker</dt><dd className="mono">{details.execution.claimed_by || "—"}</dd></div>
         <div><dt>Lease expires</dt><dd>{details.execution.lease_expires_at ? formatTimestamp(details.execution.lease_expires_at) : "—"}</dd></div>
+        <div><dt>Execution mode</dt><dd>{details.execution.detached ? "Background" : "Blocking"}</dd></div>
+        <div><dt>Parent notification</dt><dd>{details.execution.detached ? "On completion" : "Awaited"}</dd></div>
       </dl>
 
       {details.has_provider_continuation && (
