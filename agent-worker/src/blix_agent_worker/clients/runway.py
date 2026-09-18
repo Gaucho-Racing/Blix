@@ -36,6 +36,8 @@ class RunwayMessage(ContractModel):
     event_position: int
     role: ConversationMessageRole
     content: str
+    pending: bool = False
+    processed_at: datetime | None = None
     created_at: datetime
 
 
@@ -68,6 +70,7 @@ class ExecutionContext(ContractModel):
         BeforeValidator(lambda value: () if value is None else value),
     ] = ()
     notification_turn_id: NotificationID | None = None
+    active_turn_message_id: MessageID | None = None
 
 
 class VersionResponse(ContractModel):

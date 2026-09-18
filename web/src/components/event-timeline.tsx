@@ -39,6 +39,7 @@ const icons: Record<string, ComponentType<{ size?: number }>> = {
   "execution.resumed_v1": Play,
   "execution.lease_expired_v1": Clock3,
   "execution.failed_v1": CircleAlert,
+  "execution.cancelled_v1": Pause,
   "caller.verified_v1": ShieldCheck,
 }
 

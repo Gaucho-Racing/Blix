@@ -23,6 +23,7 @@ const (
 	EventTypeExecutionResumed   = "execution.resumed_v1"
 	EventTypeExecutionLeaseLost = "execution.lease_expired_v1"
 	EventTypeExecutionFailed    = "execution.failed_v1"
+	EventTypeExecutionCancelled = "execution.cancelled_v1"
 )
 
 type ExecutionEvent struct {

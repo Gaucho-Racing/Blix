@@ -94,6 +94,15 @@ type messageAppendedMsg struct {
 	err     error
 }
 
+type queuedMessageMsg struct {
+	content string
+	err     error
+}
+
+type interruptedMsg struct {
+	err error
+}
+
 type executionEventsMsg struct {
 	turnID uint64
 	after  uint64
@@ -182,6 +191,20 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRunCreated(message)
 	case messageAppendedMsg:
 		return m, m.handleMessageAppended(message)
+	case queuedMessageMsg:
+		if message.err != nil {
+			m.appendBlock(transcriptError, message.err.Error(), nil)
+		} else {
+			m.appendBlock(transcriptNotice, "Queued message\n"+message.content, nil)
+		}
+		return m, nil
+	case interruptedMsg:
+		if message.err != nil {
+			m.appendBlock(transcriptError, message.err.Error(), nil)
+		} else {
+			m.appendBlock(transcriptNotice, "Stopping the active turn; queued messages will continue.", nil)
+		}
+		return m, nil
 	case executionEventsMsg:
 		return m, m.handleExecutionEvents(message)
 	case backgroundEventsMsg:
@@ -239,9 +262,6 @@ func (m *tuiModel) handleKey(message tea.KeyPressMsg) tea.Cmd {
 		m.historyNext()
 		return nil
 	case "enter":
-		if m.busy {
-			return nil
-		}
 		return m.submitInput()
 	}
 
@@ -260,6 +280,10 @@ func (m *tuiModel) submitInput() tea.Cmd {
 
 	if strings.HasPrefix(value, "/") {
 		return m.handleCommand(value)
+	}
+	if m.busy {
+		m.appendBlock(transcriptNotice, "Blix is working. Use /queue <message> to queue work or /stop to interrupt.", nil)
+		return nil
 	}
 	if m.current == nil {
 		m.appendBlock(transcriptError, accessMessage(m.caller, m.user), nil)
@@ -309,6 +333,18 @@ func (m *tuiModel) handleCommand(command string) tea.Cmd {
 		}
 		m.setBusy("Starting a new run")
 		return tea.Batch(createRunCmd(m.ctx, m.api), m.spinner.Tick)
+	case "/stop":
+		if m.current == nil {
+			return nil
+		}
+		return interruptRunCmd(m.ctx, m.api, m.current.Run.ID)
+	}
+	if strings.HasPrefix(command, "/queue ") {
+		content := strings.TrimSpace(strings.TrimPrefix(command, "/queue"))
+		if content == "" || m.current == nil {
+			return nil
+		}
+		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, content)
 	}
 
 	if strings.HasPrefix(command, "/endpoint ") {
@@ -749,6 +785,19 @@ func appendMessageCmd(ctx context.Context, api *client, turnID uint64, current c
 	return func() tea.Msg {
 		result, err := api.appendMessage(ctx, current.Run.ID, content)
 		return messageAppendedMsg{turnID: turnID, current: current, result: result, err: err}
+	}
+}
+
+func queueMessageCmd(ctx context.Context, api *client, runID string, content string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := api.appendMessage(ctx, runID, content)
+		return queuedMessageMsg{content: content, err: err}
+	}
+}
+
+func interruptRunCmd(ctx context.Context, api *client, runID string) tea.Cmd {
+	return func() tea.Msg {
+		return interruptedMsg{err: api.interruptRun(ctx, runID)}
 	}
 }
 

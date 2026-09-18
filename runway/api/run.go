@@ -92,6 +92,21 @@ func (h *Handler) AppendMessage(c *gin.Context) {
 	c.JSON(http.StatusAccepted, appended)
 }
 
+func (h *Handler) InterruptRun(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if err := h.executions.InterruptRun(c.Request.Context(), c.Param("runID"), service.Interruption{
+		CallerEntityID: caller.EntityID,
+	}); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) ListEvents(c *gin.Context) {
 	if err := h.authorizeRunAccess(c, c.Param("runID")); err != nil {
 		respondError(c, err)

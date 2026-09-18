@@ -103,6 +103,10 @@ export async function appendRunMessage(runID: string, content: string): Promise<
   return data
 }
 
+export async function interruptRun(runID: string): Promise<void> {
+  await api.post(`/v1/runs/${encodeURIComponent(runID)}/interrupt`)
+}
+
 export async function listWorkers(): Promise<WorkerSummary[]> {
   const { data } = await api.get<{ workers: WorkerSummary[] }>("/v1/workers", {
     params: { limit: 100 },

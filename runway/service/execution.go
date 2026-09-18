@@ -63,6 +63,7 @@ type ExecutionContext struct {
 	Messages             []model.Message               `json:"messages"`
 	Notifications        []model.ExecutionNotification `json:"notifications"`
 	NotificationTurnID   string                        `json:"notification_turn_id,omitempty"`
+	ActiveTurnMessageID  *string                       `json:"active_turn_message_id,omitempty"`
 }
 
 type Heartbeat struct {
@@ -170,6 +171,10 @@ type Failure struct {
 	WorkerID        string         `json:"worker_id"`
 	ExpectedVersion uint64         `json:"expected_version"`
 	Error           map[string]any `json:"error"`
+}
+
+type Interruption struct {
+	CallerEntityID string `json:"caller_entity_id"`
 }
 
 type agentTaskPayload struct {
@@ -308,16 +313,16 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&execution, "id = ?", run.RootExecutionID).Error; err != nil {
 			return mapDatabaseError(err)
 		}
-		if execution.Status != model.ExecutionStatusIdle {
+		if execution.Status == model.ExecutionStatusCancelled {
 			return ErrConflict
 		}
-
 		message := model.Message{
 			ID:                identifier.New(identifier.Message),
 			RunID:             run.ID,
 			ParentExecutionID: execution.ID,
 			Role:              model.MessageRoleUser,
 			Content:           content,
+			Pending:           true,
 		}
 		payload, err := json.Marshal(map[string]any{
 			"message_id": message.ID,
@@ -349,18 +354,20 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID string, 
 			}
 		}
 
-		execution.Status = model.ExecutionStatusQueued
-		execution.Version++
-		execution.ClaimedBy = ""
-		execution.ClaimedAt = nil
-		execution.LeaseExpiresAt = nil
-		execution.State = nil
-		execution.WaitingOnExecutionID = nil
-		if err := tx.Save(&execution).Error; err != nil {
-			return err
-		}
-		if err := s.createDispatch(tx, execution); err != nil {
-			return err
+		if execution.Status == model.ExecutionStatusIdle {
+			execution.Status = model.ExecutionStatusQueued
+			execution.Version++
+			execution.ClaimedBy = ""
+			execution.ClaimedAt = nil
+			execution.LeaseExpiresAt = nil
+			execution.State = nil
+			execution.WaitingOnExecutionID = nil
+			if err := tx.Save(&execution).Error; err != nil {
+				return err
+			}
+			if err := s.createDispatch(tx, execution); err != nil {
+				return err
+			}
 		}
 		appended = AppendedMessage{
 			Message:       message,
@@ -393,6 +400,28 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			return err
 		}
 		now := time.Now().UTC()
+		if execution.ParentExecutionID == nil && execution.ActiveTurnMessageID != nil {
+			var activeCount int64
+			if err := tx.Model(&model.Message{}).
+				Where("id = ? AND parent_execution_id = ? AND pending = ?", *execution.ActiveTurnMessageID, execution.ID, true).
+				Count(&activeCount).Error; err != nil {
+				return err
+			}
+			if activeCount == 0 {
+				execution.ActiveTurnMessageID = nil
+				execution.State = nil
+			}
+		}
+		if execution.ParentExecutionID == nil && execution.ActiveTurnMessageID == nil {
+			var next model.Message
+			err := tx.Where("parent_execution_id = ? AND role = ? AND pending = ?", execution.ID, model.MessageRoleUser, true).
+				Order("event_position ASC").First(&next).Error
+			if err == nil {
+				execution.ActiveTurnMessageID = &next.ID
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
 		leaseExpiresAt := now.Add(s.leaseDuration)
 		execution.Status = model.ExecutionStatusRunning
 		execution.ClaimedBy = workerID
@@ -425,8 +454,16 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			Update("acknowledged_at", now).Error; err != nil {
 			return err
 		}
+		messagesQuery := tx.Where("parent_execution_id = ?", execution.ID)
+		if execution.ParentExecutionID == nil && execution.ActiveTurnMessageID != nil {
+			var active model.Message
+			if err := tx.First(&active, "id = ?", *execution.ActiveTurnMessageID).Error; err != nil {
+				return mapDatabaseError(err)
+			}
+			messagesQuery = messagesQuery.Where("event_position <= ?", active.EventPosition)
+		}
 		var messages []model.Message
-		if err := tx.Where("parent_execution_id = ?", execution.ID).Order("event_position ASC").Find(&messages).Error; err != nil {
+		if err := messagesQuery.Order("event_position ASC").Find(&messages).Error; err != nil {
 			return err
 		}
 		notifications := []model.ExecutionNotification{}
@@ -459,6 +496,7 @@ func (s *ExecutionService) ClaimExecution(ctx context.Context, executionID strin
 			LeaseRenewAfterMS:    uint64((s.leaseDuration / 3).Milliseconds()),
 			Messages:             messages,
 			Notifications:        notifications,
+			ActiveTurnMessageID:  execution.ActiveTurnMessageID,
 		}
 		if len(notifications) > 0 {
 			claimed.NotificationTurnID = notifications[0].ID
@@ -1088,6 +1126,9 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 			"content":    message.Content,
 			"usage":      completion.Usage,
 		}
+		if execution.ActiveTurnMessageID != nil {
+			payload["turn_message_id"] = *execution.ActiveTurnMessageID
+		}
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -1116,6 +1157,14 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 		execution.ClaimedAt = nil
 		execution.LeaseExpiresAt = nil
 		execution.WaitingOnExecutionID = nil
+		execution.State = nil
+		if execution.ActiveTurnMessageID != nil {
+			if err := tx.Model(&model.Message{}).Where("id = ?", *execution.ActiveTurnMessageID).
+				Updates(map[string]any{"pending": false, "processed_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+			execution.ActiveTurnMessageID = nil
+		}
 		if err := tx.Save(&execution).Error; err != nil {
 			return err
 		}
@@ -1143,6 +1192,22 @@ func (s *ExecutionService) CompleteExecution(ctx context.Context, executionID st
 			}
 			if err := s.createDispatch(tx, execution); err != nil {
 				return err
+			}
+		} else {
+			var queuedMessages int64
+			if err := tx.Model(&model.Message{}).
+				Where("parent_execution_id = ? AND role = ? AND pending = ?", execution.ID, model.MessageRoleUser, true).
+				Count(&queuedMessages).Error; err != nil {
+				return err
+			}
+			if queuedMessages > 0 {
+				execution.Status = model.ExecutionStatusQueued
+				if err := tx.Save(&execution).Error; err != nil {
+					return err
+				}
+				if err := s.createDispatch(tx, execution); err != nil {
+					return err
+				}
 			}
 		}
 		appended = AppendedMessage{Message: message, EventPosition: event.Position, Version: execution.Version}
@@ -1245,6 +1310,13 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 			execution.Status = model.ExecutionStatusIdle
 			execution.WaitingOnExecutionID = nil
 			execution.NotificationCutoff = nil
+			if execution.ActiveTurnMessageID != nil {
+				if err := tx.Model(&model.Message{}).Where("id = ?", *execution.ActiveTurnMessageID).
+					Updates(map[string]any{"pending": false, "processed_at": time.Now().UTC()}).Error; err != nil {
+					return err
+				}
+				execution.ActiveTurnMessageID = nil
+			}
 		} else {
 			payload, err := json.Marshal(map[string]any{
 				"run_id":              execution.RunID,
@@ -1289,9 +1361,99 @@ func (s *ExecutionService) FailExecution(ctx context.Context, executionID string
 		if isChild {
 			return s.resumeParent(tx, execution)
 		}
-		return nil
+		var pending int64
+		if err := tx.Model(&model.Message{}).
+			Where("parent_execution_id = ? AND role = ? AND pending = ?", execution.ID, model.MessageRoleUser, true).
+			Count(&pending).Error; err != nil {
+			return err
+		}
+		var notifications int64
+		if err := tx.Model(&model.ExecutionNotification{}).
+			Where("root_execution_id = ? AND delivered_at IS NULL", execution.ID).Count(&notifications).Error; err != nil {
+			return err
+		}
+		if pending == 0 && notifications == 0 {
+			return nil
+		}
+		execution.Status = model.ExecutionStatusQueued
+		if err := tx.Save(&execution).Error; err != nil {
+			return err
+		}
+		return s.createDispatch(tx, execution)
 	})
 	return event, err
+}
+
+func (s *ExecutionService) InterruptRun(ctx context.Context, runID string, interruption Interruption) error {
+	if !identifier.IsValid(runID, identifier.Run) || !identifier.IsValid(interruption.CallerEntityID, identifier.Entity) {
+		return ErrInvalid
+	}
+	return s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run model.Run
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, "id = ?", runID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if run.CallerEntityID != interruption.CallerEntityID {
+			return ErrForbidden
+		}
+		var root model.AgentExecution
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, "id = ?", run.RootExecutionID).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if root.Status == model.ExecutionStatusIdle {
+			return nil
+		}
+		now := time.Now().UTC()
+		if root.ActiveTurnMessageID != nil {
+			if err := tx.Model(&model.Message{}).Where("id = ?", *root.ActiveTurnMessageID).
+				Updates(map[string]any{"pending": false, "processed_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&model.AgentExecution{}).
+			Where("run_id = ? AND detached = ? AND status IN ?", run.ID, false,
+				[]string{model.ExecutionStatusQueued, model.ExecutionStatusRunning, model.ExecutionStatusWaiting}).
+			Updates(map[string]any{
+				"status": model.ExecutionStatusCancelled, "completed_at": now, "claimed_by": "", "claimed_at": nil,
+				"lease_expires_at": nil, "waiting_on_execution_id": nil, "state": nil,
+			}).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{"status": model.ExecutionStatusCancelled, "reason": "user_interrupted"})
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(tx, run.ID, root.ID, model.EventTypeExecutionCancelled, root.ID, payload); err != nil {
+			return err
+		}
+		root.Status = model.ExecutionStatusIdle
+		root.CompletedAt = nil
+		root.ActiveTurnMessageID = nil
+		root.NotificationCutoff = nil
+		root.ClaimedBy = ""
+		root.ClaimedAt = nil
+		root.LeaseExpiresAt = nil
+		root.WaitingOnExecutionID = nil
+		root.State = nil
+		root.Version++
+		if err := tx.Save(&root).Error; err != nil {
+			return err
+		}
+		var queuedMessages int64
+		if err := tx.Model(&model.Message{}).
+			Where("parent_execution_id = ? AND role = ? AND pending = ?", root.ID, model.MessageRoleUser, true).
+			Count(&queuedMessages).Error; err != nil {
+			return err
+		}
+		if queuedMessages == 0 {
+			return nil
+		}
+		root.Status = model.ExecutionStatusQueued
+		if err := tx.Save(&root).Error; err != nil {
+			return err
+		}
+		return s.createDispatch(tx, root)
+	})
 }
 
 func (s *ExecutionService) notifyDetachedCompletion(tx *gorm.DB, child model.AgentExecution) error {

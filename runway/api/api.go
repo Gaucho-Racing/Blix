@@ -102,6 +102,7 @@ func InitializeRoutes(
 	router.POST("/v1/runs", RequireAuthentication(auth), handler.CreateRun)
 	router.GET("/v1/runs/:runID", RequireAuthentication(auth), handler.GetRun)
 	router.POST("/v1/runs/:runID/messages", RequireAuthentication(auth), handler.AppendMessage)
+	router.POST("/v1/runs/:runID/interrupt", RequireAuthentication(auth), handler.InterruptRun)
 	router.GET("/v1/runs/:runID/events", RequireAuthentication(auth), handler.ListEvents)
 	router.GET("/v1/runs/:runID/events/stream", RequireStreamAuthentication(auth), handler.StreamRunEvents)
 	router.GET("/v1/executions/:executionID", RequireAuthentication(auth), handler.GetExecution)

@@ -373,6 +373,10 @@ func (c *client) appendMessage(ctx context.Context, runID string, content string
 	return appended, err
 }
 
+func (c *client) interruptRun(ctx context.Context, runID string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/runs/"+runID+"/interrupt", nil, nil)
+}
+
 func (c *client) listEvents(ctx context.Context, runID string, after uint64) ([]executionEvent, error) {
 	var response eventsResponse
 	path := fmt.Sprintf("/api/v1/runs/%s/events?after=%d", runID, after)
@@ -623,6 +627,8 @@ func renderHelpPanel(width int) string {
 		{command: "/endpoint", detail: "Show or change the active Blix endpoint"},
 		{command: "/help", detail: "Show available commands"},
 		{command: "/reset", detail: "Start a fresh run"},
+		{command: "/queue", detail: "Queue a message while Blix is working"},
+		{command: "/stop", detail: "Interrupt the active turn"},
 		{command: "/quit", detail: "End the session"},
 	}
 	lines := make([]string, 0, len(commands)+1)

@@ -9,6 +9,7 @@ import {
   LogIn,
   Plus,
   Sparkles,
+  Square,
   TriangleAlert,
 } from "lucide-react"
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
@@ -18,7 +19,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { ChatActivity } from "@/components/chat-activity"
 import { RunEventStream } from "@/components/event-stream"
 import { StatusBadge } from "@/components/status-badge"
-import { appendRunMessage, createRun, getRun, getRunEvents, listMyRuns } from "@/lib/api"
+import { appendRunMessage, createRun, getRun, getRunEvents, interruptRun, listMyRuns } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { formatRelative, readString, runDisplayStatus } from "@/lib/format"
 import type { ExecutionEvent, ExecutionSummary } from "@/lib/types"
@@ -51,6 +52,7 @@ interface PendingSubmission {
   runID?: string
   rootExecutionID?: string
   eventPosition?: number
+  messageID?: string
 }
 
 interface ConversationTurn {
@@ -79,10 +81,13 @@ function conversationTurns(events: ExecutionEvent[], rootExecutionID: string): C
       }
       return []
     }
-    const nextUser = rootMessages.slice(index + 1).find((candidate) => candidate.type === "message.user_v1")
-    const assistant = rootMessages
+    const assistant = rootMessages.find(
+      (candidate) => candidate.type === "message.assistant_v1" &&
+        readString(candidate.payload, "turn_message_id") === event.entity_id,
+    ) ?? rootMessages
       .slice(index + 1)
-      .find((candidate) => candidate.type === "message.assistant_v1" && (!nextUser || candidate.position < nextUser.position))
+      .find((candidate) => candidate.type === "message.assistant_v1" && !readString(candidate.payload, "turn_message_id"))
+    const nextUser = rootMessages.slice(index + 1).find((candidate) => candidate.type === "message.user_v1")
     const endPosition = assistant?.position ?? nextUser?.position ?? Number.POSITIVE_INFINITY
     const activity = sortedEvents.filter(
       (candidate) => candidate.position > event.position &&
@@ -162,14 +167,15 @@ export function ChatPage() {
   const executionInFlight = rootExecution
     ? ["queued", "running", "waiting"].includes(rootExecution.status)
     : false
-  const executionFailed = rootExecution?.status === "failed"
   const pendingEventPosition = pendingSubmission?.eventPosition
   const pendingRootExecutionID = run?.root_execution_id ?? pendingSubmission?.rootExecutionID
   const pendingTerminalEvent = pendingEventPosition && pendingRootExecutionID
     ? events.find(
         (event) => event.position > pendingEventPosition &&
           (event.type === "message.assistant_v1" || event.type === "execution.failed_v1") &&
-          event.execution_id === pendingRootExecutionID,
+          event.execution_id === pendingRootExecutionID &&
+          (event.type === "execution.failed_v1" || !pendingSubmission?.messageID ||
+            readString(event.payload, "turn_message_id") === pendingSubmission.messageID),
       )
     : undefined
   const pendingMatchesRun = !pendingSubmission?.runID || !runID || pendingSubmission.runID === runID
@@ -181,7 +187,7 @@ export function ChatPage() {
   const currentTurn = turns.at(-1)
   const currentTurnFinished = Boolean(currentTurn?.assistant || currentTurn?.failure)
   const turnActive = Boolean(activePendingSubmission) || executionInFlight || Boolean(currentTurn && !currentTurnFinished)
-  const composerDisabled = !canChat || Boolean(runID && (runQuery.isPending || runQuery.isError || executionFailed)) || turnActive
+  const composerDisabled = !canChat || Boolean(runID && (runQuery.isPending || runQuery.isError))
 
   useEffect(() => {
     if (turns.length === 0 && !optimisticSubmission) return
@@ -216,7 +222,13 @@ export function ChatPage() {
     scope: { id: "chat-send" },
     onMutate: (content) => setPendingSubmission({ content, runID: runID || undefined, rootExecutionID: run?.root_execution_id }),
     onSuccess: ({ runID: targetRunID, rootExecutionID, appended, createdNewRun }, content) => {
-      setPendingSubmission({ content, runID: targetRunID, rootExecutionID, eventPosition: appended.event_position })
+      setPendingSubmission({
+        content,
+        runID: targetRunID,
+        rootExecutionID,
+        eventPosition: appended.event_position,
+        messageID: appended.message.message_id,
+      })
       if (createdNewRun) setEnteringRunID(targetRunID)
       if (runID !== targetRunID) {
         navigate(`/chat/${targetRunID}`, {
@@ -234,6 +246,13 @@ export function ChatPage() {
       setPendingSubmission(null)
       setDraft(content)
     },
+  })
+  const interruptMutation = useMutation({
+    mutationFn: () => interruptRun(runID),
+    onSuccess: () => void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["run", runID] }),
+      queryClient.invalidateQueries({ queryKey: ["run-events", runID] }),
+    ]),
   })
 
   function submitMessage(event: FormEvent<HTMLFormElement>) {
@@ -374,14 +393,15 @@ export function ChatPage() {
                 disabled={composerDisabled}
                 onChange={(event) => setDraft(event.currentTarget.value)}
                 onKeyDown={handleComposerKeyDown}
-                placeholder={executionFailed ? "This run failed — start a new conversation" : turnActive ? "Blix is working…" : "Ask Blix anything…"}
+                placeholder={turnActive ? "Queue another message…" : "Ask Blix anything…"}
                 rows={2}
                 value={draft}
               />
               <div className="composer-footer">
                 <span className="agent-mode"><Sparkles size={14} /> Agent mode</span>
                 <div className="composer-hint">Enter to send · Shift Enter for a new line</div>
-                <button aria-label="Send message" className="send-button" disabled={!draft.trim() || composerDisabled} type="submit"><ArrowUp size={18} /></button>
+                {turnActive && runID && <button aria-label="Stop current turn" className="send-button" disabled={interruptMutation.isPending} onClick={() => interruptMutation.mutate()} type="button"><Square size={15} /></button>}
+                <button aria-label={turnActive ? "Queue message" : "Send message"} className="send-button" disabled={!draft.trim() || composerDisabled} type="submit"><ArrowUp size={18} /></button>
               </div>
             </form>
           )}
