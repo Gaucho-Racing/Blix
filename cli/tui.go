@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image/color"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,9 +29,13 @@ const (
 )
 
 type transcriptBlock struct {
-	kind    transcriptBlockKind
-	content string
-	turn    *turnView
+	kind          transcriptBlockKind
+	content       string
+	turn          *turnView
+	queued        bool
+	queueID       uint64
+	messageID     string
+	eventPosition uint64
 }
 
 type turnView struct {
@@ -63,6 +68,7 @@ type tuiModel struct {
 	activeTurn           *turnView
 	activeTurnID         uint64
 	nextTurnID           uint64
+	nextQueueID          uint64
 	backgroundCursor     uint64
 	backgroundExecutions map[string]bool
 	width                int
@@ -95,7 +101,9 @@ type messageAppendedMsg struct {
 }
 
 type queuedMessageMsg struct {
-	err error
+	queueID uint64
+	result  appendedMessage
+	err     error
 }
 
 type interruptedMsg struct {
@@ -195,7 +203,10 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleMessageAppended(message)
 	case queuedMessageMsg:
 		if message.err != nil {
+			m.removeQueuedBlock(message.queueID)
 			m.appendBlock(transcriptError, message.err.Error(), nil)
+		} else {
+			m.confirmQueuedBlock(message.queueID, message.result.EventPosition)
 		}
 		return m, nil
 	case interruptedMsg:
@@ -282,9 +293,13 @@ func (m *tuiModel) submitInput() tea.Cmd {
 		return m.handleCommand(value)
 	}
 	if m.busy {
-		m.appendBlock(transcriptUser, value, nil)
+		m.nextQueueID++
+		m.blocks = append(m.blocks, transcriptBlock{
+			kind: transcriptUser, content: value, queued: true, queueID: m.nextQueueID,
+		})
+		m.syncTranscript(true)
 		m.input.Reset()
-		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, value)
+		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, m.nextQueueID, value)
 	}
 	if m.current == nil {
 		m.appendBlock(transcriptError, accessMessage(m.caller, m.user), nil)
@@ -431,6 +446,7 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 	for _, event := range message.events {
 		position = event.Position
 		m.backgroundCursor = max(m.backgroundCursor, event.Position)
+		m.reconcileQueuedEvent(event)
 		if event.Type == "agent.call_v1" {
 			var payload agentCallPayload
 			if json.Unmarshal(event.Payload, &payload) == nil && payload.Background {
@@ -492,6 +508,7 @@ func (m *tuiModel) handleBackgroundEvents(message backgroundEventsMsg) tea.Cmd {
 		}
 		position = event.Position
 		m.backgroundCursor = event.Position
+		m.reconcileQueuedEvent(event)
 		switch event.Type {
 		case "agent.call_v1":
 			var payload agentCallPayload
@@ -534,6 +551,89 @@ func (m *tuiModel) appendBlock(kind transcriptBlockKind, content string, turn *t
 	m.syncTranscript(true)
 }
 
+func (m *tuiModel) confirmQueuedBlock(queueID uint64, position uint64) {
+	for index := range m.blocks {
+		if m.blocks[index].queueID == queueID {
+			m.blocks[index].eventPosition = position
+			m.orderQueuedMessages()
+			m.syncTranscript(true)
+			return
+		}
+	}
+}
+
+func (m *tuiModel) orderQueuedMessages() {
+	indices := make([]int, 0)
+	messages := make([]transcriptBlock, 0)
+	for index, block := range m.blocks {
+		if block.queueID != 0 {
+			indices = append(indices, index)
+			messages = append(messages, block)
+		}
+	}
+	sort.SliceStable(messages, func(left, right int) bool {
+		leftPosition := messages[left].eventPosition
+		rightPosition := messages[right].eventPosition
+		if leftPosition == 0 || rightPosition == 0 {
+			return messages[left].queueID < messages[right].queueID
+		}
+		return leftPosition < rightPosition
+	})
+	for index, blockIndex := range indices {
+		m.blocks[blockIndex] = messages[index]
+	}
+}
+
+func (m *tuiModel) removeQueuedBlock(queueID uint64) {
+	for index := range m.blocks {
+		if m.blocks[index].queueID == queueID {
+			m.blocks = append(m.blocks[:index], m.blocks[index+1:]...)
+			return
+		}
+	}
+}
+
+func (m *tuiModel) reconcileQueuedEvent(event executionEvent) {
+	switch event.Type {
+	case "message.user_v1":
+		var payload userMessagePayload
+		if json.Unmarshal(event.Payload, &payload) != nil {
+			return
+		}
+		for index := range m.blocks {
+			block := &m.blocks[index]
+			if block.queued && (block.eventPosition == event.Position ||
+				(block.eventPosition == 0 && block.messageID == "" && block.content == payload.Content)) {
+				block.messageID = event.EntityID
+				block.eventPosition = event.Position
+				m.orderQueuedMessages()
+				return
+			}
+		}
+	case "model.call_v1":
+		var payload modelCallPayload
+		if json.Unmarshal(event.Payload, &payload) != nil || payload.TurnMessageID == "" {
+			return
+		}
+		var cutoff uint64
+		for _, block := range m.blocks {
+			if block.messageID == payload.TurnMessageID {
+				cutoff = block.eventPosition
+				break
+			}
+		}
+		if cutoff == 0 {
+			return
+		}
+		for index := range m.blocks {
+			block := &m.blocks[index]
+			if block.queued && block.eventPosition > 0 && block.eventPosition <= cutoff {
+				block.queued = false
+			}
+		}
+	}
+}
+
 func (m *tuiModel) syncTranscript(forceBottom bool) {
 	if m.width == 0 || m.height == 0 {
 		return
@@ -550,7 +650,11 @@ func (m *tuiModel) renderTranscript() string {
 	for _, block := range m.blocks {
 		switch block.kind {
 		case transcriptUser:
-			parts = append(parts, renderUserMessage(block.content, m.contentWidth()))
+			if block.queued {
+				parts = append(parts, renderQueuedUserMessage(block.content, m.contentWidth()))
+			} else {
+				parts = append(parts, renderUserMessage(block.content, m.contentWidth()))
+			}
 		case transcriptTurn:
 			parts = append(parts, m.renderTurn(block.turn))
 		case transcriptNotice:
@@ -787,10 +891,10 @@ func appendMessageCmd(ctx context.Context, api *client, turnID uint64, current c
 	}
 }
 
-func queueMessageCmd(ctx context.Context, api *client, runID string, content string) tea.Cmd {
+func queueMessageCmd(ctx context.Context, api *client, runID string, queueID uint64, content string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := api.appendMessage(ctx, runID, content)
-		return queuedMessageMsg{err: err}
+		result, err := api.appendMessage(ctx, runID, content)
+		return queuedMessageMsg{queueID: queueID, result: result, err: err}
 	}
 }
 
@@ -866,6 +970,20 @@ func renderUserMessage(content string, width int) string {
 		Background(userSurface).
 		Render("❯  " + content)
 	return renderMessageSurface(message, width, 1)
+}
+
+func renderQueuedUserMessage(content string, width int) string {
+	label := lipgloss.NewStyle().Bold(true).Foreground(softPink).Render("QUEUED")
+	body := lipgloss.NewStyle().Foreground(white).Render("❯  " + content)
+	return lipgloss.NewStyle().
+		BorderLeft(true).
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(softPink).
+		Background(userSurface).
+		Padding(1, 2).
+		MarginLeft(chatInset).
+		Width(width).
+		Render(label + "\n\n" + body)
 }
 
 func renderMessageSurface(content string, width int, verticalPadding int) string {

@@ -91,6 +91,15 @@ type toolCallPayload struct {
 	ToolID string `json:"tool_id"`
 }
 
+type userMessagePayload struct {
+	MessageID string `json:"message_id"`
+	Content   string `json:"content"`
+}
+
+type modelCallPayload struct {
+	TurnMessageID string `json:"turn_message_id"`
+}
+
 type toolResultPayload struct {
 	Status string `json:"status"`
 }
