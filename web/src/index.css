@@ -823,7 +823,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-upload-status .progress-bar { width: 100%; }
 .document-metadata-panel { padding: 1.5rem; }
 .document-metadata-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-.document-metadata-heading h2 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
+.document-metadata-heading .workspace-kicker { margin: 0; }
 .document-metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 2rem; margin: 0; }
 .document-metadata-grid dt { color: var(--muted); font-size: .8rem; }
 .document-metadata-grid dt span { margin-left: .5rem; color: var(--pink); }
@@ -892,7 +892,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-review-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .document-library-filters { margin-bottom: 20px; max-width: 100%; flex-wrap: wrap; }
 .document-pdf-preview { margin-top: 24px; overflow: hidden; }
-.document-pdf-preview > header { padding: 20px 24px; border-bottom: 1px solid var(--border); }
-.document-pdf-preview h2 { font-size: 18px; }
+.document-pdf-preview > header { padding: 24px; border-bottom: 1px solid var(--border); }
+.document-pdf-preview .workspace-kicker { margin: 0; }
 .document-pdf-preview iframe { display: block; width: 100%; height: clamp(420px, 80vh, 1000px); border: 0; background: var(--surface-subtle); }
 .document-pdf-preview > .loading-state, .document-pdf-preview > .runtime-error { padding: 24px; }

@@ -76,7 +76,7 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
   return (
     <section className="panel document-metadata-panel">
       <header className="document-metadata-heading">
-        <h2>Document details</h2>
+        <h2 className="workspace-kicker">DOCUMENT DETAILS</h2>
         {canEdit && !editing && (
           <button
             className="secondary-button"
