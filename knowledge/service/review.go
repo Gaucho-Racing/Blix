@@ -38,6 +38,9 @@ func (s *WikiService) ReviewChangeset(ctx context.Context, id, decision string, 
 		if err != nil {
 			return err
 		}
+		if result.Changeset.PublicationLeaseUntil != nil && result.Changeset.PublicationLeaseUntil.After(time.Now()) {
+			return fmt.Errorf("%w: publication is already running", ErrConflict)
+		}
 		if result.Changeset.Status == model.ChangesetStatusRejected {
 			return nil
 		}

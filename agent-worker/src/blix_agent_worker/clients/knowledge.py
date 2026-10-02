@@ -64,8 +64,14 @@ class KnowledgeClient:
                         "Read the source/record first; do not overwrite evidence or invent a version "
                         "to bypass a conflict."
                     )
+                elif path.endswith("/apply"):
+                    message += (
+                        " Publication may already be running or its base revision may have changed. "
+                        "Inspect this changeset and retry the same ID when appropriate. Do not replace "
+                        "a changeset whose publication outcome is unresolved."
+                    )
                 else:
-                    message += " Read the latest wiki revision and propose a new changeset; do not force the write."
+                    message += " Read the latest wiki revision; do not force the write."
             raise KnowledgeClientError(
                 code, message, retryable=response.status_code == 429 or response.status_code >= 500
             )

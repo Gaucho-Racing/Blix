@@ -14,24 +14,26 @@ const (
 )
 
 type Changeset struct {
-	ID              string     `json:"changeset_id" gorm:"primaryKey"`
-	Origin          string     `json:"origin" gorm:"index;not null;default:'agent'"`
-	ConversationID  string     `json:"conversation_id" gorm:"index;not null"`
-	SessionID       string     `json:"session_id" gorm:"index;not null"`
-	SeasonSlug      string     `json:"season_slug" gorm:"index;not null"`
-	Type            string     `json:"type" gorm:"index;not null"`
-	Status          string     `json:"status" gorm:"index;not null"`
-	Summary         string     `json:"summary" gorm:"type:text;not null"`
-	BaseCommitSHA   string     `json:"base_commit_sha" gorm:"size:64;not null"`
-	ResultCommitSHA string     `json:"result_commit_sha" gorm:"size:64;not null"`
-	Error           string     `json:"error" gorm:"type:text;not null"`
-	ReviewDecision  string     `json:"review_decision" gorm:"not null;default:''"`
-	ReviewedBy      string     `json:"reviewed_by" gorm:"not null;default:''"`
-	ReviewNote      string     `json:"review_note" gorm:"type:text;not null;default:''"`
-	ReviewedAt      *time.Time `json:"reviewed_at,omitempty"`
-	CommittedAt     *time.Time `json:"committed_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	PublicationOwner      string     `json:"-" gorm:"not null;default:''"`
+	PublicationLeaseUntil *time.Time `json:"publication_lease_until,omitempty"`
+	ID                    string     `json:"changeset_id" gorm:"primaryKey"`
+	Origin                string     `json:"origin" gorm:"index;not null;default:'agent'"`
+	ConversationID        string     `json:"conversation_id" gorm:"index;not null"`
+	SessionID             string     `json:"session_id" gorm:"index;not null"`
+	SeasonSlug            string     `json:"season_slug" gorm:"index;not null"`
+	Type                  string     `json:"type" gorm:"index;not null"`
+	Status                string     `json:"status" gorm:"index;not null"`
+	Summary               string     `json:"summary" gorm:"type:text;not null"`
+	BaseCommitSHA         string     `json:"base_commit_sha" gorm:"size:64;not null"`
+	ResultCommitSHA       string     `json:"result_commit_sha" gorm:"size:64;not null"`
+	Error                 string     `json:"error" gorm:"type:text;not null"`
+	ReviewDecision        string     `json:"review_decision" gorm:"not null;default:''"`
+	ReviewedBy            string     `json:"reviewed_by" gorm:"not null;default:''"`
+	ReviewNote            string     `json:"review_note" gorm:"type:text;not null;default:''"`
+	ReviewedAt            *time.Time `json:"reviewed_at,omitempty"`
+	CommittedAt           *time.Time `json:"committed_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt             time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (Changeset) TableName() string {

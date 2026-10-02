@@ -361,51 +361,80 @@ func (s *WikiService) apply(ctx context.Context, id string) (ChangesetDetails, e
 }
 
 func (s *WikiService) applyReviewed(ctx context.Context, id string, review *ReviewChangesetInput) (ChangesetDetails, error) {
-	for _, publish := range []bool{false, true} {
-		var operationError error
-		err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			result, err := s.lockChangeset(ctx, tx, id)
-			if err != nil {
-				return err
-			}
-			changeset := result.Changeset
-			if changeset.Status == model.ChangesetStatusRejected {
-				return fmt.Errorf("%w: rejected changesets cannot be published", ErrConflict)
-			}
-			if changeset.Status == model.ChangesetStatusCommitted {
-				return nil
-			}
-			updates := map[string]any{}
-			if review != nil && changeset.ReviewDecision != "approved" {
-				updates = reviewUpdates(*review, "approved")
-			}
-			if publish {
-				operationError = s.wiki.Publish(ctx, changeset.BaseCommitSHA, changeset.ResultCommitSHA)
-				if operationError == nil {
-					updates["status"], updates["committed_at"], updates["error"] = model.ChangesetStatusCommitted, time.Now().UTC(), ""
-				}
-			} else if changeset.ResultCommitSHA == "" {
-				edits := make([]repository.Edit, 0, len(result.Files))
-				for _, file := range result.Files {
-					edits = append(edits, repository.Edit{Operation: file.Operation, Path: file.Path, Content: file.Content})
-				}
-				var sha string
-				sha, operationError = s.wiki.Prepare(ctx, changeset.BaseCommitSHA, changeset.ID, changeset.Summary, edits, changeset.CreatedAt)
-				if operationError == nil {
-					updates["result_commit_sha"], updates["status"], updates["error"] = sha, model.ChangesetStatusPrepared, ""
-				}
-			}
-			if operationError != nil {
-				updates["status"], updates["error"] = model.ChangesetStatusFailed, operationError.Error()
-			}
-			if len(updates) == 0 {
-				return nil
-			}
-			return tx.Model(&model.Changeset{}).Where("id = ?", id).Updates(updates).Error
-		})
-		if err != nil || operationError != nil {
-			return ChangesetDetails{}, errors.Join(err, operationError)
+	owner := identifier.New(identifier.Changeset)
+	var result ChangesetDetails
+	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		result, err = s.lockChangeset(ctx, tx, id)
+		if err != nil {
+			return err
 		}
+		changeset := result.Changeset
+		if changeset.Status == model.ChangesetStatusRejected {
+			return fmt.Errorf("%w: rejected changesets cannot be published", ErrConflict)
+		}
+		if changeset.Status == model.ChangesetStatusCommitted {
+			return nil
+		}
+		if changeset.PublicationLeaseUntil != nil && changeset.PublicationLeaseUntil.After(time.Now()) {
+			return fmt.Errorf("%w: publication is already running", ErrConflict)
+		}
+		updates := map[string]any{"publication_owner": owner, "publication_lease_until": time.Now().Add(2 * time.Minute)}
+		if review != nil && changeset.ReviewDecision != "approved" {
+			for key, value := range reviewUpdates(*review, "approved") {
+				updates[key] = value
+			}
+		}
+		return tx.Model(&model.Changeset{}).Where("id = ?", id).Updates(updates).Error
+	})
+	if err != nil || result.Changeset.Status == model.ChangesetStatusCommitted {
+		return result, err
+	}
+	persist := func(updates map[string]any) error {
+		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		saved := s.database.WithContext(saveCtx).Model(&model.Changeset{}).
+			Where("id = ? AND publication_owner = ? AND publication_lease_until > ?", id, owner, time.Now()).Updates(updates)
+		if saved.Error != nil {
+			return saved.Error
+		}
+		if saved.RowsAffected != 1 {
+			return fmt.Errorf("%w: publication lease expired", ErrConflict)
+		}
+		return nil
+	}
+	fail := func(operationError error) (ChangesetDetails, error) {
+		saveError := persist(map[string]any{"status": model.ChangesetStatusFailed, "error": operationError.Error(), "publication_owner": "", "publication_lease_until": nil})
+		return ChangesetDetails{}, errors.Join(operationError, saveError)
+	}
+	changeset := result.Changeset
+	if changeset.ResultCommitSHA == "" {
+		edits := make([]repository.Edit, 0, len(result.Files))
+		for _, file := range result.Files {
+			edits = append(edits, repository.Edit{Operation: file.Operation, Path: file.Path, Content: file.Content})
+		}
+		operationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		sha, operationError := s.wiki.Prepare(operationCtx, changeset.BaseCommitSHA, changeset.ID, changeset.Summary, edits, changeset.CreatedAt)
+		cancel()
+		if operationError != nil {
+			return fail(operationError)
+		}
+		if err := persist(map[string]any{"result_commit_sha": sha, "status": model.ChangesetStatusPrepared, "error": ""}); err != nil {
+			return ChangesetDetails{}, err
+		}
+		changeset.ResultCommitSHA = sha
+	}
+	operationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	operationError := s.wiki.Publish(operationCtx, changeset.BaseCommitSHA, changeset.ResultCommitSHA)
+	cancel()
+	if operationError != nil {
+		return fail(operationError)
+	}
+	if err := persist(map[string]any{"status": model.ChangesetStatusCommitted, "committed_at": time.Now().UTC(), "error": "", "publication_owner": "", "publication_lease_until": nil}); err != nil {
+		return ChangesetDetails{}, err
+	}
+	if s.index != nil {
+		s.index.Wake()
 	}
 	return s.GetChangeset(ctx, id)
 }
