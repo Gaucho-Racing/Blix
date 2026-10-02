@@ -94,6 +94,7 @@ services:
       - ./knowledge:/app
       - knowledge_gopath:/go
       - knowledge_wiki:/data/wiki
+      - knowledge_documents:/data/documents
     depends_on:
       db:
         condition: service_healthy
@@ -106,6 +107,7 @@ services:
       DATABASE_USER: postgres
       DATABASE_PASSWORD: password
       DATABASE_NAME: blix
+      DOCUMENT_STORAGE_PATH: /data/documents
       WIKI_REPOSITORY_URL: https://github.com/gaucho-racing/blixwiki.git
       WIKI_REPOSITORY_BRANCH: main
       WIKI_REPOSITORY_PATH: /data/wiki
@@ -222,6 +224,7 @@ services:
     image: emqx/nanomq:0.25.6
 
 volumes:
+  knowledge_documents:
   agent_worker_1_venv:
   agent_worker_2_venv:
   agent_worker_3_venv:

@@ -5,6 +5,7 @@ import ulid "github.com/gaucho-racing/ulid-go"
 type Prefix string
 
 const (
+	Document           Prefix = "document"
 	Source             Prefix = "source"
 	SourceIdentity     Prefix = "sourceidentity"
 	SourceRecord       Prefix = "sourcerecord"

@@ -40,6 +40,8 @@ type wikiRepository interface {
 
 type Citation struct {
 	SourceRecordID string    `json:"source_record_id"`
+	DocumentID     string    `json:"document_id,omitempty"`
+	PDFPage        int       `json:"pdf_page,omitempty"`
 	SourceName     string    `json:"source_name"`
 	RecordType     string    `json:"record_type"`
 	ExternalURL    string    `json:"external_url"`
@@ -65,6 +67,7 @@ type ChangesetDetails struct {
 	Changeset       model.Changeset       `json:"changeset"`
 	Files           []model.ChangesetFile `json:"files"`
 	SourceRecordIDs []string              `json:"source_record_ids"`
+	Citations       map[string]Citation   `json:"citations"`
 }
 
 func NewWikiService(database *gorm.DB, wiki wikiRepository) *WikiService {
@@ -89,6 +92,14 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 	var records []model.SourceRecord
 	if err := s.database.WithContext(ctx).Omit("content", "metadata").Where("id IN ?", ids).Find(&records).Error; err != nil {
 		return nil, err
+	}
+	var documentPages []model.DocumentPage
+	if err := s.database.WithContext(ctx).Where("source_record_id IN ?", ids).Find(&documentPages).Error; err != nil {
+		return nil, err
+	}
+	pageByRecord := make(map[string]model.DocumentPage, len(documentPages))
+	for _, page := range documentPages {
+		pageByRecord[page.SourceRecordID] = page
 	}
 	sourceIDs := make([]string, 0, len(records))
 	identityIDs := make([]string, 0, len(records))
@@ -128,6 +139,10 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 			if identity.EntityID != nil {
 				citation.AuthorEntityID = *identity.EntityID
 			}
+		}
+		if page, ok := pageByRecord[record.ID]; ok {
+			citation.DocumentID = page.DocumentID
+			citation.PDFPage = page.Number
 		}
 		citations[record.ID] = citation
 	}
@@ -271,6 +286,7 @@ func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDet
 	for _, link := range links {
 		result.SourceRecordIDs = append(result.SourceRecordIDs, link.SourceRecordID)
 	}
+	result.Citations, err = s.resolveCitations(ctx, []string{strings.Join(result.SourceRecordIDs, " ")})
 	return result, err
 }
 

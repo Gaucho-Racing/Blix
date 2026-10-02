@@ -17,18 +17,21 @@ import (
 )
 
 type Handler struct {
-	sources *service.SourceService
-	wiki    *repository.Wiki
-	pages   *service.WikiService
+	sources   *service.SourceService
+	wiki      *repository.Wiki
+	pages     *service.WikiService
+	documents *service.DocumentService
 }
 
-func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, auth *service.AuthService) error {
+func Run(ctx context.Context, port string, production bool, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, documents *service.DocumentService, auth *service.AuthService) error {
 	router := InitializeRouter(production)
-	InitializeRoutes(router, sources, wiki, pages, auth)
+	InitializeRoutes(router, sources, wiki, pages, documents, auth)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       90 * time.Second,
+		WriteTimeout:      120 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
 	go func() {
@@ -59,8 +62,18 @@ func InitializeRouter(production bool) *gin.Engine {
 	return gin.Default()
 }
 
-func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, auth *service.AuthService) {
-	handler := &Handler{sources: sources, wiki: wiki, pages: pages}
+func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, documents *service.DocumentService, auth *service.AuthService) {
+	handler := &Handler{sources: sources, wiki: wiki, pages: pages, documents: documents}
+	uploads := router.Group("/v1/documents", RequireAuthentication(auth), RequireGroup("BlixUsers"))
+	uploads.GET("", handler.ListDocuments)
+	uploads.POST("", handler.ImportDocument)
+	uploads.GET("/:documentID", handler.GetDocument)
+	uploads.GET("/:documentID/pages/:number", handler.GetDocumentPage)
+	uploads.GET("/:documentID/file", handler.GetDocumentFile)
+	reads := router.Group("/v1/wiki", RequireAuthentication(auth), RequireGroup("BlixUsers"))
+	reads.GET("/search", handler.SearchWiki)
+	reads.GET("/page", handler.ReadWikiPage)
+	reads.GET("/changesets/:changesetID", handler.GetWikiChangeset)
 	router.GET("/ping", Ping)
 	reviews := router.Group("/v1/changesets", RequireAuthentication(auth), RequireGroup("BlixAdmins"))
 	reviews.GET("", handler.ListWikiChangesets)

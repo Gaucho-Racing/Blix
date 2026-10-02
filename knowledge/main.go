@@ -55,5 +55,6 @@ func run(configuration config.Config) error {
 		}
 	}
 	auth := service.NewAuthService(sentinelClient)
-	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages, auth)
+	documents := service.NewDocumentService(db, configuration.DocumentStoragePath, service.PopplerExtractor{})
+	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages, documents, auth)
 }

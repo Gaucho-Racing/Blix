@@ -19,6 +19,7 @@ type Config struct {
 	WikiRepositoryURL    string
 	WikiRepositoryBranch string
 	WikiRepositoryPath   string
+	DocumentStoragePath  string
 	GitHubAppID          string
 	GitHubInstallationID string
 	GitHubPrivateKey     string
@@ -46,6 +47,7 @@ func Load() (Config, error) {
 		WikiRepositoryURL:    value("WIKI_REPOSITORY_URL", "https://github.com/gaucho-racing/blixwiki.git"),
 		WikiRepositoryBranch: value("WIKI_REPOSITORY_BRANCH", "main"),
 		WikiRepositoryPath:   value("WIKI_REPOSITORY_PATH", ".data/wiki"),
+		DocumentStoragePath:  value("DOCUMENT_STORAGE_PATH", ".data/documents"),
 		GitHubAppID:          value("GITHUB_APP_ID", ""),
 		GitHubInstallationID: value("GITHUB_APP_INSTALLATION_ID", ""),
 		GitHubPrivateKey:     value("GITHUB_APP_PRIVATE_KEY", ""),
