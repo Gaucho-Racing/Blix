@@ -16,7 +16,7 @@ export function DocumentPDFPreview({ document }: { document: TeamDocument }) {
   return (
     <section className="panel document-pdf-preview">
       <header>
-        <h2 className="workspace-kicker">DOCUMENT PREVIEW</h2>
+        <h2>Document preview</h2>
       </header>
       {pdf.isPending ? (
         <p className="loading-state" role="status">
