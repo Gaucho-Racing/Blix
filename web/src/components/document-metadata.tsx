@@ -68,6 +68,8 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
       setEditing(false)
     },
   })
+  if (!extracted && active) return null
+
   return (
     <section className="panel document-metadata-panel">
       <header className="document-metadata-heading">
