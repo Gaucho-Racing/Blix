@@ -5,7 +5,23 @@ import type { WikiChangeset } from "@/lib/knowledge"
 export type DocumentReviewStatus =
   "pending" | "in_review" | "ingested" | "rejected"
 
+export interface DocumentStage {
+  name:
+    | "uploading"
+    | "extracting"
+    | "indexing"
+    | "reading"
+    | "identifying_metadata"
+    | "reconciling"
+  status: "waiting" | "running" | "completed" | "failed" | "cancelled"
+  generation: number
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
+
 export interface TeamDocument {
+  stages: DocumentStage[]
   review_status: DocumentReviewStatus
   reviewed_by: string
   review_note: string
@@ -18,7 +34,9 @@ export interface TeamDocument {
     | "upload_failed"
     | "queued"
     | "extracting"
+    | "indexing"
     | "reading"
+    | "identifying_metadata"
     | "reconciling"
     | "ready"
     | "partial"
@@ -189,16 +207,24 @@ export async function getDocumentChunk(
   ).data
 }
 export const documentProcessing = (status: TeamDocument["status"]) =>
-  ["queued", "extracting", "reading", "reconciling", "cancelling"].includes(
-    status,
-  )
+  [
+    "queued",
+    "extracting",
+    "indexing",
+    "reading",
+    "identifying_metadata",
+    "reconciling",
+    "cancelling",
+  ].includes(status)
 export const documentStatusLabel = (status: TeamDocument["status"]) =>
   ({
     uploading: "Upload pending",
     upload_failed: "Upload failed",
     queued: "Queued",
     extracting: "Extracting text",
+    indexing: "Making document searchable",
     reading: "Reading document",
+    identifying_metadata: "Identifying document details",
     reconciling: "Drafting wiki changes",
     ready: "Reading complete",
     partial: "Reading complete · coverage gaps",

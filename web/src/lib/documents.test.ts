@@ -96,6 +96,8 @@ describe("document upload handoff", () => {
 
   it("polls only active processing stages and sends retries to the ingestion endpoint", async () => {
     expect(documentProcessing("reading")).toBe(true)
+    expect(documentProcessing("indexing")).toBe(true)
+    expect(documentProcessing("identifying_metadata")).toBe(true)
     expect(documentProcessing("ready")).toBe(false)
     expect(documentProcessing("failed")).toBe(false)
     expect(documentStatusLabel("partial")).toContain("coverage gaps")

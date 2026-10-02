@@ -126,6 +126,10 @@ func (s *SourceService) IngestSourceRecord(
 	sourceID string,
 	input IngestSourceRecordInput,
 ) (IngestedSourceRecord, error) {
+	return s.ingestSourceRecord(ctx, sourceID, input, true)
+}
+
+func (s *SourceService) ingestSourceRecord(ctx context.Context, sourceID string, input IngestSourceRecordInput, index bool) (IngestedSourceRecord, error) {
 	if !identifier.IsValid(sourceID, identifier.Source) {
 		return IngestedSourceRecord{}, fmt.Errorf("%w: source_id is invalid", ErrInvalid)
 	}
@@ -201,7 +205,10 @@ func (s *SourceService) IngestSourceRecord(
 		}
 		if result.RowsAffected == 1 {
 			ingested = IngestedSourceRecord{Record: record, Created: true}
-			return indexSourceRecord(tx, record)
+			if index {
+				return indexSourceRecord(tx, record)
+			}
+			return nil
 		}
 		var existing model.SourceRecord
 		if err := tx.Where(
@@ -216,7 +223,10 @@ func (s *SourceService) IngestSourceRecord(
 			return fmt.Errorf("%w: immutable source record version has different content", ErrConflict)
 		}
 		ingested = IngestedSourceRecord{Record: existing, Created: false}
-		return indexSourceRecord(tx, existing)
+		if index {
+			return indexSourceRecord(tx, existing)
+		}
+		return nil
 	})
 	if err != nil {
 		return IngestedSourceRecord{}, err

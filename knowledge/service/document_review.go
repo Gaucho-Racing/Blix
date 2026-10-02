@@ -95,6 +95,8 @@ func (s *DocumentService) Review(ctx context.Context, id, decision string, input
 		}
 		updates := map[string]any{"review_status": model.DocumentReviewRejected, "reviewed_by": input.Caller.EntityID, "review_note": strings.TrimSpace(input.Note), "reviewed_at": time.Now().UTC(), "generation": doc.Generation + 1}
 		if documentIsProcessing(doc.Status) || doc.Status == "uploading" {
+			stopDocumentStage(&doc, "cancelled")
+			updates["stages"] = doc.Stages
 			updates["status"] = "cancelled"
 			if doc.TaskID != "" {
 				updates["status"] = "cancelling"

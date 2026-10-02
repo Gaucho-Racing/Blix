@@ -49,12 +49,14 @@ func (s *DocumentService) InitiateUpload(ctx context.Context, filename string, c
 	}
 	callerData, _ := json.Marshal(map[string]string{"entity_id": caller.EntityID, "entity_type": caller.EntityType, "user_id": caller.UserID})
 	doc := model.Document{ID: identifier.New(identifier.Document), Title: title, Filename: filename, Tags: datatypes.NewJSONSlice([]string{}), UploadedBy: caller.EntityID, Status: "uploading", Objective: objective, Caller: callerData, Generation: 1}
+	setDocumentStage(&doc, "uploading", "running")
 	if err := s.db.WithContext(ctx).Create(&doc).Error; err != nil {
 		return DocumentUpload{}, err
 	}
 	upload, err := s.depot.Initiate(ctx, doc.Filename, doc.ID)
 	if err != nil {
-		_ = s.db.WithContext(ctx).Model(&doc).Updates(map[string]any{"status": "upload_failed", "error": err.Error()}).Error
+		setDocumentStage(&doc, "uploading", "failed")
+		_ = saveDocumentProgress(s.db.WithContext(ctx).Where("review_status = ? AND status = ?", model.DocumentReviewPending, "uploading"), &doc, map[string]any{"status": "upload_failed", "error": err.Error()})
 		return DocumentUpload{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	doc.DepotFileID = upload.File.ID
@@ -85,7 +87,23 @@ func (s *DocumentService) CompleteUpload(ctx context.Context, id, owner string) 
 	if file.ID != doc.DepotFileID || file.Status != "ACTIVE" || file.SizeBytes < 5 || file.SizeBytes > MaxDocumentBytes {
 		return details, fmt.Errorf("%w: upload a PDF up to 20 MiB", ErrInvalid)
 	}
-	err = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND status = ? AND review_status = ? AND generation = ?", id, "uploading", model.DocumentReviewPending, doc.Generation).Updates(map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""}).Error
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Document
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", id).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if current.ReviewStatus == model.DocumentReviewRejected {
+			return nil
+		}
+		if current.ReviewStatus != model.DocumentReviewPending || current.Generation != doc.Generation {
+			return ErrConflict
+		}
+		if current.Status != "uploading" {
+			return nil
+		}
+		setDocumentStage(&current, "uploading", "completed")
+		return saveDocumentProgress(tx, &current, map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""})
+	})
 	if err != nil {
 		return details, err
 	}
@@ -110,7 +128,7 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 		return nil
 	}
 	var docs []model.Document
-	if err := s.db.WithContext(ctx).Where("status IN ?", []string{"queued", "extracting", "reading", "reconciling", "cancelling"}).Order("created_at").Limit(100).Find(&docs).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("status IN ?", documentProcessingStatuses).Order("created_at").Limit(100).Find(&docs).Error; err != nil {
 		return err
 	}
 	for _, doc := range docs {
@@ -182,7 +200,17 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				message = "The executor finished without completing document ingestion."
 			}
 			if status != "" {
-				if err := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status IN ?", doc.ID, doc.Generation, []string{"queued", "extracting", "reading", "reconciling", "cancelling"}).Updates(map[string]any{"status": status, "error": message}).Error; err != nil {
+				if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+					var current model.Document
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", doc.ID).Error; err != nil {
+						return err
+					}
+					if current.Generation != doc.Generation || current.TaskID != doc.TaskID || !documentIsProcessing(current.Status) {
+						return nil
+					}
+					stopDocumentStage(&current, status)
+					return saveDocumentProgress(tx, &current, map[string]any{"status": status, "error": message})
+				}); err != nil {
 					return err
 				}
 			}
@@ -207,7 +235,7 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 			if doc.Status == "cancelled" || doc.Status == "cancelling" {
 				return nil
 			}
-			if doc.Status != "queued" && doc.Status != "extracting" && doc.Status != "reading" && doc.Status != "reconciling" {
+			if !documentIsProcessing(doc.Status) {
 				return ErrConflict
 			}
 			return tx.Model(&doc).Update("status", "cancelling").Error
@@ -215,7 +243,8 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 			if doc.Status != "failed" && doc.Status != "cancelled" {
 				return ErrConflict
 			}
-			return tx.Model(&doc).Updates(map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "conversation_id": "", "error": ""}).Error
+			resetUnfinishedDocumentStages(&doc)
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "conversation_id": "", "error": ""})
 		default:
 			return ErrInvalid
 		}
@@ -299,21 +328,27 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 	if err != nil {
 		return details, err
 	}
+	prepared := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
 			return err
 		}
-		if len(details.Chunks) > 0 {
+		var count int64
+		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ?", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			prepared = true
 			return nil
 		}
-		return tx.Model(&doc).Update("status", "extracting").Error
+		return startDocumentStage(tx, &doc, "extracting")
 	})
 	if err != nil {
 		return details, err
 	}
-	if len(details.Chunks) > 0 {
-		return s.Get(ctx, id)
+	if prepared {
+		return s.prepareSearch(ctx, id, e)
 	}
 	select {
 	case s.slots <- struct{}{}:
@@ -374,7 +409,7 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 		pages := []model.DocumentPage{}
 		for i, content := range text {
 			metadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash})
-			record, err := sources.IngestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"})
+			record, err := sources.ingestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"}, false)
 			if err != nil {
 				return err
 			}
@@ -387,10 +422,64 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 		if err := tx.Create(&chunks).Error; err != nil {
 			return err
 		}
-		return tx.Model(&doc).Updates(map[string]any{"sha256": hash, "source_id": source.ID, "page_count": len(pages), "size_bytes": len(data), "status": "reading", "error": ""}).Error
+		setDocumentStage(&doc, "extracting", "completed")
+		setDocumentStage(&doc, "indexing", "running")
+		return saveDocumentProgress(tx, &doc, map[string]any{"sha256": hash, "source_id": source.ID, "page_count": len(pages), "size_bytes": len(data), "status": "indexing", "error": ""})
 	})
 	if err != nil {
 		return details, err
+	}
+	return s.prepareSearch(ctx, id, e)
+}
+
+func (s *DocumentService) prepareSearch(ctx context.Context, id string, e DocumentExecution) (DocumentDetails, error) {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		doc, err := s.lockedExecution(ctx, tx, id, e)
+		if err != nil {
+			return err
+		}
+		return startDocumentStage(tx, &doc, "indexing")
+	})
+	if err != nil {
+		return DocumentDetails{}, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		doc, err := s.lockedExecution(ctx, tx, id, e)
+		if err != nil {
+			return err
+		}
+		if !documentStageComplete(doc, "indexing") {
+			var records []model.SourceRecord
+			if err := tx.Where("id IN (SELECT source_record_id FROM knowledge_document_page WHERE document_id = ?)", id).Find(&records).Error; err != nil {
+				return err
+			}
+			if len(records) == 0 {
+				return ErrConflict
+			}
+			for _, record := range records {
+				if err := indexSourceRecord(tx, record); err != nil {
+					return err
+				}
+			}
+			setDocumentStage(&doc, "indexing", "completed")
+		}
+		var remaining int64
+		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
+			return err
+		}
+		if remaining > 0 {
+			setDocumentStage(&doc, "reading", "running")
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "reading", "error": ""})
+		}
+		setDocumentStage(&doc, "reading", "completed")
+		if len(doc.ExtractedMetadata) == 0 {
+			setDocumentStage(&doc, "identifying_metadata", "running")
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "identifying_metadata", "error": ""})
+		}
+		return saveDocumentProgress(tx, &doc, map[string]any{})
+	})
+	if err != nil {
+		return DocumentDetails{}, err
 	}
 	return s.Get(ctx, id)
 }
@@ -495,7 +584,15 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 		if err := tx.Create(&revision).Error; err != nil {
 			return err
 		}
-		return tx.Model(&doc).Update("status", "reading").Error
+		var total int64
+		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ?", id).Count(&total).Error; err != nil {
+			return err
+		}
+		if completed+1 == total {
+			setDocumentStage(&doc, "reading", "completed")
+			return startDocumentStage(tx, &doc, "identifying_metadata")
+		}
+		return startDocumentStage(tx, &doc, "reading")
 	})
 	if err != nil {
 		return DocumentDetails{}, err
@@ -548,8 +645,11 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 		updates := map[string]any{"status": status, "error": message}
 		if outcome != "blocked" {
 			updates["review_status"] = model.DocumentReviewInReview
+			setDocumentStage(&doc, "reconciling", "completed")
+		} else {
+			stopDocumentStage(&doc, "failed")
 		}
-		return tx.Model(&doc).Updates(updates).Error
+		return saveDocumentProgress(tx, &doc, updates)
 	})
 	if err != nil {
 		return DocumentDetails{}, err
@@ -572,7 +672,7 @@ func (s *DocumentService) Reconcile(ctx context.Context, id string, e DocumentEx
 		if remaining > 0 {
 			return ErrConflict
 		}
-		return tx.Model(&doc).Update("status", "reconciling").Error
+		return startDocumentStage(tx, &doc, "reconciling")
 	})
 	if err != nil {
 		return DocumentDetails{}, err
@@ -600,6 +700,8 @@ func (s *DocumentService) ReadOriginal(ctx context.Context, id string) ([]byte, 
 	return data, doc.Filename, nil
 }
 
+var documentProcessingStatuses = []string{"queued", "extracting", "indexing", "reading", "identifying_metadata", "reconciling", "cancelling"}
+
 func documentIsProcessing(status string) bool {
-	return status == "queued" || status == "extracting" || status == "reading" || status == "reconciling" || status == "cancelling"
+	return slices.Contains(documentProcessingStatuses, status)
 }

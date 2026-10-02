@@ -104,6 +104,9 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if completed.Document.Status != "queued" || completed.Document.ReviewStatus != model.DocumentReviewPending || extractor.calls != 0 {
 		t.Fatal("completion must queue without extraction")
 	}
+	if !documentStageComplete(completed.Document, "uploading") || completed.Document.Stages[0].StartedAt == nil || completed.Document.Stages[0].CompletedAt == nil {
+		t.Fatal("upload progress was not persisted")
+	}
 	if _, err := service.CompleteUpload(ctx, docID, caller.EntityID); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +132,15 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	}
 	if len(prepared.Chunks) < 2 || len(prepared.Pages) != 3 || extractor.calls != 1 {
 		t.Fatalf("manifest: %+v", prepared)
+	}
+	for _, name := range []string{"uploading", "extracting", "indexing"} {
+		if !documentStageComplete(prepared.Document, name) {
+			t.Fatalf("preparation did not complete %s", name)
+		}
+	}
+	extractionCompleted := *prepared.Document.Stages[1].CompletedAt
+	if prepared.Document.Stages[3].Status != "running" || prepared.Document.Stages[4].Status != "waiting" {
+		t.Fatal("reading and metadata phases are not distinct")
 	}
 	first, err := service.ReadChunk(ctx, docID, 1)
 	if err != nil {
@@ -175,6 +187,9 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil || cancelled.Document.Status != "cancelled" || cancelled.Document.ReviewStatus != model.DocumentReviewPending {
 		t.Fatalf("cancel status: %+v %v", cancelled, err)
 	}
+	if cancelled.Document.Stages[3].Status != "cancelled" || !documentStageComplete(cancelled.Document, "indexing") {
+		t.Fatal("cancellation lost the completed stages or stopped the wrong stage")
+	}
 	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign metadata editor accepted: %v", err)
 	}
@@ -206,6 +221,9 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if extractor.calls != 1 {
 		t.Fatal("retry repeated extraction")
 	}
+	if !resumed.Document.Stages[1].CompletedAt.Equal(extractionCompleted) || resumed.Document.Stages[3].Status != "running" || resumed.Document.Stages[3].Generation != 2 {
+		t.Fatal("retry did not preserve extraction and resume reading")
+	}
 	for _, chunk := range resumed.Chunks[1:] {
 		result, err := service.ReadChunk(ctx, docID, chunk.Number)
 		if err != nil {
@@ -224,6 +242,10 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		if _, err := service.SaveChunk(ctx, docID, chunk.Number, save); err != nil {
 			t.Fatal(err)
 		}
+	}
+	readingComplete, err := service.Get(ctx, docID)
+	if err != nil || readingComplete.Document.Status != "identifying_metadata" || !documentStageComplete(readingComplete.Document, "reading") || readingComplete.Document.Stages[4].Status != "running" {
+		t.Fatalf("metadata phase: %+v %v", readingComplete.Document, err)
 	}
 	invalidMetadata := automatic
 	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
@@ -254,6 +276,11 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	final, err := service.Finish(ctx, docID, execution, "no_changes")
 	if err != nil || final.Document.Status != "no_changes" || final.Document.ReviewStatus != model.DocumentReviewInReview {
 		t.Fatalf("completion: %+v %v", final, err)
+	}
+	for _, stage := range final.Document.Stages {
+		if stage.Status != "completed" || stage.StartedAt == nil || stage.CompletedAt == nil || stage.CompletedAt.Before(*stage.StartedAt) {
+			t.Fatalf("invalid completed timeline: %+v", stage)
+		}
 	}
 	cleared := ""
 	edited, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 2, Publisher: &cleared})

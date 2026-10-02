@@ -183,7 +183,8 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 				updates[field] = value
 			}
 		}
-		return tx.Model(&doc).Updates(updates).Error
+		setDocumentStage(&doc, "identifying_metadata", "completed")
+		return saveDocumentProgress(tx, &doc, updates)
 	})
 	if err != nil {
 		return DocumentDetails{}, err

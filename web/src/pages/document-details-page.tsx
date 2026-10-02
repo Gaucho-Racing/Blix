@@ -29,6 +29,7 @@ import { errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
 import { StatusBadge } from "@/components/status-badge"
 import { DocumentTags } from "@/components/document-tags"
+import { DocumentIngestionTimeline } from "@/components/document-ingestion-timeline"
 
 export function DocumentDetailsPage() {
   const { documentID = "" } = useParams()
@@ -143,74 +144,80 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
   })
   return (
     <section className="panel ingestion-panel">
-      <header className="workspace-toolbar">
-        <div>
-          <span className="workspace-kicker">DOCUMENT INGESTION</span>
-          <h2>
-            {active && <LoaderCircle className="spin" size={15} />}{" "}
-            {documentStatusLabel(document.status)}
-          </h2>
-        </div>
-        <div className="ingestion-actions">
-          {canControl && active && document.status !== "cancelling" && (
-            <button
-              className="secondary-button"
-              disabled={control.isPending}
-              onClick={() => control.mutate("cancel")}
-              type="button"
-            >
-              Cancel processing
-            </button>
+      <div className="ingestion-status-layout">
+        <div className="ingestion-status-content">
+          <header className="workspace-toolbar">
+            <div>
+              <span className="workspace-kicker">DOCUMENT INGESTION</span>
+              <h2>
+                {active && <LoaderCircle className="spin" size={15} />}{" "}
+                {documentStatusLabel(document.status)}
+              </h2>
+            </div>
+            <div className="ingestion-actions">
+              {canControl && active && document.status !== "cancelling" && (
+                <button
+                  className="secondary-button"
+                  disabled={control.isPending}
+                  onClick={() => control.mutate("cancel")}
+                  type="button"
+                >
+                  Cancel processing
+                </button>
+              )}
+              {canControl &&
+                ["failed", "cancelled"].includes(document.status) && (
+                  <button
+                    className="primary-button"
+                    disabled={control.isPending}
+                    onClick={() => control.mutate("retry")}
+                    type="button"
+                  >
+                    Retry unfinished work
+                  </button>
+                )}
+              {canControl && document.status === "uploading" && (
+                <button
+                  className="secondary-button"
+                  disabled={control.isPending}
+                  onClick={() => control.mutate("complete")}
+                  type="button"
+                >
+                  Finish uploaded file
+                </button>
+              )}
+            </div>
+          </header>
+          <p className="ingestion-stage" role="status">
+            {ingestionStage(details)}
+          </p>
+          {chunks.length > 0 && (
+            <div className="document-progress">
+              <ProgressBar
+                max={chunks.length}
+                value={completed.length}
+                label="Document reading progress"
+                valueText={`${completed.length} of ${chunks.length} reading chunks saved`}
+              />
+              <span>
+                {completed.length} / {chunks.length} reading chunks saved ·{" "}
+                {document.page_count} PDF pages
+              </span>
+            </div>
           )}
-          {canControl && ["failed", "cancelled"].includes(document.status) && (
-            <button
-              className="primary-button"
-              disabled={control.isPending}
-              onClick={() => control.mutate("retry")}
-              type="button"
-            >
-              Retry unfinished work
-            </button>
+          {document.error && (
+            <p className="runtime-error" role="status">
+              {document.error}
+            </p>
           )}
-          {canControl && document.status === "uploading" && (
-            <button
-              className="secondary-button"
-              disabled={control.isPending}
-              onClick={() => control.mutate("complete")}
-              type="button"
-            >
-              Finish uploaded file
-            </button>
+          {control.error && (
+            <p className="runtime-error" role="alert">
+              {errorMessage(control.error)}
+            </p>
           )}
         </div>
-      </header>
-      <p className="ingestion-stage" role="status">
-        {ingestionStage(details)}
-      </p>
-      {chunks.length > 0 && (
-        <div className="document-progress">
-          <ProgressBar
-            max={chunks.length}
-            value={completed.length}
-            label="Document reading progress"
-            valueText={`${completed.length} of ${chunks.length} reading chunks saved`}
-          />
-          <span>
-            {completed.length} / {chunks.length} reading chunks saved ·{" "}
-            {document.page_count} PDF pages
-          </span>
-        </div>
-      )}
-      {document.error && (
-        <p className="runtime-error" role="status">
-          {document.error}
-        </p>
-      )}
-      {control.error && (
-        <p className="runtime-error" role="alert">
-          {errorMessage(control.error)}
-        </p>
-      )}
+        <DocumentIngestionTimeline document={document} />
+      </div>
       {changesets.length > 0 && (
         <div className="ingestion-proposals">
           {changesets.map((changeset) => (
@@ -258,11 +265,15 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
       return "Your document is queued for Blix to read."
     case "extracting":
       return "Blix is preparing the document for reading."
+    case "indexing":
+      return "Blix is saving page evidence and making the document searchable."
     case "reading":
       return chunks.length > 0 &&
         chunks.every((chunk) => chunk.completed_at !== null)
         ? "Blix has finished reading and is identifying the document details."
         : "Blix is reading the document and saving what it learns."
+    case "identifying_metadata":
+      return "Blix has finished reading and is identifying the document details."
     case "reconciling":
       return "Blix is comparing its learnings with the wiki and preparing updates for review."
     case "ready":
