@@ -64,7 +64,7 @@ func (s *ExecutionService) StartDocumentIngestion(ctx context.Context, r Documen
 		if len(runes) > 80 {
 			runes = runes[:80]
 		}
-		c := model.Conversation{ID: cid, Name: string(runes), CallerEntityID: r.Caller.EntityID, CallerContext: datatypes.NewJSONType(r.Caller), LeadSessionID: lead.ID, Status: "active"}
+		c := model.Conversation{ID: cid, Name: string(runes), CallerEntityID: r.Caller.EntityID, CallerContext: datatypes.NewJSONType(r.Caller), LeadSessionID: lead.ID, Status: "active", DocumentIDs: datatypes.NewJSONSlice([]string{r.DocumentID})}
 		if err := tx.Create(&c).Error; err != nil {
 			return err
 		}

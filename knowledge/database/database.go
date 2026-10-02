@@ -46,6 +46,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.Source{},
 		&model.SourceIdentity{},
 		&model.SourceRecord{},
+		&model.SourceChunk{}, &model.SourceRecordIndex{},
 		&model.Episode{},
 		&model.EpisodeRecord{},
 		&model.EpisodeParticipant{},
@@ -58,6 +59,14 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 	}
 	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_wiki_search ON knowledge_wiki_section USING GIN (search_vector)`).Error; err != nil {
 		return nil, fmt.Errorf("create wiki search index: %w", err)
+	}
+	for _, statement := range []string{
+		"CREATE INDEX IF NOT EXISTS idx_source_chunk_search ON knowledge_source_chunk USING GIN (search_vector)",
+		"CREATE INDEX IF NOT EXISTS idx_source_chunk_rules ON knowledge_source_chunk USING GIN (rule_ids)",
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			return nil, fmt.Errorf("create source search index: %w", err)
+		}
 	}
 	return db, nil
 }

@@ -97,7 +97,7 @@ class BlixV1Agent:
             "discord_webhook_send_v1",
             "knowledge_remember_v1",
             "knowledge_read_v1",
-            "knowledge_document_read_v1",
+            "knowledge_document_search_v1",
             "sentinel_api_v1",
             "sentinel_identity_resolve_v1",
             "sentinel_impersonate_v1",

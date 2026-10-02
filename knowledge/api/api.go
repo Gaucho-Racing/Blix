@@ -95,6 +95,8 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 		c.Next()
 	})
 	internal.GET("/documents/:documentID", handler.GetDocument)
+	internal.POST("/documents/access", handler.ValidateDocumentAccess)
+	internal.GET("/document-evidence", handler.RetrieveDocumentEvidence)
 	internal.POST("/documents/:documentID/metadata", handler.SaveExtractedDocumentMetadata)
 	internal.GET("/documents/:documentID/chunks/:number", handler.ReadDocumentChunk)
 	internal.POST("/documents/:documentID/chunks/:number", handler.SaveDocumentChunk)

@@ -21,6 +21,7 @@ const event = (
 })
 const details: ConversationDetails = {
   conversation: {
+    document_ids: [],
     conversation_id: "conv",
     name: "",
     status: "active",

@@ -41,6 +41,12 @@ func run(configuration config.Config) error {
 		logger.SugarLogger.Warnf("initialize wiki repository: %v", err)
 	}
 	sources := service.NewSourceService(db)
+	sourceIndexDone := make(chan struct{})
+	go func() {
+		defer close(sourceIndexDone)
+		sources.RunIndex(ctx, func(err error) { logger.SugarLogger.Warnf("source index: %v", err) })
+	}()
+	defer func() { stop(); <-sourceIndexDone }()
 	pages := service.NewWikiService(db, wiki)
 	index := service.NewWikiIndex(db, wiki)
 	pages.SetIndex(index)

@@ -7,7 +7,7 @@ import {
   GitPullRequest,
   LoaderCircle,
 } from "lucide-react"
-import { Link, useParams } from "react-router-dom"
+import { Link, useParams, useSearchParams } from "react-router-dom"
 import { useState } from "react"
 import {
   controlDocument,
@@ -32,6 +32,14 @@ import { DocumentTags } from "@/components/document-tags"
 
 export function DocumentDetailsPage() {
   const { documentID = "" } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedPage = Number(searchParams.get("page") ?? 1)
+  const previewPage =
+    Number.isInteger(requestedPage) &&
+    requestedPage >= 1 &&
+    requestedPage <= 500
+      ? requestedPage
+      : 1
   const [previewDocumentID, setPreviewDocumentID] = useState<string | null>(
     null,
   )
@@ -85,11 +93,28 @@ export function DocumentDetailsPage() {
           />
           <DocumentReadingNotes details={query.data} key={documentID} />
           <DocumentSources details={query.data} key={`sources:${documentID}`} />
-          {previewDocumentID === documentID &&
+          {(previewDocumentID === documentID ||
+            searchParams.get("preview") === "1") &&
             query.data.document.size_bytes > 0 && (
               <DocumentPDFPreview
                 document={query.data.document}
-                onClose={() => setPreviewDocumentID(null)}
+                page={Math.min(
+                  previewPage,
+                  query.data.document.page_count || 500,
+                )}
+                onClose={() => {
+                  setPreviewDocumentID(null)
+                  if (searchParams.has("preview")) {
+                    setSearchParams(
+                      (params) => {
+                        params.delete("preview")
+                        params.delete("page")
+                        return params
+                      },
+                      { replace: true },
+                    )
+                  }
+                }}
                 key={documentID}
               />
             )}

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 )
 
 type DocumentRuntimeClient struct {
@@ -21,9 +23,13 @@ func NewDocumentRuntimeClient(baseURL, token string) *DocumentRuntimeClient {
 	return &DocumentRuntimeClient{strings.TrimRight(baseURL, "/"), token, &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 func (c *DocumentRuntimeClient) request(ctx context.Context, method, path string, payload any, output any) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
+	var data []byte
+	var err error
+	if payload != nil {
+		data, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/internal/v1/"+path, bytes.NewReader(data))
 	if err != nil {
@@ -38,6 +44,15 @@ func (c *DocumentRuntimeClient) request(ctx context.Context, method, path string
 	defer res.Body.Close()
 	if res.StatusCode == 409 {
 		return ErrConflict
+	}
+	if res.StatusCode == 400 {
+		return ErrInvalid
+	}
+	if res.StatusCode == 403 {
+		return ErrForbidden
+	}
+	if res.StatusCode == 404 {
+		return ErrNotFound
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("%w: Runway returned HTTP %d", ErrUnavailable, res.StatusCode)
@@ -75,4 +90,20 @@ func (c *DocumentRuntimeClient) validate(ctx context.Context, id string, e Docum
 }
 func (c *DocumentRuntimeClient) control(ctx context.Context, task, owner, operation string) error {
 	return c.request(ctx, "POST", "tasks/"+url.PathEscape(task)+"/"+operation, map[string]string{"owner": owner}, nil)
+}
+
+func (s *DocumentService) ConversationRetrievalScope(ctx context.Context, conversationID, sessionID, scope string) (DocumentRetrievalScope, error) {
+	if scope != "conversation" && scope != "team" {
+		return DocumentRetrievalScope{}, ErrInvalid
+	}
+	if s.runtime == nil {
+		return DocumentRetrievalScope{}, ErrUnavailable
+	}
+	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
+		return DocumentRetrievalScope{}, ErrInvalid
+	}
+	var result DocumentRetrievalScope
+	err := s.runtime.request(ctx, "GET", "conversations/"+url.PathEscape(conversationID)+"/retrieval-context?session_id="+url.QueryEscape(sessionID), nil, &result)
+	result.Team = scope == "team"
+	return result, err
 }

@@ -9,6 +9,7 @@ const (
 	Source             Prefix = "source"
 	SourceIdentity     Prefix = "sourceidentity"
 	SourceRecord       Prefix = "sourcerecord"
+	SourceChunk        Prefix = "sourcechunk"
 	Episode            Prefix = "episode"
 	EpisodeRecord      Prefix = "episoderecord"
 	EpisodeParticipant Prefix = "episodeparticipant"

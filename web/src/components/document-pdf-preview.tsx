@@ -7,9 +7,11 @@ import { errorMessage } from "@/lib/runtime"
 export function DocumentPDFPreview({
   document,
   onClose,
+  page = 1,
 }: {
   document: TeamDocument
   onClose: () => void
+  page?: number
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const pointerStartedOutside = useRef(false)
@@ -93,7 +95,11 @@ export function DocumentPDFPreview({
           </button>
         </p>
       ) : (
-        <PDFFrame blob={pdf.data} title={document.title || document.filename} />
+        <PDFFrame
+          blob={pdf.data}
+          title={document.title || document.filename}
+          page={page}
+        />
       )}
     </dialog>
   )
@@ -106,19 +112,27 @@ function outsideDialog(dialog: HTMLDialogElement, x: number, y: number) {
   )
 }
 
-function PDFFrame({ blob, title }: { blob: Blob; title: string }) {
+function PDFFrame({
+  blob,
+  title,
+  page,
+}: {
+  blob: Blob
+  title: string
+  page: number
+}) {
   const frame = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
     const viewer = frame.current
     if (!viewer) return
     const url = URL.createObjectURL(blob)
-    viewer.src = url
+    viewer.src = `${url}#page=${page}`
     return () => {
       viewer.removeAttribute("src")
       URL.revokeObjectURL(url)
     }
-  }, [blob])
+  }, [blob, page])
 
   return <iframe ref={frame} title={`PDF preview: ${title}`} />
 }

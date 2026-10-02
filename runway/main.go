@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -63,6 +64,7 @@ func run(configuration config.Config) error {
 	auth := service.NewAuthService(sentinelClient, configuration.SentinelScopes)
 	identities := service.NewIdentityService(sentinelClient, configuration.SentinelServiceToken)
 	executions := service.NewExecutionService(db, workers, configuration)
+	executions.SetDocumentScopeValidator(service.NewKnowledgeDocumentClient(os.Getenv("KNOWLEDGE_URL"), os.Getenv("BLIX_INTERNAL_TOKEN")))
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
 	executions.SetDispatchNotifier(outbox.Notify)
 	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)

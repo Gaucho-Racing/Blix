@@ -7,6 +7,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from blix_agent_worker.models.agent import AgentResult, AgentTask
+from blix_agent_worker.models.common import DocumentID
 from blix_agent_worker.models.context import CallerContext
 from blix_agent_worker.models.message import ConversationMessage
 
@@ -38,6 +39,7 @@ class Attempt(ResponseModel):
 class Conversation(ResponseModel):
     conversation_id: str
     caller_context: CallerContext
+    document_ids: tuple[DocumentID, ...] = ()
 
 
 class Session(ResponseModel):

@@ -44,7 +44,19 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.CreateConversation(c.Request.Context(), caller.ConversationContext())
+		var request struct {
+			DocumentIDs []string `json:"document_ids"`
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
+		if c.Request.ContentLength != 0 && c.ShouldBindJSON(&request) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		if len(request.DocumentIDs) > 0 && !callerHasGroup(caller, "BlixUsers") && !callerHasGroup(caller, adminGroup) {
+			respondError(c, service.ErrForbidden)
+			return
+		}
+		result, err := h.executions.CreateConversationWithDocuments(c.Request.Context(), caller.ConversationContext(), request.DocumentIDs)
 		if err != nil {
 			respondError(c, err)
 			return
@@ -176,6 +188,14 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.Status(http.StatusNoContent)
 	})
 	internal := router.Group("/internal/v1", internalAuthentication)
+	internal.GET("/conversations/:conversationID/retrieval-context", func(c *gin.Context) {
+		result, err := h.executions.RetrievalContext(c.Request.Context(), c.Param("conversationID"), c.Query("session_id"))
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
 	internal.POST("/document-attempts/validate", func(c *gin.Context) {
 		var request service.DocumentAttemptAccess
 		if c.ShouldBindJSON(&request) != nil {

@@ -713,6 +713,14 @@ h1, h2, h3, p { margin-top: 0; }
 .runtime-composer > div > a { color: #a32d80; font-size: 11px; }
 .runtime-composer > div > span { flex: 1; font-size: 10px; color: #99929e; }
 .runtime-composer .primary-button { padding: 8px; border-radius: 8px; }
+.chat-document-context { display: grid; gap: 10px; margin-bottom: 12px; }
+.chat-document-context > .themed-select-trigger { max-width: 360px; font-size: 13px; }
+.chat-document-context ul { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-document-context li { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.chat-document-context li > svg { flex-shrink: 0; color: var(--pink); }
+.chat-document-context li > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; }
+.chat-document-context li > span { flex-shrink: 0; color: var(--muted); font-size: 11px; }
+.chat-document-context li > button { display: grid; place-items: center; padding: 2px; color: var(--muted); cursor: pointer; }
 .runtime-working { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #928399; padding: 16px 0; }
 .runtime-error { color: #b13b51 !important; background: #fff2f4; border: 1px solid #f5dbe1; border-radius: 7px; padding: 10px 12px; font-size: 12px; line-height: 1.6; margin: 12px 0; overflow-wrap: anywhere; }
 .runtime-error button { color: #932b56; text-decoration: underline; cursor: pointer; }

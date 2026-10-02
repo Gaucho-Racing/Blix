@@ -33,6 +33,7 @@ type ExecutionService struct {
 	attemptReadyTopic string
 	eventTopic        string
 	notify            func()
+	documents         DocumentScopeValidator
 }
 
 func NewExecutionService(db *gorm.DB, workers *WorkerService, cfg config.Config) *ExecutionService {
@@ -139,12 +140,27 @@ type CreatedConversation struct {
 }
 
 func (s *ExecutionService) CreateConversation(ctx context.Context, caller model.CallerContext) (CreatedConversation, error) {
+	return s.CreateConversationWithDocuments(ctx, caller, nil)
+}
+
+func (s *ExecutionService) CreateConversationWithDocuments(ctx context.Context, caller model.CallerContext, documents []string) (CreatedConversation, error) {
 	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != model.EntityTypeUser || !identifier.IsValid(caller.UserID, identifier.User) {
 		return CreatedConversation{}, ErrForbidden
 	}
+	if err := validateDocumentIDs(documents); err != nil {
+		return CreatedConversation{}, err
+	}
+	if len(documents) > 0 {
+		if s.documents == nil {
+			return CreatedConversation{}, ErrUnavailable
+		}
+		if err := s.documents.ValidateDocuments(ctx, documents); err != nil {
+			return CreatedConversation{}, err
+		}
+	}
 	var result CreatedConversation
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		c := model.Conversation{ID: identifier.New(identifier.Conversation), CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active"}
+		c := model.Conversation{ID: identifier.New(identifier.Conversation), CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice(append([]string{}, documents...))}
 		session, err := s.createSession(tx, c.ID, nil, profiles["blix_v1"], "")
 		if err != nil {
 			return err

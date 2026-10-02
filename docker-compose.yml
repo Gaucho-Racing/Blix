@@ -62,6 +62,7 @@ services:
       nanomq:
         condition: service_started
     environment:
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
       BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
       ENV: ${ENV:?Set ENV in .env}
       PORT: ${RUNWAY_PORT:?Set RUNWAY_PORT in .env}

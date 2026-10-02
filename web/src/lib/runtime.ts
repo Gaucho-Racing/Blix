@@ -1,6 +1,7 @@
 import { api } from "@/lib/api"
 
 export interface Conversation {
+  document_ids: string[]
   conversation_id: string
   name: string
   status: string
@@ -64,9 +65,12 @@ export async function listConversations() {
   return (await api.get<{ conversations: Conversation[] }>("/v1/conversations"))
     .data.conversations
 }
-export async function createConversation() {
-  return (await api.post<{ conversation: Conversation }>("/v1/conversations"))
-    .data.conversation
+export async function createConversation(documentIDs: string[] = []) {
+  return (
+    await api.post<{ conversation: Conversation }>("/v1/conversations", {
+      document_ids: documentIDs,
+    })
+  ).data.conversation
 }
 export async function getConversation(id: string, signal?: AbortSignal) {
   return (

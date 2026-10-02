@@ -201,7 +201,7 @@ func (s *SourceService) IngestSourceRecord(
 		}
 		if result.RowsAffected == 1 {
 			ingested = IngestedSourceRecord{Record: record, Created: true}
-			return nil
+			return indexSourceRecord(tx, record)
 		}
 		var existing model.SourceRecord
 		if err := tx.Where(
@@ -216,7 +216,7 @@ func (s *SourceService) IngestSourceRecord(
 			return fmt.Errorf("%w: immutable source record version has different content", ErrConflict)
 		}
 		ingested = IngestedSourceRecord{Record: existing, Created: false}
-		return nil
+		return indexSourceRecord(tx, existing)
 	})
 	if err != nil {
 		return IngestedSourceRecord{}, err

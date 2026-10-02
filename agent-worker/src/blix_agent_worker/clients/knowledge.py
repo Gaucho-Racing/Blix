@@ -53,6 +53,7 @@ class KnowledgeClient:
         if not response.is_success:
             code = {
                 400: "invalid_knowledge_request",
+                403: "knowledge_forbidden",
                 404: "knowledge_not_found",
                 409: "knowledge_conflict",
             }.get(response.status_code, "knowledge_request_failed")

@@ -72,6 +72,7 @@ class DeepResearchV1Agent(ToolAgent):
             "discord_read_v1",
             "discord_search_v1",
             "knowledge_read_v1",
+            "knowledge_document_search_v1",
             "sentinel_api_v1",
             "sentinel_identity_resolve_v1",
             "sentinel_impersonate_v1",

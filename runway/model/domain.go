@@ -26,6 +26,7 @@ type CallerContext struct {
 }
 
 type Conversation struct {
+	DocumentIDs    datatypes.JSONSlice[string]       `json:"document_ids" gorm:"type:jsonb;not null;default:'[]'"`
 	ID             string                            `json:"conversation_id" gorm:"primaryKey"`
 	Name           string                            `json:"name" gorm:"not null"`
 	CallerEntityID string                            `json:"caller_entity_id" gorm:"index;not null"`

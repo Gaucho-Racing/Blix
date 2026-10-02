@@ -58,6 +58,7 @@ from blix_agent_worker.tools.knowledge import (
     KnowledgeSourceRecordCreateV1Tool,
 )
 from blix_agent_worker.tools.knowledge.knowledge_document_read_v1 import KnowledgeDocumentReadV1Tool
+from blix_agent_worker.tools.knowledge.knowledge_document_search_v1 import KnowledgeDocumentSearchV1Tool
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_identity import SentinelIdentityResolveV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
@@ -318,6 +319,7 @@ class ApiRuntime:
                     DiscordWebhookSendV1Tool(self.discord, caller),
                     KnowledgeReadV1Tool(self.knowledge),
                     KnowledgeDocumentReadV1Tool(self.knowledge),
+                    KnowledgeDocumentSearchV1Tool(self.knowledge),
                     KnowledgeEvidenceReadV1Tool(self.knowledge),
                     KnowledgeSourceCreateV1Tool(self.knowledge),
                     KnowledgeSourceRecordCreateV1Tool(self.knowledge, self.sentinel),
@@ -380,6 +382,7 @@ class ApiRuntime:
             return str(response["task_id"])
 
         trusted_context = {
+            "document_ids": list(execution.conversation.document_ids),
             "caller": {
                 **execution.conversation.caller_context.model_dump(mode="json"),
                 "user": caller.model_dump(mode="json"),
