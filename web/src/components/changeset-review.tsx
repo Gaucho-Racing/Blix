@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Link } from "react-router-dom"
+import { WikiMarkdown } from "@/components/wiki-markdown"
 import { StatusBadge } from "@/components/status-badge"
 import { formatTimestamp } from "@/lib/format"
 import {
@@ -45,6 +46,7 @@ export function ChangesetReview({
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [changeset.publication_lease_until])
+  const [view, setView] = useState<"rendered" | "markdown">("rendered")
   const [selected, setSelected] = useState(files[0]?.path ?? "")
   const [decision, setDecision] = useState<"approve" | "reject" | null>(null)
   const [note, setNote] = useState("")
@@ -236,14 +238,33 @@ export function ChangesetReview({
               Compare with the exact base revision, not the current wiki.
             </span>
           </div>
-          <button
-            className="secondary-button"
-            disabled={refreshing || mutation.isPending}
-            onClick={onRefresh}
-            type="button"
-          >
-            <RefreshCw className={refreshing ? "spin" : ""} size={14} /> Refresh
-          </button>
+          <div className="knowledge-comparison-controls">
+            <div
+              className="knowledge-comparison-toggle"
+              role="group"
+              aria-label="Comparison format"
+            >
+              {(["rendered", "markdown"] as const).map((format) => (
+                <button
+                  type="button"
+                  key={format}
+                  aria-pressed={view === format}
+                  onClick={() => setView(format)}
+                >
+                  {format === "rendered" ? "Rendered" : "Markdown"}
+                </button>
+              ))}
+            </div>
+            <button
+              className="secondary-button"
+              disabled={refreshing || mutation.isPending}
+              onClick={onRefresh}
+              type="button"
+            >
+              <RefreshCw className={refreshing ? "spin" : ""} size={14} />{" "}
+              Refresh
+            </button>
+          </div>
         </div>
         <div className="knowledge-review-file-tabs" aria-label="Changed files">
           {files.map((item) => (
@@ -265,6 +286,11 @@ export function ChangesetReview({
             changesetID={changeset.changeset_id}
             file={file}
             key={file.path}
+            view={view}
+            proposedPaths={files
+              .filter((item) => item.operation !== "delete")
+              .map((item) => item.path)}
+            onSelectPath={setSelected}
           />
         )}
       </section>
@@ -339,7 +365,13 @@ export function ChangesetReview({
 function FileComparison({
   changesetID,
   file,
+  view,
+  proposedPaths,
+  onSelectPath,
 }: {
+  view: "rendered" | "markdown"
+  proposedPaths: string[]
+  onSelectPath: (path: string) => void
   changesetID: string
   file: WikiChangesetFile
 }) {
@@ -370,7 +402,16 @@ function FileComparison({
           <small>{query.data.exists ? "Base revision" : "New file"}</small>
         </header>
         {query.data.exists ? (
-          <pre>{query.data.content || "(empty file)"}</pre>
+          view === "markdown" ? (
+            <pre>{query.data.content || "(empty file)"}</pre>
+          ) : (
+            <div className="knowledge-rendered-file">
+              <WikiMarkdown
+                content={query.data.content || "*Empty file*"}
+                path={file.path}
+              />
+            </div>
+          )
         ) : (
           <div className="knowledge-file-absent">
             This file does not exist in the base revision.
@@ -388,8 +429,17 @@ function FileComparison({
           <div className="knowledge-file-absent">
             This file will be removed from the wiki.
           </div>
-        ) : (
+        ) : view === "markdown" ? (
           <pre>{file.content || "(empty file)"}</pre>
+        ) : (
+          <div className="knowledge-rendered-file">
+            <WikiMarkdown
+              content={file.content || "*Empty file*"}
+              path={file.path}
+              proposedPaths={proposedPaths}
+              onSelectPath={onSelectPath}
+            />
+          </div>
         )}
       </section>
     </div>
@@ -466,7 +516,7 @@ function ReviewDialog({
           onChange={(event) => setNote(event.target.value)}
           placeholder={
             reject
-              ? "What should Blix reconsider?"
+              ? "Add a note to the review record."
               : "Anything future reviewers should know?"
           }
           required={reject}

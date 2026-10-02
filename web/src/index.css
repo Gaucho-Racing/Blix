@@ -864,3 +864,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .knowledge-review-sources a:hover { text-decoration: underline; }
 .knowledge-review-sources code { display: block; margin-top: 4px; color: var(--dim); font-size: 10px; overflow-wrap: anywhere; }
 @media (max-width: 720px) { .knowledge-review-heading-actions { flex-direction: row; align-items: center; flex-wrap: wrap; } }
+
+.knowledge-comparison-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.knowledge-comparison-toggle { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+.knowledge-comparison-toggle button { padding: 7px 11px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.knowledge-comparison-toggle button[aria-pressed="true"] { background: var(--pink-faint); color: var(--pink-strong); box-shadow: 0 1px 3px #00000008; }
+.knowledge-rendered-file { max-height: 560px; min-height: 170px; padding: 21px; overflow: auto; }
+.knowledge-rendered-file .wiki-markdown > :first-child { margin-top: 0; }
+.knowledge-rendered-file .wiki-markdown pre { min-height: auto; max-height: none; padding: 12px; font-size: 12px; line-height: 1.7; white-space: pre; }
+.knowledge-rendered-file img { max-width: 100%; height: auto; }

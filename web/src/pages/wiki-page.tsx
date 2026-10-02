@@ -1,47 +1,11 @@
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { ArrowLeft, LoaderCircle } from "lucide-react"
 import { Link, useSearchParams } from "react-router-dom"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import type { DocumentCitation } from "@/lib/documents"
 import { readWiki } from "@/lib/documents"
-import { wikiLink } from "@/lib/wiki-links"
+import { WikiMarkdown } from "@/components/wiki-markdown"
 import { errorMessage } from "@/lib/runtime"
 
-function Markdown({
-  content,
-  path,
-  proposedPaths = [],
-}: {
-  content: string
-  path: string
-  proposedPaths?: string[]
-}) {
-  return (
-    <div className="wiki-markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ href, children }) => {
-            if (!href) return <span>{children}</span>
-            const link = wikiLink(href, path, proposedPaths)
-            return link.external ? (
-              <a href={link.href} target="_blank" rel="noreferrer">
-                {children}
-              </a>
-            ) : link.href.startsWith("#") ? (
-              <a href={link.href}>{children}</a>
-            ) : (
-              <Link to={link.href}>{children}</Link>
-            )
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  )
-}
 function EvidenceLinks({
   citations,
 }: {
@@ -118,7 +82,7 @@ export function WikiPage() {
         </p>
       )}
       <section className="panel wiki-reader">
-        <Markdown
+        <WikiMarkdown
           path={path}
           content={
             query.data?.pages.map((part) => part.page.content).join("") ?? ""
