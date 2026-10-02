@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -12,10 +13,15 @@ import (
 
 	"github.com/gaucho-racing/blix/runway/model"
 	"github.com/gaucho-racing/blix/runway/pkg/identifier"
+	"gorm.io/gorm"
 )
 
 type DocumentScopeValidator interface {
 	ValidateDocuments(context.Context, []string) error
+}
+
+type DocumentQuestionValidator interface {
+	ValidateQuestionDocument(context.Context, string) error
 }
 
 type KnowledgeDocumentClient struct {
@@ -32,10 +38,18 @@ func (s *ExecutionService) SetDocumentScopeValidator(validator DocumentScopeVali
 }
 
 func (c *KnowledgeDocumentClient) ValidateDocuments(ctx context.Context, ids []string) error {
+	return c.validate(ctx, ids, "team")
+}
+
+func (c *KnowledgeDocumentClient) ValidateQuestionDocument(ctx context.Context, id string) error {
+	return c.validate(ctx, []string{id}, "questions")
+}
+
+func (c *KnowledgeDocumentClient) validate(ctx context.Context, ids []string, mode string) error {
 	if c.url == "" || c.token == "" {
 		return ErrUnavailable
 	}
-	data, err := json.Marshal(map[string]any{"document_ids": ids})
+	data, err := json.Marshal(map[string]any{"document_ids": ids, "mode": mode})
 	if err != nil {
 		return err
 	}
@@ -80,6 +94,7 @@ func validateDocumentIDs(ids []string) error {
 
 type RetrievalContext struct {
 	DocumentIDs []string `json:"document_ids"`
+	ProfileID   string   `json:"profile_id"`
 }
 
 func (s *ExecutionService) RetrievalContext(ctx context.Context, conversationID, sessionID string) (RetrievalContext, error) {
@@ -90,12 +105,15 @@ func (s *ExecutionService) RetrievalContext(ctx context.Context, conversationID,
 	if err := s.database.WithContext(ctx).First(&conversation, "id = ?", conversationID).Error; err != nil {
 		return RetrievalContext{}, mapDatabaseError(err)
 	}
-	var count int64
-	if err := s.database.WithContext(ctx).Model(&model.AgentSession{}).Where("id = ? AND conversation_id = ?", sessionID, conversationID).Count(&count).Error; err != nil {
+	var session model.AgentSession
+	if err := s.database.WithContext(ctx).First(&session, "id = ? AND conversation_id = ?", sessionID, conversationID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return RetrievalContext{}, ErrForbidden
+		}
 		return RetrievalContext{}, err
 	}
-	if count != 1 || conversation.CallerContext.Data().EntityType != model.EntityTypeUser {
+	if conversation.CallerContext.Data().EntityType != model.EntityTypeUser {
 		return RetrievalContext{}, ErrForbidden
 	}
-	return RetrievalContext{DocumentIDs: append([]string{}, conversation.DocumentIDs...)}, nil
+	return RetrievalContext{DocumentIDs: append([]string{}, conversation.DocumentIDs...), ProfileID: session.ProfileID}, nil
 }

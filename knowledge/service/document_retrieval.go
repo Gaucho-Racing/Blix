@@ -14,8 +14,9 @@ import (
 )
 
 type DocumentRetrievalScope struct {
-	DocumentIDs []string `json:"document_ids"`
-	Team        bool     `json:"-"`
+	DocumentIDs     []string `json:"document_ids"`
+	Team            bool     `json:"-"`
+	AllowUnapproved bool     `json:"-"`
 }
 
 type DocumentSearchOptions struct {
@@ -79,7 +80,7 @@ func (s *DocumentService) ValidateRetrievalDocuments(ctx context.Context, ids []
 		return err
 	}
 	var count int64
-	if err := s.db.WithContext(ctx).Model(&model.Document{}).Where("id IN ? AND review_status <> ? AND size_bytes > 0", ids, model.DocumentReviewRejected).Count(&count).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.Document{}).Where("id IN ? AND review_status = ? AND size_bytes > 0", ids, model.DocumentReviewIngested).Count(&count).Error; err != nil {
 		return err
 	}
 	if count != int64(len(ids)) {
@@ -96,6 +97,9 @@ func documentRetrievalQuery(db *gorm.DB, scope DocumentRetrievalScope, id string
 		return nil, ErrInvalid
 	}
 	query := db.Table("knowledge_document d").Joins("LEFT JOIN knowledge_source s ON s.id = d.source_id").Where("(d.source_id = '' OR s.status = ?)", model.SourceStatusActive).Where("d.review_status <> ?", model.DocumentReviewRejected)
+	if !scope.AllowUnapproved || scope.Team {
+		query = query.Where("d.review_status = ?", model.DocumentReviewIngested)
+	}
 	if !scope.Team {
 		if id != "" && !slices.Contains(scope.DocumentIDs, id) {
 			return nil, ErrForbidden

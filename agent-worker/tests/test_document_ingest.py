@@ -99,7 +99,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         calls = []
 
         class Client:
-            async def request(self, url, method, path, *, payload=None):
+            async def request(self, url, method, path, *, payload=None, params=None):
                 calls.append((method, path, payload))
                 if path.endswith("/prepare") and fail_after_save:
                     details["document"]["status"] = "reading"

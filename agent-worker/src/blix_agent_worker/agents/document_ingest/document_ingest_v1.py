@@ -141,7 +141,7 @@ class DocumentIngestV1Agent:
         path = f"documents/{request.document_id}"
         ownership = {**self.execution, "generation": request.generation}
         try:
-            details = await self.client.request(base_url, "GET", path)
+            details = await self.client.request(base_url, "GET", path, params={"conversation_id": task.conversation_id, "session_id": task.session_id})
             if details["document"]["status"] in {"ready", "partial", "no_changes"}:
                 outcome = "no_changes" if details["document"]["status"] == "no_changes" else "proposed"
                 return self.result(task, details, outcome, "Document processing already completed.")
@@ -200,7 +200,9 @@ class DocumentIngestV1Agent:
             if chunk["completed_at"] is not None:
                 continue
             number = chunk["number"]
-            evidence = await self.client.request(base_url, "GET", f"{path}/chunks/{number}")
+            evidence = await self.client.request(base_url, "GET", f"{path}/chunks/{number}",
+                params={"conversation_id": task.conversation_id, "session_id": task.session_id},
+            )
             reading, response = await self.read_chunk(task, details, evidence)
             notes = details.get("notes") or {}
             details = await self.client.request(
@@ -279,7 +281,9 @@ class DocumentIngestV1Agent:
         numbers = dict.fromkeys((chunks[0]["number"], chunks[-1]["number"]))
         evidence = []
         for number in numbers:
-            chunk = await self.client.request(base_url, "GET", f"{path}/chunks/{number}")
+            chunk = await self.client.request(base_url, "GET", f"{path}/chunks/{number}",
+                params={"conversation_id": task.conversation_id, "session_id": task.session_id},
+            )
             evidence.extend(chunk["evidence"])
         prompt = json.dumps({
             "filename_hint": details["document"].get("filename", ""),

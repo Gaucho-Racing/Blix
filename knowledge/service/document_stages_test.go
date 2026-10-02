@@ -101,7 +101,7 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 	if !resumed.Document.Stages[1].CompletedAt.Equal(*failed.Document.Stages[1].CompletedAt) || resumed.Document.Stages[2].Generation != 2 {
 		t.Fatal("retry rewrote completed extraction or retained the old indexing generation")
 	}
-	result, err := s.SearchSources(ctx, DocumentSearchOptions{Query: "brake", DocumentID: doc.ID, Limit: 8}, DocumentRetrievalScope{Team: true})
+	result, err := s.SearchSources(ctx, DocumentSearchOptions{Query: "brake", DocumentID: doc.ID, Limit: 8}, DocumentRetrievalScope{DocumentIDs: []string{doc.ID}, AllowUnapproved: true})
 	if err != nil || len(result.Results) != 1 {
 		t.Fatalf("retry did not restore search: %+v %v", result, err)
 	}

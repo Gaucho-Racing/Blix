@@ -17,6 +17,7 @@ from blix_agent_worker.agents.blix import (
 )
 from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
 from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
+from blix_agent_worker.agents.document_qa.document_qa_v1 import DocumentQAV1Agent, DocumentQAV1Output
 from blix_agent_worker.agents.knowledge_curator import KnowledgeCuratorV1Agent
 from blix_agent_worker.clients import (
     ExecutionContext,
@@ -176,7 +177,7 @@ class ApiRuntime:
             raise CallerVerificationError(
                 "caller_identity_mismatch", "The current Sentinel identity does not match this conversation's owner."
             )
-        if REQUIRED_BLIX_GROUP not in entity.user.groups:
+        if REQUIRED_BLIX_GROUP not in entity.user.groups and "BlixAdmins" not in entity.user.groups:
             raise CallerVerificationError(
                 "caller_not_blix_user", f"The user must be an active member of {REQUIRED_BLIX_GROUP}."
             )
@@ -381,7 +382,11 @@ class ApiRuntime:
             },
             on_response=document_response,
         )
-        registry = AgentRegistry([research, curator, document_ingest])
+        document_qa = DocumentQAV1Agent(
+            model=model, on_before_model=model.prepare, tool_runner=tools,
+            on_tool_result=checkpoint_tool, on_model_response=checkpoint_model,
+        )
+        registry = AgentRegistry([research, curator, document_ingest, document_qa])
 
         async def background(task: AgentTask, ref: str) -> str:
             response = await lease.delegate(task, ref, background=True)
@@ -411,25 +416,42 @@ class ApiRuntime:
                 notifications=execution.notifications,
                 reply_to_message_id=execution.turn.get("input_message_id") if execution.turn else None,
             )
-            agent = BlixV1Agent(
-                model=model,
-                on_before_model=model.prepare,
-                tool_runner=tools,
-                agent_runner=AgentRunner(registry),
-                on_tool_result=checkpoint_tool,
-                on_model_response=checkpoint_model,
-                on_background_agent=background,
-            )
-            task = AgentTask(
-                conversation_id=execution.conversation.conversation_id,
-                session_id=execution.session.session_id,
-                agent_id="blix_v1",
-                objective="Respond to the user and coordinate ongoing work.",
-                input=agent_input.model_dump(mode="json"),
-                context={**trusted_context, "memory": execution.session.memory},
-                allowed_tool_ids=execution.allowed_tool_ids,
-                allowed_subagent_ids=execution.profile.executor_ids,
-            )
+            if execution.profile.profile_id == "document_qa_v1":
+                if len(execution.conversation.document_ids) != 1:
+                    raise ValueError("Document Q&A requires exactly one trusted document.")
+                await self.knowledge.request(
+                    os.environ["KNOWLEDGE_URL"], "POST", "documents/access",
+                    payload={"document_ids": list(execution.conversation.document_ids), "mode": "questions"},
+                )
+                agent = document_qa
+                task = AgentTask(
+                    conversation_id=execution.conversation.conversation_id,
+                    session_id=execution.session.session_id, agent_id="document_qa_v1",
+                    objective="Answer the user's question from this document's original evidence.",
+                    input={"document_id": execution.conversation.document_ids[0],
+                           "messages": [message.model_dump(mode="json") for message in messages]},
+                    context=trusted_context, allowed_tool_ids=execution.allowed_tool_ids,
+                )
+            else:
+                agent = BlixV1Agent(
+                    model=model,
+                    on_before_model=model.prepare,
+                    tool_runner=tools,
+                    agent_runner=AgentRunner(registry),
+                    on_tool_result=checkpoint_tool,
+                    on_model_response=checkpoint_model,
+                    on_background_agent=background,
+                )
+                task = AgentTask(
+                    conversation_id=execution.conversation.conversation_id,
+                    session_id=execution.session.session_id,
+                    agent_id="blix_v1",
+                    objective="Respond to the user and coordinate ongoing work.",
+                    input=agent_input.model_dump(mode="json"),
+                    context={**trusted_context, "memory": execution.session.memory},
+                    allowed_tool_ids=execution.allowed_tool_ids,
+                    allowed_subagent_ids=execution.profile.executor_ids,
+                )
         try:
             outcome = await agent.run(task, state=latest_state, resume_result=execution.resume_result)
         except ApprovalRequiredError as approval:
@@ -440,6 +462,11 @@ class ApiRuntime:
                 {"runtime_kind": "api", "schema_version": 1, "payload": latest_state.model_dump(mode="json")},
             )
             return
+        if task.agent_id == "document_qa_v1":
+            await self.knowledge.request(
+                os.environ["KNOWLEDGE_URL"], "POST", "documents/access",
+                payload={"document_ids": list(execution.conversation.document_ids), "mode": "questions"},
+            )
         await flush_delta()
         if isinstance(outcome, AgentSuspension):
             pending = outcome.state.pending_agent_call
@@ -460,7 +487,7 @@ class ApiRuntime:
                 "complete", {"result": outcome.model_dump(mode="json"), "usage": outcome.usage.model_dump(mode="json")}
             )
         elif outcome.status is AgentResultStatus.SUCCEEDED:
-            output = BlixV1Output.model_validate(outcome.output)
+            output = (DocumentQAV1Output if task.agent_id == "document_qa_v1" else BlixV1Output).model_validate(outcome.output)
             await lease.post("complete", {"content": output.message, "usage": outcome.usage.model_dump(mode="json")})
         else:
             error = outcome.error or ContractError(code="agent_failed", message="The agent failed.")

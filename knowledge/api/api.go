@@ -94,11 +94,11 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 		}
 		c.Next()
 	})
-	internal.GET("/documents/:documentID", handler.GetDocument)
+	internal.GET("/documents/:documentID", handler.GetAgentDocument)
 	internal.POST("/documents/access", handler.ValidateDocumentAccess)
 	internal.GET("/document-evidence", handler.RetrieveDocumentEvidence)
 	internal.POST("/documents/:documentID/metadata", handler.SaveExtractedDocumentMetadata)
-	internal.GET("/documents/:documentID/chunks/:number", handler.ReadDocumentChunk)
+	internal.GET("/documents/:documentID/chunks/:number", handler.ReadAgentDocumentChunk)
 	internal.POST("/documents/:documentID/chunks/:number", handler.SaveDocumentChunk)
 	internal.POST("/documents/:documentID/ingestion/:operation", handler.ProcessDocument)
 	internal.GET("/repository", handler.GetRepository)

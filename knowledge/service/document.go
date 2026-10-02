@@ -39,12 +39,13 @@ type DocumentMetadata struct {
 }
 
 type DocumentDetails struct {
-	Document      model.Document               `json:"document"`
-	Pages         []model.DocumentPage         `json:"pages"`
-	Chunks        []model.DocumentChunk        `json:"chunks"`
-	Notes         *model.DocumentNotesRevision `json:"notes"`
-	Changesets    []model.Changeset            `json:"changesets"`
-	ReviewBlocked bool                         `json:"review_blocked"`
+	ReadyForQuestions bool                         `json:"ready_for_questions"`
+	Document          model.Document               `json:"document"`
+	Pages             []model.DocumentPage         `json:"pages"`
+	Chunks            []model.DocumentChunk        `json:"chunks"`
+	Notes             *model.DocumentNotesRevision `json:"notes"`
+	Changesets        []model.Changeset            `json:"changesets"`
+	ReviewBlocked     bool                         `json:"review_blocked"`
 }
 
 type PDFExtractor interface {
@@ -272,6 +273,11 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 				break
 			}
 		}
+		var indexed int64
+		if err := tx.Model(&model.SourceRecordIndex{}).Where("chunker_version = ? AND source_record_id IN (SELECT source_record_id FROM knowledge_document_page WHERE document_id = ?)", sourceChunkerVersion, id).Count(&indexed).Error; err != nil {
+			return err
+		}
+		result.ReadyForQuestions = result.Document.ReviewStatus != model.DocumentReviewRejected && result.Document.PageCount > 0 && indexed == int64(result.Document.PageCount)
 		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err

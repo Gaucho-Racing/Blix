@@ -55,11 +55,14 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 	libraryTerm := strings.ReplaceAll(identifier.New(identifier.Document), "_", "")
 	first := importDoc([]string{"T.3.2 Brake pressure requires two circuits.\nExceptions: inspect the next page. " + libraryTerm, "Testing qualifications and participation in 2027.", ""})
 	second := importDoc([]string{"T.3.20 Brake pressure is a different rule. " + libraryTerm, "Unrelated battery voltage."})
+	if err := db.Model(&second.Document).Update("review_status", model.DocumentReviewIngested).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Model(&first.Document).Updates(map[string]any{"review_status": model.DocumentReviewPending, "status": "reading"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	s := NewDocumentService(db, t.TempDir(), nil)
-	scope := DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID}}
+	scope := DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID}, AllowUnapproved: true}
 	search := func(query string, scope DocumentRetrievalScope, id string) DocumentSearchResult {
 		t.Helper()
 		result, err := s.SearchSources(ctx, DocumentSearchOptions{Query: query, Limit: 8, DocumentID: id}, scope)
@@ -87,27 +90,30 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 			t.Fatal(err)
 		}
 		result := search(libraryTerm, library, "")
-		if len(result.Results) != 2 {
-			t.Fatalf("library search requires attachments for %s evidence: %+v", status, result)
+		if len(result.Results) != 1 || result.Results[0].DocumentID != second.Document.ID {
+			t.Fatalf("library search leaked %s evidence: %+v", status, result)
 		}
-		for _, hit := range result.Results {
-			if hit.DocumentID == first.Document.ID && hit.ReviewStatus != status {
-				t.Fatal("library search did not preserve the document review status")
-			}
+		if _, err := s.ReadEvidencePage(ctx, first.Document.ID, 1, 0, library); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("unapproved library page leaked: %v", err)
 		}
-		page, err := s.ReadEvidencePage(ctx, first.Document.ID, 1, 0, library)
-		if err != nil || page.ReviewStatus != status {
-			t.Fatalf("unapproved library page: %+v %v", page, err)
+		if len(search(libraryTerm, DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID}}, "").Results) != 0 {
+			t.Fatal("ordinary conversation scope leaked unapproved evidence")
+		}
+		if len(search(libraryTerm, DocumentRetrievalScope{Team: true, AllowUnapproved: true}, "").Results) != 1 {
+			t.Fatal("team scope accepted an unapproved-access override")
+		}
+		if len(search(libraryTerm, scope, "").Results) != 1 {
+			t.Fatal("document Q&A lost access to its unapproved evidence")
 		}
 	}
 	documents, err := s.ListRetrievableDocuments(ctx, library)
-	if err != nil || !slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == first.Document.ID }) || !slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == second.Document.ID }) {
+	if err != nil || slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == first.Document.ID }) || !slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == second.Document.ID }) {
 		t.Fatalf("library document discovery: %+v %v", documents, err)
 	}
 	if _, err := s.SearchSources(ctx, DocumentSearchOptions{Query: "brakes", Limit: 8, DocumentID: second.Document.ID}, scope); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("scope override accepted: %v", err)
 	}
-	both := DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID, second.Document.ID}}
+	both := DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID, second.Document.ID}, AllowUnapproved: true}
 	exact := search("T.3.2", both, "")
 	if len(exact.Results) != 1 || exact.Results[0].DocumentID != first.Document.ID {
 		t.Fatalf("rule identifiers matched by prefix: %+v", exact)
@@ -156,7 +162,7 @@ func TestDocumentEvidenceReadIsBoundedAndIndexCanRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := DocumentRetrievalScope{DocumentIDs: []string{doc.Document.ID}}
+	scope := DocumentRetrievalScope{DocumentIDs: []string{doc.Document.ID}, AllowUnapproved: true}
 	var reconstructed strings.Builder
 	cursor := 0
 	for {

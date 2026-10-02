@@ -102,8 +102,37 @@ func (s *DocumentService) ConversationRetrievalScope(ctx context.Context, conver
 	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
 		return DocumentRetrievalScope{}, ErrInvalid
 	}
-	var result DocumentRetrievalScope
+	access, err := s.agentDocumentContext(ctx, conversationID, sessionID)
+	if err != nil {
+		return DocumentRetrievalScope{}, err
+	}
+	result := DocumentRetrievalScope{DocumentIDs: access.DocumentIDs, Team: scope == "team"}
+	if access.ProfileID == "document_qa_v1" {
+		if len(access.DocumentIDs) != 1 {
+			return DocumentRetrievalScope{}, ErrForbidden
+		}
+		result.Team = false
+		result.AllowUnapproved = true
+	}
+	return result, nil
+}
+
+type agentDocumentAccess struct {
+	DocumentIDs []string `json:"document_ids"`
+	ProfileID   string   `json:"profile_id"`
+}
+
+func (s *DocumentService) agentDocumentContext(ctx context.Context, conversationID, sessionID string) (agentDocumentAccess, error) {
+	var result agentDocumentAccess
+	if s.runtime == nil {
+		return result, ErrUnavailable
+	}
+	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
+		return result, ErrInvalid
+	}
 	err := s.runtime.request(ctx, "GET", "conversations/"+url.PathEscape(conversationID)+"/retrieval-context?session_id="+url.QueryEscape(sessionID), nil, &result)
-	result.Team = scope == "team"
+	if err == nil {
+		err = validateRetrievalIDs(result.DocumentIDs)
+	}
 	return result, err
 }

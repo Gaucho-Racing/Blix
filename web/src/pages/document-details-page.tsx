@@ -18,6 +18,7 @@ import {
 } from "@/lib/documents"
 import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
+import { DocumentChat } from "@/components/document-chat"
 import { DocumentReview } from "@/components/document-review"
 import { DocumentMetadata } from "@/components/document-metadata"
 import { DocumentPDFPreview } from "@/components/document-pdf-preview"
@@ -88,10 +89,22 @@ export function DocumentDetailsPage() {
           ) : (
             <DocumentIngestion details={query.data} />
           )}
-          <DocumentMetadata
-            details={query.data}
-            key={`${documentID}:${query.data.document.metadata_revision}`}
-          />
+          <div className={
+            query.data.ready_for_questions &&
+            query.data.document.review_status !== "rejected" &&
+            (query.data.document.extracted_metadata ||
+              (!documentProcessing(query.data.document.status) && query.data.document.status !== "uploading"))
+              ? "document-info-layout with-document-chat"
+              : "document-info-layout"
+          }>
+            <DocumentMetadata
+              details={query.data}
+              key={`${documentID}:${query.data.document.metadata_revision}`}
+            />
+            {query.data.ready_for_questions && query.data.document.review_status !== "rejected" && (
+              <DocumentChat details={query.data} key={`chat:${documentID}`} />
+            )}
+          </div>
           <DocumentReadingNotes details={query.data} key={documentID} />
           <DocumentSources details={query.data} key={`sources:${documentID}`} />
           {(previewDocumentID === documentID ||

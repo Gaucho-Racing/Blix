@@ -12,16 +12,46 @@ func (h *Handler) ValidateDocumentAccess(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
 	var request struct {
 		DocumentIDs []string `json:"document_ids"`
+		Mode        string   `json:"mode"`
 	}
 	if c.ShouldBindJSON(&request) != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	if err := h.documents.ValidateRetrievalDocuments(c.Request.Context(), request.DocumentIDs); err != nil {
+	var err error
+	switch request.Mode {
+	case "", "team":
+		err = h.documents.ValidateRetrievalDocuments(c.Request.Context(), request.DocumentIDs)
+	case "questions":
+		if len(request.DocumentIDs) != 1 {
+			err = service.ErrInvalid
+		} else {
+			err = h.documents.ValidateQuestionDocument(c.Request.Context(), request.DocumentIDs[0])
+		}
+	default:
+		err = service.ErrInvalid
+	}
+	if err != nil {
 		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"allowed": true})
+}
+
+func (h *Handler) GetAgentDocument(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
+	h.GetDocument(c)
+}
+
+func (h *Handler) ReadAgentDocumentChunk(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
+	h.ReadDocumentChunk(c)
 }
 
 func (h *Handler) RetrieveDocumentEvidence(c *gin.Context) {

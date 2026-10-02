@@ -28,4 +28,6 @@ class KnowledgeDocumentReadV1Tool(KnowledgeTool):
         path = f"documents/{arguments.document_id}"
         if arguments.chunk is not None:
             path += f"/chunks/{arguments.chunk}"
-        return await self._client.request(url, "GET", path)
+        return await self._client.request(url, "GET", path,
+            params={"conversation_id": call.conversation_id, "session_id": call.parent_session_id},
+        )

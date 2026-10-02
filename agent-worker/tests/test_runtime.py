@@ -466,6 +466,71 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                if event["type"] == "model.output.delta_v1" and event["entity_id"] == call_id)
             self.assertEqual(streamed, str(sequence) * 780)
 
+    async def test_document_qa_turn_uses_specialist_and_rechecks_access_before_completion(self):
+        from blix_agent_worker.clients.knowledge import KnowledgeClientError
+        from blix_agent_worker.clients.sentinel import SentinelUser
+        from blix_agent_worker.worker import ApiRuntime
+
+        for rejected in (False, True):
+            execution = self.context()
+            document_id = new_ulid("document")
+            execution.conversation.document_ids = (document_id,)
+            execution.profile.profile_id = "document_qa_v1"
+            execution.session.profile_id = "document_qa_v1"
+            execution.allowed_tool_ids = ("knowledge_document_search_v1",)
+            caller = SentinelUser.model_construct(
+                id=execution.conversation.caller_context.user_id,
+                entity_id=execution.conversation.caller_context.entity_id,
+                first_name="Test", last_name="Admin", username="test", avatar_url="", groups=("BlixAdmins",),
+            )
+
+            class Runtime(ApiRuntime):
+                async def resolve_caller(self, execution):
+                    return caller
+
+            operations = []
+
+            class Lease:
+                async def post(self, operation, payload=None):
+                    operations.append((operation, payload))
+                    return {"action": {"action_id": new_ulid("action"), "status": "authorized"}, "commands": []}
+
+                async def events(self, batch):
+                    pass
+
+                async def checkpoint(self, state, **kwargs):
+                    pass
+
+            access_checks = []
+
+            class Knowledge:
+                async def request(self, url, method, path, **kwargs):
+                    if path == "documents/access":
+                        access_checks.append(kwargs["payload"])
+                        if rejected and len(access_checks) == 2:
+                            raise KnowledgeClientError("knowledge_not_found", "Document was rejected.")
+                        return {"allowed": True}
+                    return {"results": []}
+
+            model = ScriptedModel(
+                assistant(calls=(ModelCallRequest(ref="search", callable_id="knowledge_document_search_v1",
+                    arguments={"operation": "search", "scope": "conversation", "document_id": document_id, "query": "brakes"}),)),
+                assistant(json.dumps({"message": "I couldn’t find that in this document."})),
+            )
+            model.model = "test-qa"
+            with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+                run = Runtime({"lead": model}, None, None, None, Knowledge(), None).execute(execution, Lease())
+                if rejected:
+                    with self.assertRaises(KnowledgeClientError):
+                        await run
+                else:
+                    await run
+            self.assertEqual(len(access_checks), 2)
+            self.assertTrue(all(check == {"document_ids": [document_id], "mode": "questions"} for check in access_checks))
+            self.assertTrue(all(request.output_format.id == "document_qa_v1" for request in model.requests))
+            completed = [payload for operation, payload in operations if operation == "complete"]
+            self.assertEqual(len(completed), 0 if rejected else 1)
+
     async def test_compaction_preserves_late_replies_before_queued_questions(self):
         from blix_agent_worker.worker import ApiRuntime
 

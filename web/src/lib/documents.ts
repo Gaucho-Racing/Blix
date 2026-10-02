@@ -90,6 +90,7 @@ export interface DocumentChunk {
   findings: string
 }
 export interface DocumentDetails {
+  ready_for_questions: boolean
   review_blocked: boolean
   chunks: DocumentChunk[]
   notes: { revision: number; notes: string; created_at: string } | null

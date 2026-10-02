@@ -38,6 +38,32 @@ func callerHasGroup(caller service.CallerContext, group string) bool {
 }
 func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthService) {
 	public := router.Group("/v1", RequireAuthentication(auth))
+	public.GET("/document-chats/:documentID", RequireGroup("BlixUsers", "BlixAdmins"), func(c *gin.Context) {
+		caller, err := getCaller(c)
+		if err != nil || caller.EntityType != "USER" {
+			respondError(c, service.ErrForbidden)
+			return
+		}
+		conversation, err := h.executions.GetDocumentChat(c.Request.Context(), c.Param("documentID"), caller.EntityID)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"conversation": conversation})
+	})
+	public.POST("/document-chats/:documentID", RequireGroup("BlixUsers", "BlixAdmins"), func(c *gin.Context) {
+		caller, err := getCaller(c)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		result, err := h.executions.CreateDocumentChat(c.Request.Context(), c.Param("documentID"), caller.ConversationContext())
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusCreated, result)
+	})
 	public.POST("/conversations", func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil {

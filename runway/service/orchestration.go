@@ -198,6 +198,9 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 		return AppendedMessage{}, ErrInvalid
 	}
 	var result AppendedMessage
+	if err := s.validateDocumentChatMessage(ctx, cid, owner); err != nil {
+		return result, err
+	}
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
 		c, err := lockConversation(tx, cid)
 		if err != nil {
@@ -213,7 +216,15 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 		if queued >= 64 {
 			return fmt.Errorf("%w: too many queued turns", ErrConflict)
 		}
-		policy := profiles["blix_v1"].Policy
+		var session model.AgentSession
+		if err := tx.First(&session, "id = ?", c.LeadSessionID).Error; err != nil {
+			return err
+		}
+		profile, ok := profiles[session.ProfileID]
+		if !ok {
+			return ErrInvalid
+		}
+		policy := profile.Policy
 		turn := model.Turn{ID: identifier.New(identifier.Turn), ConversationID: c.ID, SessionID: c.LeadSessionID, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{})}
 		msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: cid, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content, DisplayContent: displayContent}
 		e, err := s.event(tx, model.ExecutionAttempt{ConversationID: cid, SessionID: c.LeadSessionID, TurnID: &turn.ID}, "message.user_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": content, "display_content": displayContent})
@@ -569,7 +580,7 @@ func (s *ExecutionService) AuthorizeConversationAccess(ctx context.Context, cid,
 }
 func (s *ExecutionService) ListConversations(ctx context.Context, owner string, admin bool) ([]model.Conversation, error) {
 	rows := []model.Conversation{}
-	q := s.database.WithContext(ctx)
+	q := s.database.WithContext(ctx).Where("lead_session_id NOT IN (SELECT id FROM runway_agent_session WHERE profile_id = ?)", "document_qa_v1")
 	if !admin {
 		q = q.Where("caller_entity_id = ?", owner)
 	}
