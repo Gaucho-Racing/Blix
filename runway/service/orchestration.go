@@ -160,7 +160,7 @@ func (s *ExecutionService) CreateConversationWithDocuments(ctx context.Context, 
 	}
 	var result CreatedConversation
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		c := model.Conversation{ID: identifier.New(identifier.Conversation), CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice(append([]string{}, documents...))}
+		c := model.Conversation{ID: identifier.New(identifier.Conversation), Kind: model.ConversationKindChat, CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice(append([]string{}, documents...))}
 		session, err := s.createSession(tx, c.ID, nil, profiles["blix_v1"], "")
 		if err != nil {
 			return err
@@ -589,7 +589,7 @@ func (s *ExecutionService) AuthorizeConversationAccess(ctx context.Context, cid,
 }
 func (s *ExecutionService) ListConversations(ctx context.Context, owner string, admin bool) ([]model.Conversation, error) {
 	rows := []model.Conversation{}
-	q := s.database.WithContext(ctx).Where("lead_session_id NOT IN (SELECT id FROM runway_agent_session WHERE profile_id = ?)", "document_qa_v1")
+	q := s.database.WithContext(ctx).Where("kind = ?", model.ConversationKindChat)
 	if !admin {
 		q = q.Where("caller_entity_id = ?", owner)
 	}

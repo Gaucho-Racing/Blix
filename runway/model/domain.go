@@ -6,6 +6,8 @@ import (
 )
 
 const (
+	ConversationKindChat     = "chat"
+	ConversationKindInternal = "internal"
 	EntityTypeUser           = "USER"
 	EntityTypeServiceAccount = "SERVICE_ACCOUNT"
 	StatusQueued             = "queued"
@@ -26,6 +28,7 @@ type CallerContext struct {
 }
 
 type Conversation struct {
+	Kind           string                            `json:"kind" gorm:"not null;default:chat;index;check:chk_conversation_kind,kind IN ('chat','internal')"`
 	DocumentIDs    datatypes.JSONSlice[string]       `json:"document_ids" gorm:"type:jsonb;not null;default:'[]'"`
 	ID             string                            `json:"conversation_id" gorm:"primaryKey"`
 	Name           string                            `json:"name" gorm:"not null"`

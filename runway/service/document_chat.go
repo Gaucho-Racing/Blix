@@ -24,7 +24,7 @@ func (s *ExecutionService) validateQuestionDocument(ctx context.Context, id stri
 
 func documentChatQuery(tx *gorm.DB, documentID, owner string) *gorm.DB {
 	ids, _ := json.Marshal([]string{documentID})
-	return tx.Where("caller_entity_id = ? AND document_ids = ?::jsonb AND lead_session_id IN (SELECT id FROM runway_agent_session WHERE profile_id = ?)", owner, string(ids), "document_qa_v1")
+	return tx.Where("kind = ? AND caller_entity_id = ? AND document_ids = ?::jsonb AND lead_session_id IN (SELECT id FROM runway_agent_session WHERE profile_id = ?)", model.ConversationKindInternal, owner, string(ids), "document_qa_v1")
 }
 
 func (s *ExecutionService) GetDocumentChat(ctx context.Context, documentID, owner string) (*model.Conversation, error) {
@@ -51,7 +51,7 @@ func (s *ExecutionService) CreateDocumentChat(ctx context.Context, documentID st
 	}
 	var result CreatedConversation
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		conversation := model.Conversation{ID: identifier.New(identifier.Conversation), CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice([]string{documentID})}
+		conversation := model.Conversation{ID: identifier.New(identifier.Conversation), Kind: model.ConversationKindInternal, CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice([]string{documentID})}
 		session, err := s.createSession(tx, conversation.ID, nil, profiles["document_qa_v1"], "")
 		if err != nil {
 			return err

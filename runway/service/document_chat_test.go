@@ -29,6 +29,9 @@ func TestDocumentChatIsPrivateScopedAndUsesOnlyQuestionTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if created.Conversation.Kind != model.ConversationKindInternal {
+		t.Fatalf("document question is not internal: %+v", created.Conversation)
+	}
 	again, err := f.s.CreateDocumentChat(f.ctx, documentID, f.owner)
 	if err != nil || again.Conversation.ID == created.Conversation.ID || again.Session.ID == created.Session.ID {
 		t.Fatalf("question reused a conversation or session: %+v %v", again, err)

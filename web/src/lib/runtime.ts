@@ -1,6 +1,7 @@
 import { api } from "@/lib/api"
 
 export interface Conversation {
+  kind: "chat" | "internal"
   document_ids: string[]
   conversation_id: string
   name: string
