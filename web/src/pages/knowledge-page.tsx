@@ -10,7 +10,12 @@ import {
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
-import { importDocument, listDocuments, searchWiki } from "@/lib/documents"
+import {
+  importDocument,
+  listDocuments,
+  searchWiki,
+  documentStatusLabel,
+} from "@/lib/documents"
 import { errorMessage } from "@/lib/runtime"
 
 export function KnowledgePage() {
@@ -27,6 +32,7 @@ export function KnowledgePage() {
     queryKey: ["documents"],
     queryFn: listDocuments,
     enabled: allowed,
+    refetchInterval: 5000,
   })
   const results = useQuery({
     queryKey: ["wiki-search", search],
@@ -162,10 +168,19 @@ export function KnowledgePage() {
                   />
                 </label>
               </div>
+              <label>
+                What should Blix learn? (optional)
+                <textarea
+                  name="objective"
+                  rows={3}
+                  maxLength={4000}
+                  placeholder="Build a useful rules reference with exact rule identifiers and exceptions."
+                />
+              </label>
               <p className="document-help">
-                Use the date and version printed in the document. Import
-                preserves evidence; wiki updates are drafted separately for
-                review.
+                Use the date and version printed in the document. Import starts
+                background reading and a wiki draft for review. You can leave
+                the page while Blix works.
               </p>
               {(upload.error || fileError) && (
                 <p className="runtime-error" role="alert">
@@ -178,7 +193,7 @@ export function KnowledgePage() {
                   <span>
                     {progress < 100
                       ? `Uploading ${progress}%`
-                      : "Extracting page evidence…"}
+                      : "Queuing background ingestion…"}
                   </span>
                 </div>
               )}
@@ -188,7 +203,7 @@ export function KnowledgePage() {
                 ) : (
                   <Upload size={16} />
                 )}
-                {upload.isPending ? "Importing…" : "Import & preview"}
+                {upload.isPending ? "Importing…" : "Upload & start ingestion"}
               </button>
             </fieldset>
           </form>
@@ -267,7 +282,7 @@ export function KnowledgePage() {
           <div>
             <h2>Document library</h2>
             <span>
-              Original evidence · choose a focused page range to curate.
+              Original evidence, ingestion progress, and wiki proposals.
             </span>
           </div>
         </div>
@@ -316,7 +331,8 @@ export function KnowledgePage() {
                 {document.publisher} · {document.version}
               </p>
               <footer>
-                {document.page_count} pages
+                {documentStatusLabel(document.status)} ·{" "}
+                {document.page_count || "—"} pages
                 <span>{document.published_at.slice(0, 10)}</span>
               </footer>
             </Link>

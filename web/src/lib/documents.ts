@@ -1,8 +1,30 @@
+import axios from "axios"
 import { api } from "@/lib/api"
 import type { WikiChangesetDetails } from "@/lib/knowledge"
 
 export interface TeamDocument {
   document_id: string
+  uploaded_by: string
+  depot_file_id: string
+  status:
+    | "uploading"
+    | "upload_failed"
+    | "queued"
+    | "extracting"
+    | "reading"
+    | "reconciling"
+    | "ready"
+    | "partial"
+    | "no_changes"
+    | "failed"
+    | "cancelling"
+    | "cancelled"
+    | "imported"
+  objective: string
+  generation: number
+  conversation_id: string
+  task_id: string
+  error: string
   title: string
   filename: string
   publisher: string
@@ -14,7 +36,17 @@ export interface TeamDocument {
   size_bytes: number
   created_at: string
 }
+export interface DocumentChunk {
+  number: number
+  first_page: number
+  last_page: number
+  completed_at: string | null
+  findings: string
+}
 export interface DocumentDetails {
+  chunks: DocumentChunk[]
+  notes: { revision: number; notes: string; created_at: string } | null
+  changesets: { changeset_id: string; summary: string; status: string }[]
   document: TeamDocument
   pages: {
     page_number: number
@@ -67,14 +99,69 @@ export async function importDocument(
   form: FormData,
   progress: (percent: number) => void,
 ) {
+  const file = form.get("file")
+  if (!(file instanceof File)) throw new Error("Choose a PDF.")
+  const metadata = Object.fromEntries(
+    [...form.entries()].filter(([key]) => key !== "file"),
+  )
+  const intent = (
+    await api.post<{
+      document: TeamDocument
+      upload: { upload_url: string; method: string }
+    }>(`${root}/documents/uploads`, { ...metadata, filename: file.name })
+  ).data
+  await axios.put(intent.upload.upload_url, file, {
+    headers: { "Content-Type": "application/pdf" },
+    timeout: 120_000,
+    onUploadProgress: (event) =>
+      progress(Math.round((event.progress ?? 0) * 100)),
+  })
   return (
-    await api.post<DocumentDetails>(`${root}/documents`, form, {
-      timeout: 90_000,
-      onUploadProgress: (event) =>
-        progress(Math.round((event.progress ?? 0) * 100)),
-    })
+    await api.post<DocumentDetails>(
+      `${root}/documents/${intent.document.document_id}/complete`,
+    )
   ).data
 }
+export async function controlDocument(
+  id: string,
+  operation: "cancel" | "retry" | "complete",
+) {
+  const path = operation === "complete" ? "complete" : `ingestion/${operation}`
+  return (await api.post<DocumentDetails>(`${root}/documents/${id}/${path}`))
+    .data
+}
+export async function getDocumentChunk(
+  id: string,
+  number: number,
+  signal?: AbortSignal,
+) {
+  return (
+    await api.get<{
+      chunk: DocumentChunk
+      evidence: { page: number; source_record_id: string; content: string }[]
+    }>(`${root}/documents/${id}/chunks/${number}`, { signal })
+  ).data
+}
+export const documentProcessing = (status: TeamDocument["status"]) =>
+  ["queued", "extracting", "reading", "reconciling", "cancelling"].includes(
+    status,
+  )
+export const documentStatusLabel = (status: TeamDocument["status"]) =>
+  ({
+    uploading: "Upload pending",
+    upload_failed: "Upload failed",
+    queued: "Queued",
+    extracting: "Extracting text",
+    reading: "Reading document",
+    reconciling: "Drafting wiki changes",
+    ready: "Ready for review",
+    partial: "Review with coverage warnings",
+    no_changes: "Processed · no new changes",
+    failed: "Processing failed",
+    cancelling: "Cancelling",
+    cancelled: "Cancelled",
+    imported: "Source evidence imported",
+  })[status]
 export async function getDocument(id: string, signal?: AbortSignal) {
   return (await api.get<DocumentDetails>(`${root}/documents/${id}`, { signal }))
     .data

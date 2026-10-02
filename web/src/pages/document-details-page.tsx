@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,8 +8,19 @@ import {
 } from "lucide-react"
 import { useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { downloadDocument, getDocument, getDocumentPage } from "@/lib/documents"
+import {
+  controlDocument,
+  documentProcessing,
+  documentStatusLabel,
+  downloadDocument,
+  getDocument,
+  getDocumentPage,
+  getDocumentChunk,
+} from "@/lib/documents"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import type { DocumentDetails } from "@/lib/documents"
+import { useAuth } from "@/lib/auth"
 import { appendMessage, createConversation, errorMessage } from "@/lib/runtime"
 
 export function DocumentDetailsPage() {
@@ -17,6 +28,10 @@ export function DocumentDetailsPage() {
   const query = useQuery({
     queryKey: ["document", documentID],
     queryFn: ({ signal }) => getDocument(documentID, signal),
+    refetchInterval: (query) =>
+      query.state.data && documentProcessing(query.state.data.document.status)
+        ? 2000
+        : false,
   })
   return (
     <div className="workspace-page document-page">
@@ -35,7 +50,13 @@ export function DocumentDetailsPage() {
           </button>
         </p>
       ) : (
-        <DocumentWorkspace details={query.data} key={documentID} />
+        <>
+          <DocumentHeader details={query.data} />
+          <DocumentIngestion details={query.data} />
+          {query.data.pages.length > 0 && (
+            <DocumentWorkspace details={query.data} key={documentID} />
+          )}
+        </>
       )}
     </div>
   )
@@ -65,7 +86,6 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
       getDocumentPage(document.document_id, preview, signal),
     staleTime: Infinity,
   })
-  const download = useMutation({ mutationFn: () => downloadDocument(document) })
   const selection = pages.filter(
     (page) => page.page_number >= first && page.page_number <= last,
   )
@@ -100,31 +120,6 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
   })
   return (
     <>
-      <header className="workspace-toolbar">
-        <div>
-          <span className="workspace-kicker">
-            IMPORTED DOCUMENT · {document.kind.toUpperCase()}
-          </span>
-          <h1>{document.title}</h1>
-          <p>
-            {document.publisher} · Version {document.version} · Revised{" "}
-            {document.published_at.slice(0, 10)}
-          </p>
-        </div>
-        <button
-          className="secondary-button"
-          disabled={download.isPending}
-          onClick={() => download.mutate()}
-          type="button"
-        >
-          <Download size={15} /> Original PDF
-        </button>
-      </header>
-      {download.error && (
-        <p role="alert" className="runtime-error">
-          {errorMessage(download.error)}
-        </p>
-      )}
       <div className="knowledge-review-notice">
         <FileText size={20} />
         <div>
@@ -132,9 +127,8 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
             {document.page_count} pages imported as source evidence
           </strong>
           <p>
-            Check the extracted text, select a focused range, and ask Blix to
-            propose wiki changes. Imported evidence becomes searchable in the
-            wiki after publication.
+            Inspect the original page evidence or start an additional focused
+            task. Wiki changes become searchable after publication.
           </p>
           {document.external_url && (
             <a href={document.external_url} target="_blank" rel="noreferrer">
@@ -206,8 +200,9 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
           <span className="workspace-kicker">NEXT STEP</span>
           <h2>Make this useful to the team.</h2>
           <p>
-            Give Blix a focused objective. It will read the selected evidence,
-            compare it with the wiki, and draft updates for review.
+            For an additional focused task, give Blix an objective. It will read
+            the selected evidence, compare it with the wiki, and draft updates
+            for review.
           </p>
           <form
             className="document-form"
@@ -292,6 +287,213 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
           </form>
         </section>
       </div>
+    </>
+  )
+}
+
+function DocumentIngestion({ details }: { details: DocumentDetails }) {
+  const { document, chunks, notes, changesets } = details
+  const cache = useQueryClient()
+  const auth = useAuth()
+  const canControl = auth.user?.entity_id === document.uploaded_by
+  const [selectedChunk, setSelectedChunk] = useState(1)
+  const completed = chunks.filter((chunk) => chunk.completed_at !== null)
+  const active = documentProcessing(document.status)
+  const control = useMutation({
+    mutationFn: (operation: "cancel" | "retry" | "complete") =>
+      controlDocument(document.document_id, operation),
+    onSuccess: (data) => {
+      cache.setQueryData(["document", document.document_id], data)
+      void cache.invalidateQueries({ queryKey: ["documents"] })
+    },
+  })
+  const reading = useQuery({
+    queryKey: ["document-chunk", document.document_id, selectedChunk],
+    queryFn: ({ signal }) =>
+      getDocumentChunk(document.document_id, selectedChunk, signal),
+    enabled: completed.some((chunk) => chunk.number === selectedChunk),
+    refetchInterval: active ? 5000 : false,
+  })
+  const citedNotes = (content: string) =>
+    content.replace(/sourcerecord_[0-9a-z]{26}/g, (id) => {
+      const page = details.pages.find((page) => page.source_record_id === id)
+      return page
+        ? `[PDF page ${page.page_number}](/knowledge/documents/${document.document_id}?page=${page.page_number})`
+        : id
+    })
+  return (
+    <section className="panel ingestion-panel">
+      <header className="workspace-toolbar">
+        <div>
+          <span className="workspace-kicker">DOCUMENT INGESTION</span>
+          <h2>
+            {active && <LoaderCircle className="spin" size={15} />}{" "}
+            {documentStatusLabel(document.status)}
+          </h2>
+        </div>
+        <div className="ingestion-actions">
+          {document.conversation_id && (
+            <Link
+              className="secondary-button"
+              to={`/chat/${document.conversation_id}`}
+            >
+              Discuss with Blix
+            </Link>
+          )}
+          {canControl && active && document.status !== "cancelling" && (
+            <button
+              className="secondary-button"
+              disabled={control.isPending}
+              onClick={() => control.mutate("cancel")}
+              type="button"
+            >
+              Cancel processing
+            </button>
+          )}
+          {canControl && ["failed", "cancelled"].includes(document.status) && (
+            <button
+              className="primary-button"
+              disabled={control.isPending}
+              onClick={() => control.mutate("retry")}
+              type="button"
+            >
+              Retry unfinished work
+            </button>
+          )}
+          {canControl && document.status === "uploading" && (
+            <button
+              className="secondary-button"
+              disabled={control.isPending}
+              onClick={() => control.mutate("complete")}
+              type="button"
+            >
+              Finish uploaded file
+            </button>
+          )}
+        </div>
+      </header>
+      {chunks.length > 0 && (
+        <div className="document-progress">
+          <progress max={chunks.length} value={completed.length} />
+          <span>
+            {completed.length} / {chunks.length} reading chunks saved ·{" "}
+            {document.page_count} PDF pages
+          </span>
+        </div>
+      )}
+      {active && (
+        <p className="document-help">
+          Processing continues in the background. You can leave this page and
+          return later.
+        </p>
+      )}
+      {document.error && (
+        <p className="runtime-error" role="status">
+          {document.error}
+        </p>
+      )}
+      {control.error && (
+        <p className="runtime-error" role="alert">
+          {errorMessage(control.error)}
+        </p>
+      )}
+      {document.objective && (
+        <p className="document-help">Objective: {document.objective}</p>
+      )}
+      <p className="document-help">
+        This pass reads extracted text. Images, diagrams, and visual table
+        layout still need inspection. Ingestion drafts changes; it does not
+        publish them.
+      </p>
+      {changesets.length > 0 && (
+        <div className="ingestion-proposals">
+          {changesets.map((changeset) => (
+            <Link
+              className="wiki-result"
+              key={changeset.changeset_id}
+              to={`/knowledge/proposals/${changeset.changeset_id}`}
+            >
+              <strong>{changeset.summary}</strong>
+              <small>{changeset.status}</small>
+            </Link>
+          ))}
+        </div>
+      )}
+      {notes && (
+        <details className="ingestion-notes">
+          <summary>Working notes · revision {notes.revision}</summary>
+          <div className="wiki-markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {citedNotes(notes.notes)}
+            </ReactMarkdown>
+          </div>
+        </details>
+      )}
+      {completed.length > 0 && (
+        <details className="ingestion-notes">
+          <summary>Saved section findings</summary>
+          <label>
+            Section{" "}
+            <select
+              value={selectedChunk}
+              onChange={(event) => setSelectedChunk(Number(event.target.value))}
+            >
+              {completed.map((chunk) => (
+                <option key={chunk.number} value={chunk.number}>
+                  Chunk {chunk.number} · PDF pages {chunk.first_page}–
+                  {chunk.last_page}
+                </option>
+              ))}
+            </select>
+          </label>
+          {reading.error && (
+            <p role="alert" className="runtime-error">
+              {errorMessage(reading.error)}
+            </p>
+          )}
+          {reading.data && (
+            <div className="wiki-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {citedNotes(reading.data.chunk.findings)}
+              </ReactMarkdown>
+            </div>
+          )}
+        </details>
+      )}
+    </section>
+  )
+}
+
+function DocumentHeader({ details }: { details: DocumentDetails }) {
+  const { document } = details
+  const download = useMutation({ mutationFn: () => downloadDocument(document) })
+  return (
+    <>
+      <header className="workspace-toolbar">
+        <div>
+          <span className="workspace-kicker">
+            TEAM DOCUMENT · {document.kind.toUpperCase()}
+          </span>
+          <h1>{document.title}</h1>
+          <p>
+            {document.publisher} · {document.version} · Revised{" "}
+            {document.published_at.slice(0, 10)}
+          </p>
+        </div>
+        <button
+          className="secondary-button"
+          disabled={download.isPending || document.size_bytes === 0}
+          onClick={() => download.mutate()}
+          type="button"
+        >
+          <Download size={15} /> Original PDF
+        </button>
+      </header>
+      {download.error && (
+        <p role="alert" className="runtime-error">
+          {errorMessage(download.error)}
+        </p>
+      )}
     </>
   )
 }
