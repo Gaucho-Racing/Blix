@@ -108,11 +108,14 @@ class OpenAIResponsesModel:
 
     @classmethod
     def from_environment(cls, profile: str = "lead") -> Self:
-        prefix = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR"}.get(profile, "LEAD")
+        prefix = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR", "document_qa": "DOCUMENT_QA"}.get(profile, "LEAD")
+        model = os.environ.get(f"LLM_{prefix}_MODEL")
+        if profile == "document_qa" and not model:
+            raise ValueError("LLM_DOCUMENT_QA_MODEL must be configured for document questions.")
         return cls(
             base_url=os.environ.get("LLM_GATEWAY_ENDPOINT", ""),
             api_key=os.environ.get("LLM_GATEWAY_API_KEY", ""),
-            model=os.environ.get(f"LLM_{prefix}_MODEL") or os.environ.get("LLM_MODEL", "gpt-6-astra"),
+            model=model or os.environ.get("LLM_MODEL", "gpt-6-astra"),
             reasoning_effort=(
                 os.environ.get(f"LLM_{prefix}_REASONING_EFFORT") or os.environ.get("LLM_REASONING_EFFORT", "")
             ).strip()

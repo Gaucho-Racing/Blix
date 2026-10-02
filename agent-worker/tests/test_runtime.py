@@ -477,6 +477,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             execution.conversation.document_ids = (document_id,)
             execution.profile.profile_id = "document_qa_v1"
             execution.session.profile_id = "document_qa_v1"
+            execution.profile.policy["model_profile"] = "document_qa"
             execution.allowed_tool_ids = ("knowledge_document_search_v1",)
             template = execution.messages[0]
             execution.messages = (
@@ -525,7 +526,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
             model.model = "test-qa"
             with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
-                run = Runtime({"lead": model}, None, None, None, Knowledge(), None).execute(execution, Lease())
+                run = Runtime({"document_qa": model}, None, None, None, Knowledge(), None).execute(execution, Lease())
                 if rejected:
                     with self.assertRaises(KnowledgeClientError):
                         await run

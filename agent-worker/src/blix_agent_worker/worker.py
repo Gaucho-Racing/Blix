@@ -615,7 +615,7 @@ async def run() -> None:
         runway = await stack.enter_async_context(RunwayClient(os.environ.get("RUNWAY_URL", "http://localhost:9999")))
         models = {
             profile: await stack.enter_async_context(OpenAIResponsesModel.from_environment(profile))
-            for profile in ("lead", "research", "curator")
+            for profile in ("lead", "research", "curator", "document_qa")
         }
         tavily = await stack.enter_async_context(TavilyClient())
         sentinel = await stack.enter_async_context(SentinelClient())

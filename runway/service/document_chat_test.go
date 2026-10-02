@@ -63,7 +63,7 @@ func TestDocumentChatIsPrivateScopedAndUsesOnlyQuestionTools(t *testing.T) {
 		}
 	}
 	appended, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "What does T.3.2 require?")
-	if err != nil || appended.Turn.SessionID != created.Session.ID || appended.Turn.Policy.Data().DeadlineSeconds != 300 {
+	if err != nil || appended.Turn.SessionID != created.Session.ID || appended.Turn.Policy.Data().DeadlineSeconds != 300 || appended.Turn.Policy.Data().ModelProfile != "document_qa" {
 		t.Fatalf("incorrect QA turn routing: %+v %v", appended, err)
 	}
 	if _, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "And what else?"); !errors.Is(err, ErrConflict) {
