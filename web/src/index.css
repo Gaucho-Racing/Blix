@@ -801,6 +801,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 .ingestion-panel { padding: 24px; margin-bottom: 24px; }
 .ingestion-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.document-header-actions { flex-shrink: 0; }
 .ingestion-panel .workspace-toolbar { min-height: 0; margin-bottom: 16px; }
 .ingestion-panel .workspace-toolbar h2 { margin-bottom: 0; }
 .ingestion-stage { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
@@ -832,7 +833,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-upload-status .document-progress { min-width: 0; margin: 0; }
 .document-metadata-panel { padding: 1.5rem; }
 .document-metadata-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-.document-metadata-heading:last-child { margin-bottom: 0; }
 .document-metadata-heading h2, .document-pdf-preview h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.025em; }
 .document-metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 2rem; margin: 0; }
 .document-metadata-grid dt { color: var(--muted); font-size: .8rem; }

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Eye, LoaderCircle, Pencil, Plus, X } from "lucide-react"
+import { LoaderCircle, Pencil, Plus, X } from "lucide-react"
 import { useId, useState } from "react"
 import { useAuth } from "@/lib/auth"
 import { documentProcessing, updateDocumentMetadata } from "@/lib/documents"
@@ -16,13 +16,7 @@ const labels: Record<Exclude<keyof DocumentMetadataFields, "tags">, string> = {
   external_url: "Official source URL",
 }
 
-export function DocumentMetadata({
-  details,
-  onPreview,
-}: {
-  details: DocumentDetails
-  onPreview: () => void
-}) {
+export function DocumentMetadata({ details }: { details: DocumentDetails }) {
   const { document } = details
   const auth = useAuth()
   const cache = useQueryClient()
@@ -77,32 +71,21 @@ export function DocumentMetadata({
       setEditing(false)
     },
   })
-  if (!extracted && active && document.size_bytes === 0) return null
+  if (!extracted && active) return null
 
   return (
     <section className="panel document-metadata-panel">
       <header className="document-metadata-heading">
         <h2>Document details</h2>
-        <div className="ingestion-actions">
-          {document.size_bytes > 0 && (
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={onPreview}
-            >
-              <Eye size={14} /> Preview document
-            </button>
-          )}
-          {canEdit && !editing && (
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => setEditing(true)}
-            >
-              <Pencil size={14} /> Edit details
-            </button>
-          )}
-        </div>
+        {canEdit && !editing && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil size={14} /> Edit details
+          </button>
+        )}
       </header>
       {editing && canEdit ? (
         <form

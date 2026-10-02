@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Download,
+  Eye,
   GitPullRequest,
   LoaderCircle,
 } from "lucide-react"
@@ -68,7 +69,10 @@ export function DocumentDetailsPage() {
         </p>
       ) : (
         <>
-          <DocumentHeader details={query.data} />
+          <DocumentHeader
+            details={query.data}
+            onPreview={() => setPreviewDocumentID(documentID)}
+          />
           <DocumentReview details={query.data} />
           {query.data.document.review_status === "ingested" ? (
             <DocumentChangesets changesets={query.data.changesets} />
@@ -77,7 +81,6 @@ export function DocumentDetailsPage() {
           )}
           <DocumentMetadata
             details={query.data}
-            onPreview={() => setPreviewDocumentID(documentID)}
             key={`${documentID}:${query.data.document.metadata_revision}`}
           />
           <DocumentReadingNotes details={query.data} key={documentID} />
@@ -254,7 +257,13 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
   }
 }
 
-function DocumentHeader({ details }: { details: DocumentDetails }) {
+function DocumentHeader({
+  details,
+  onPreview,
+}: {
+  details: DocumentDetails
+  onPreview: () => void
+}) {
   const { document } = details
   const download = useMutation({
     mutationFn: () => downloadDocument(document),
@@ -268,14 +277,24 @@ function DocumentHeader({ details }: { details: DocumentDetails }) {
           <p>{document.filename}</p>
           <DocumentTags tags={document.tags} />
         </div>
-        <button
-          className="secondary-button"
-          disabled={download.isPending || document.size_bytes === 0}
-          onClick={() => download.mutate()}
-          type="button"
-        >
-          <Download size={15} /> Original PDF
-        </button>
+        <div className="ingestion-actions document-header-actions">
+          <button
+            className="secondary-button"
+            disabled={document.size_bytes === 0}
+            onClick={onPreview}
+            type="button"
+          >
+            <Eye size={15} /> Preview
+          </button>
+          <button
+            className="secondary-button"
+            disabled={download.isPending || document.size_bytes === 0}
+            onClick={() => download.mutate()}
+            type="button"
+          >
+            <Download size={15} /> Download
+          </button>
+        </div>
       </header>
       {download.error && (
         <p role="alert" className="runtime-error">
