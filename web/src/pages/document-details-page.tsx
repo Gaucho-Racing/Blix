@@ -38,7 +38,9 @@ export function DocumentDetailsPage() {
     refetchInterval: (query) =>
       query.state.data && documentProcessing(query.state.data.document.status)
         ? 2000
-        : query.state.data?.document.review_status === "in_review"
+        : ["pending", "in_review"].includes(
+              query.state.data?.document.review_status ?? "",
+            )
           ? 5000
           : false,
   })

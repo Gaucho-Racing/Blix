@@ -59,11 +59,11 @@ func (s *DocumentService) Review(ctx context.Context, id, decision string, input
 		if (decision == "approve" && doc.ReviewStatus == model.DocumentReviewIngested) || (decision == "reject" && doc.ReviewStatus == model.DocumentReviewRejected) {
 			return nil
 		}
-		if doc.ReviewStatus != model.DocumentReviewInReview {
+		if doc.ReviewStatus != model.DocumentReviewInReview && doc.ReviewStatus != model.DocumentReviewPending {
 			return fmt.Errorf("%w: document review is already complete", ErrConflict)
 		}
 		if decision == "approve" {
-			if !documentProcessingComplete(doc.Status) {
+			if doc.ReviewStatus != model.DocumentReviewInReview || !documentProcessingComplete(doc.Status) {
 				return fmt.Errorf("%w: document processing must finish before approval", ErrConflict)
 			}
 			return tx.Model(&doc).Updates(documentApprovalUpdates(input)).Error

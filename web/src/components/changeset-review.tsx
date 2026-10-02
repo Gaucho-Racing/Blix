@@ -100,7 +100,8 @@ export function ChangesetReview({
       (document) =>
         document.review_status !== "rejected" &&
         (document.review_status === "ingested" ||
-          documentProcessingComplete(document.status)),
+          (document.review_status === "in_review" &&
+            documentProcessingComplete(document.status))),
     )
   const canReject =
     canReview &&
@@ -214,7 +215,13 @@ export function ChangesetReview({
               to={`/knowledge/documents/${document.document_id}`}
             >
               <span>{document.title}</span>
-              <StatusBadge status={document.review_status} />
+              <StatusBadge
+                status={
+                  document.review_status === "pending"
+                    ? document.status
+                    : document.review_status
+                }
+              />
               <ArrowRight size={15} />
             </Link>
           ))}

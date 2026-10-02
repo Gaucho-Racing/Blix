@@ -19,6 +19,7 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/pkg/depot"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 	"github.com/gaucho-racing/blix/knowledge/repository"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -60,6 +61,67 @@ func reviewCaller(admin bool) CallerContext {
 		group = "BlixAdmins"
 	}
 	return CallerContext{EntityID: identifier.New(identifier.Entity), EntityType: "USER", Groups: []string{group}}
+}
+
+func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
+	for _, tc := range []struct {
+		name, outcome, status, review string
+		lowText                       bool
+	}{
+		{"proposal", "proposed", "ready", model.DocumentReviewInReview, false},
+		{"coverage gaps", "proposed", "partial", model.DocumentReviewInReview, true},
+		{"no changes", "no_changes", "no_changes", model.DocumentReviewInReview, false},
+		{"blocked", "blocked", "failed", model.DocumentReviewPending, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _, _, _ := indexFixture(t)
+			s, doc := documentReviewFixture(t, db)
+			t.Cleanup(func() {
+				if err := db.Delete(&model.Document{}, "id = ?", doc.Document.ID).Error; err != nil {
+					t.Error(err)
+				}
+			})
+			ctx := context.Background()
+			if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reconciling", "review_status": model.DocumentReviewPending, "extracted_metadata": datatypes.JSON([]byte("{}"))}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if tc.lowText {
+				if err := db.Model(&model.DocumentPage{}).Where("document_id = ?", doc.Document.ID).Update("character_count", 0).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			task := identifier.New(identifier.Prefix("task"))
+			runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/internal/v1/document-attempts/validate" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.Document.SessionID, "conversation_id": doc.Document.ConversationID, "attempt_number": 1, "input": map[string]any{"document_id": doc.Document.ID, "generation": doc.Document.Generation}})
+			}))
+			t.Cleanup(runtime.Close)
+			s.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "internal"))
+			if _, err := s.Review(ctx, doc.Document.ID, "approve", ReviewInput{Caller: reviewCaller(true)}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("pending document accepted: %v", err)
+			}
+			if tc.outcome == "proposed" {
+				wiki := NewWikiService(db, &publishingRepository{})
+				changeset := documentChangesetFixture(t, wiki, doc)
+				if _, err := wiki.ReviewChangeset(ctx, changeset.Changeset.ID, "approve", ReviewInput{Caller: reviewCaller(true)}); !errors.Is(err, ErrConflict) {
+					t.Fatalf("pending source published before ingestion completed: %v", err)
+				}
+			}
+			finished, err := s.Finish(ctx, doc.Document.ID, DocumentExecution{Generation: doc.Document.Generation}, tc.outcome)
+			if err != nil || finished.Document.Status != tc.status || finished.Document.ReviewStatus != tc.review {
+				t.Fatalf("ingestion completion: %+v %v", finished.Document, err)
+			}
+			if tc.outcome == "blocked" {
+				retry, err := s.Control(ctx, doc.Document.ID, doc.Document.UploadedBy, "retry")
+				if err != nil || retry.Document.ReviewStatus != model.DocumentReviewPending || retry.Document.Status != "queued" {
+					t.Fatalf("retry entered review: %+v %v", retry.Document, err)
+				}
+			}
+		})
+	}
 }
 
 func TestDocumentApprovalIsSeparateFromWikiPublication(t *testing.T) {
@@ -269,7 +331,7 @@ func TestRejectedDocumentFencesRunningIngestion(t *testing.T) {
 	s, doc := documentReviewFixture(t, db)
 	wiki := NewWikiService(db, &publishingRepository{})
 	changeset := documentChangesetFixture(t, wiki, doc)
-	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reading", "task_id": identifier.New(identifier.Prefix("task"))}).Error; err != nil {
+	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reading", "review_status": model.DocumentReviewPending, "task_id": identifier.New(identifier.Prefix("task"))}).Error; err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -295,7 +357,7 @@ func TestRejectedDocumentFencesRunningIngestion(t *testing.T) {
 func TestDocumentRejectionDuringUploadCompletionDoesNotQueueWork(t *testing.T) {
 	db, _, _, _ := indexFixture(t)
 	s, doc := documentReviewFixture(t, db)
-	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "uploading", "depot_file_id": "file_test"}).Error; err != nil {
+	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "uploading", "review_status": model.DocumentReviewPending, "depot_file_id": "file_test"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	started, resume := make(chan struct{}), make(chan struct{})
@@ -339,7 +401,7 @@ func TestDocumentRejectionDuringUploadCompletionDoesNotQueueWork(t *testing.T) {
 func TestDocumentRejectionDuringSchedulingRetainsCancellationForRetry(t *testing.T) {
 	db, _, _, _ := indexFixture(t)
 	s, doc := documentReviewFixture(t, db)
-	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "queued", "task_id": ""}).Error; err != nil {
+	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "task_id": ""}).Error; err != nil {
 		t.Fatal(err)
 	}
 	started, resume := make(chan struct{}), make(chan struct{})

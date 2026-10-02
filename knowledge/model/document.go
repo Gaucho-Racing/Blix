@@ -7,13 +7,14 @@ import (
 )
 
 const (
+	DocumentReviewPending  = "pending"
 	DocumentReviewInReview = "in_review"
 	DocumentReviewIngested = "ingested"
 	DocumentReviewRejected = "rejected"
 )
 
 type Document struct {
-	ReviewStatus      string                      `json:"review_status" gorm:"index;not null;default:in_review;check:chk_knowledge_document_review_status,review_status IN ('in_review','ingested','rejected')"`
+	ReviewStatus      string                      `json:"review_status" gorm:"index;not null;default:pending;check:chk_knowledge_document_review_status,review_status IN ('pending','in_review','ingested','rejected')"`
 	ReviewedBy        string                      `json:"reviewed_by" gorm:"not null;default:''"`
 	ReviewNote        string                      `json:"review_note" gorm:"type:text;not null;default:''"`
 	ReviewedAt        *time.Time                  `json:"reviewed_at,omitempty"`

@@ -85,6 +85,9 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	docID = intent.Document.ID
+	if intent.Document.ReviewStatus != model.DocumentReviewPending {
+		t.Fatal("an upload must not enter review before ingestion")
+	}
 	if intent.Document.Title != "rules" || intent.Document.Publisher != "" || intent.Document.Version != "" || intent.Document.PublishedAt != nil {
 		t.Fatal("upload must use only the filename hint and leave unestablished metadata empty")
 	}
@@ -98,7 +101,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Document.Status != "queued" || extractor.calls != 0 {
+	if completed.Document.Status != "queued" || completed.Document.ReviewStatus != model.DocumentReviewPending || extractor.calls != 0 {
 		t.Fatal("completion must queue without extraction")
 	}
 	if _, err := service.CompleteUpload(ctx, docID, caller.EntityID); err != nil {
@@ -113,6 +116,9 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	automatic := ExtractedDocumentMetadata{Title: "Official braking rules", Publisher: "SAE International", Version: "1.0", Tags: []string{"formula sae", "braking"}, PublishedAt: "", SourceRecordIDs: []string{prepared.Pages[0].SourceRecordID}, Warnings: []string{"Publication date is not established."}}
+	if prepared.Document.ReviewStatus != model.DocumentReviewPending {
+		t.Fatal("reading document entered review")
+	}
 	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); !errors.Is(err, ErrConflict) {
 		t.Fatalf("metadata was accepted before complete reading: %v", err)
 	}
@@ -166,7 +172,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancelled, err := service.Get(ctx, docID)
-	if err != nil || cancelled.Document.Status != "cancelled" {
+	if err != nil || cancelled.Document.Status != "cancelled" || cancelled.Document.ReviewStatus != model.DocumentReviewPending {
 		t.Fatalf("cancel status: %+v %v", cancelled, err)
 	}
 	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
@@ -241,11 +247,12 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Reconcile(ctx, docID, execution); err != nil {
-		t.Fatal(err)
+	reconciling, err := service.Reconcile(ctx, docID, execution)
+	if err != nil || reconciling.Document.ReviewStatus != model.DocumentReviewPending {
+		t.Fatalf("reconciliation entered review before completion: %+v %v", reconciling.Document, err)
 	}
 	final, err := service.Finish(ctx, docID, execution, "no_changes")
-	if err != nil || final.Document.Status != "no_changes" {
+	if err != nil || final.Document.Status != "no_changes" || final.Document.ReviewStatus != model.DocumentReviewInReview {
 		t.Fatalf("completion: %+v %v", final, err)
 	}
 	cleared := ""

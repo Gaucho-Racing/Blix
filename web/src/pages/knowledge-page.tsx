@@ -301,19 +301,21 @@ export function KnowledgePage() {
           role="group"
           aria-label="Document review status"
         >
-          {(["in_review", "ingested", "rejected"] as const).map((status) => (
-            <button
-              key={status}
-              type="button"
-              aria-pressed={documentFilter === status}
-              onClick={() => setDocumentFilter(status)}
-            >
-              {documentReviewLabel(status)} ·{" "}
-              {documents.data?.filter(
-                (document) => document.review_status === status,
-              ).length ?? 0}
-            </button>
-          ))}
+          {(["pending", "in_review", "ingested", "rejected"] as const).map(
+            (status) => (
+              <button
+                key={status}
+                type="button"
+                aria-pressed={documentFilter === status}
+                onClick={() => setDocumentFilter(status)}
+              >
+                {documentReviewLabel(status)} ·{" "}
+                {documents.data?.filter(
+                  (document) => document.review_status === status,
+                ).length ?? 0}
+              </button>
+            ),
+          )}
         </div>
         {documents.isLoading && (
           <p className="loading-state">Loading documents…</p>
@@ -332,8 +334,9 @@ export function KnowledgePage() {
             (document) => document.review_status === documentFilter,
           ) && (
             <p className="document-help">
-              No documents {documentReviewLabel(documentFilter).toLowerCase()}{" "}
-              yet.
+              {documentFilter === "pending"
+                ? "No pending documents."
+                : `No documents ${documentReviewLabel(documentFilter).toLowerCase()} yet.`}
             </p>
           )}
         <div className="document-grid">
@@ -350,7 +353,13 @@ export function KnowledgePage() {
                   <ArrowRight size={16} />
                 </div>
                 <FileText size={24} />
-                <StatusBadge status={document.review_status} />
+                <StatusBadge
+                  status={
+                    document.review_status === "pending"
+                      ? document.status
+                      : document.review_status
+                  }
+                />
                 <h3>{document.title}</h3>
                 <p>
                   {[document.publisher, document.version]

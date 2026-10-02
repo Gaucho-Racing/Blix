@@ -28,7 +28,9 @@ function ChangesetPage({ admin }: { admin: boolean }) {
       query.state.data &&
       (!["committed", "rejected"].includes(query.state.data.changeset.status) ||
         query.state.data.documents?.some(
-          (document) => document.review_status === "in_review",
+          (document) =>
+            document.review_status === "pending" ||
+            document.review_status === "in_review",
         ))
         ? 5000
         : false,

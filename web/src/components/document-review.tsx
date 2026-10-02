@@ -60,7 +60,12 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
     setDecision(action)
   }
 
-  if (document.review_status === "ingested") return null
+  if (
+    document.review_status !== "rejected" &&
+    (document.review_status !== "in_review" ||
+      !documentProcessingComplete(document.status))
+  )
+    return null
 
   return (
     <section className="panel document-review-panel">
@@ -74,9 +79,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
       <p>
         {document.review_status === "rejected"
           ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and reading evidence are retained for the review record."
-          : !documentProcessingComplete(document.status)
-            ? "A BlixAdmin can accept this document once Blix finishes processing it."
-            : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
+          : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
       </p>
       {document.reviewed_by && (
         <div className="document-review-audit">

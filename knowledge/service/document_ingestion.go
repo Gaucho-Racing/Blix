@@ -85,7 +85,7 @@ func (s *DocumentService) CompleteUpload(ctx context.Context, id, owner string) 
 	if file.ID != doc.DepotFileID || file.Status != "ACTIVE" || file.SizeBytes < 5 || file.SizeBytes > MaxDocumentBytes {
 		return details, fmt.Errorf("%w: upload a PDF up to 20 MiB", ErrInvalid)
 	}
-	err = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND status = ? AND review_status = ? AND generation = ?", id, "uploading", model.DocumentReviewInReview, doc.Generation).Updates(map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""}).Error
+	err = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND status = ? AND review_status = ? AND generation = ?", id, "uploading", model.DocumentReviewPending, doc.Generation).Updates(map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""}).Error
 	if err != nil {
 		return details, err
 	}
@@ -130,7 +130,7 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				_ = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status = ?", doc.ID, doc.Generation, "queued").Update("error", "Waiting for runtime scheduling").Error
 				continue
 			}
-			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewInReview).Updates(map[string]any{"task_id": run.TaskID, "conversation_id": run.ConversationID, "error": ""})
+			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "conversation_id": run.ConversationID, "error": ""})
 			if saved.Error != nil {
 				return saved.Error
 			}
@@ -215,7 +215,7 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 			if doc.Status != "failed" && doc.Status != "cancelled" {
 				return ErrConflict
 			}
-			return tx.Model(&doc).Updates(map[string]any{"status": "queued", "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "conversation_id": "", "error": ""}).Error
+			return tx.Model(&doc).Updates(map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "conversation_id": "", "error": ""}).Error
 		default:
 			return ErrInvalid
 		}
@@ -545,7 +545,11 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 				message = fmt.Sprintf("%d pages have little or no extracted text. Visual content has not been inspected.", lowText)
 			}
 		}
-		return tx.Model(&doc).Updates(map[string]any{"status": status, "error": message}).Error
+		updates := map[string]any{"status": status, "error": message}
+		if outcome != "blocked" {
+			updates["review_status"] = model.DocumentReviewInReview
+		}
+		return tx.Model(&doc).Updates(updates).Error
 	})
 	if err != nil {
 		return DocumentDetails{}, err

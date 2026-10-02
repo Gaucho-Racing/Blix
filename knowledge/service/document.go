@@ -220,7 +220,7 @@ func (s *DocumentService) Import(ctx context.Context, reader io.Reader, metadata
 		if err != nil {
 			return err
 		}
-		document := model.Document{ID: id, SHA256: hash, SourceID: source.ID, Title: metadata.Title, Filename: filepath.Base(metadata.Filename), Publisher: metadata.Publisher, Version: metadata.Version, Tags: datatypes.NewJSONSlice(metadata.Tags), ExternalURL: metadata.ExternalURL, PublishedAt: &metadata.PublishedAt, UploadedBy: metadata.UploadedBy, PageCount: len(pages), SizeBytes: int64(len(data))}
+		document := model.Document{ID: id, ReviewStatus: model.DocumentReviewInReview, SHA256: hash, SourceID: source.ID, Title: metadata.Title, Filename: filepath.Base(metadata.Filename), Publisher: metadata.Publisher, Version: metadata.Version, Tags: datatypes.NewJSONSlice(metadata.Tags), ExternalURL: metadata.ExternalURL, PublishedAt: &metadata.PublishedAt, UploadedBy: metadata.UploadedBy, PageCount: len(pages), SizeBytes: int64(len(data))}
 		if err := tx.Create(&document).Error; err != nil {
 			return err
 		}

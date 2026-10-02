@@ -2,7 +2,8 @@ import axios from "axios"
 import { api } from "@/lib/api"
 import type { WikiChangeset } from "@/lib/knowledge"
 
-export type DocumentReviewStatus = "in_review" | "ingested" | "rejected"
+export type DocumentReviewStatus =
+  "pending" | "in_review" | "ingested" | "rejected"
 
 export interface TeamDocument {
   review_status: DocumentReviewStatus
@@ -258,9 +259,12 @@ export async function readWiki(
 }
 
 export const documentReviewLabel = (status: DocumentReviewStatus) =>
-  ({ in_review: "In Review", ingested: "Ingested", rejected: "Rejected" })[
-    status
-  ]
+  ({
+    pending: "Pending",
+    in_review: "In Review",
+    ingested: "Ingested",
+    rejected: "Rejected",
+  })[status]
 
 export const documentProcessingComplete = (status: TeamDocument["status"]) =>
   ["ready", "partial", "no_changes", "imported"].includes(status)
