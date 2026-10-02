@@ -22,6 +22,7 @@ import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
 import { DocumentReview } from "@/components/document-review"
 import { DocumentMetadata } from "@/components/document-metadata"
+import { DocumentPDFPreview } from "@/components/document-pdf-preview"
 import { ProgressBar } from "@/components/progress-bar"
 import { errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
@@ -66,6 +67,12 @@ export function DocumentDetailsPage() {
             details={query.data}
             key={`${documentID}:${query.data.document.metadata_revision}`}
           />
+          {query.data.document.size_bytes > 0 && (
+            <DocumentPDFPreview
+              document={query.data.document}
+              key={documentID}
+            />
+          )}
         </>
       )}
     </div>
@@ -297,7 +304,9 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
 
 function DocumentHeader({ details }: { details: DocumentDetails }) {
   const { document } = details
-  const download = useMutation({ mutationFn: () => downloadDocument(document) })
+  const download = useMutation({
+    mutationFn: () => downloadDocument(document),
+  })
   return (
     <>
       <header className="workspace-toolbar">

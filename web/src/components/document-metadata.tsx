@@ -87,7 +87,7 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
           </button>
         )}
       </header>
-      {editing ? (
+      {editing && canEdit ? (
         <form
           className="document-form"
           onSubmit={(event) => {

@@ -217,13 +217,17 @@ export async function getDocumentPage(
     })
   ).data
 }
-export async function downloadDocument(document: TeamDocument) {
-  const blob = (
-    await api.get<Blob>(`${root}/documents/${document.document_id}/file`, {
+export async function getDocumentFile(id: string, signal?: AbortSignal) {
+  return (
+    await api.get<Blob>(`${root}/documents/${id}/file`, {
       responseType: "blob",
       timeout: 30_000,
+      signal,
     })
   ).data
+}
+export async function downloadDocument(document: TeamDocument) {
+  const blob = await getDocumentFile(document.document_id)
   const url = URL.createObjectURL(blob)
   const link = window.document.createElement("a")
   link.href = url

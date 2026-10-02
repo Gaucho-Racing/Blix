@@ -60,28 +60,28 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
     setDecision(action)
   }
 
+  if (document.review_status === "ingested") return null
+
   return (
     <section className="panel document-review-panel">
       <header>
         <div>
-          <span className="workspace-kicker">DOCUMENT REVIEW</span>
+          <span className="workspace-kicker">DOCUMENT STATUS</span>
           <h2>{documentReviewLabel(document.review_status)}</h2>
         </div>
         <StatusBadge status={document.review_status} />
       </header>
       <p>
-        {document.review_status === "ingested"
-          ? "This document is accepted as team knowledge. Its wiki changesets are reviewed separately."
-          : document.review_status === "rejected"
-            ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and reading evidence are retained for the review record."
-            : !documentProcessingComplete(document.status)
-              ? "A BlixAdmin can accept this document once Blix finishes processing it."
-              : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
+        {document.review_status === "rejected"
+          ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and reading evidence are retained for the review record."
+          : !documentProcessingComplete(document.status)
+            ? "A BlixAdmin can accept this document once Blix finishes processing it."
+            : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
       </p>
       {document.reviewed_by && (
         <div className="document-review-audit">
           <strong>
-            {document.review_status === "ingested" ? "Accepted" : "Rejected"}
+            Rejected
             {document.reviewed_at &&
               ` · ${formatTimestamp(document.reviewed_at)}`}
           </strong>
@@ -121,7 +121,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
       )}
       {decision && (
         <ReviewConfirmationDialog
-          kicker="DOCUMENT REVIEW"
+          kicker="DOCUMENT STATUS"
           title={
             decision === "reject"
               ? "Reject this document?"
