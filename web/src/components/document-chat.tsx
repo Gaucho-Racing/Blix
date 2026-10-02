@@ -3,7 +3,7 @@ import { AlertCircle, ArrowUp, LoaderCircle, Square } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
-import { createDocumentChat, documentQuestionFailure, getDocumentChat } from "@/lib/document-chat"
+import { createDocumentChat, documentQuestionFailure } from "@/lib/document-chat"
 import type { DocumentDetails } from "@/lib/documents"
 import {
   activeStatus, appendMessage, errorMessage, getConversation,
@@ -16,14 +16,9 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
   const auth = useAuth()
   const cache = useQueryClient()
   const [draft, setDraft] = useState("")
+  const [conversationID, setConversationID] = useState("")
   const transcript = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
-  const lookupKey = ["document-chat", document.document_id, auth.user?.entity_id]
-  const lookup = useQuery({
-    queryKey: lookupKey,
-    queryFn: ({ signal }) => getDocumentChat(document.document_id, signal),
-  })
-  const conversationID = lookup.data?.conversation_id ?? ""
   const conversation = useQuery({
     queryKey: ["conversation", conversationID],
     queryFn: ({ signal }) => getConversation(conversationID, signal),
@@ -51,9 +46,8 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
   const send = useMutation({
     mutationFn: async (question: string) => {
       follow.current = true
-      await cache.cancelQueries({ queryKey: lookupKey })
       const chat = await createDocumentChat(document.document_id)
-      cache.setQueryData(lookupKey, chat)
+      setConversationID(chat.conversation_id)
       await appendMessage(chat.conversation_id, question)
       await Promise.all([
         cache.invalidateQueries({ queryKey: ["conversation", chat.conversation_id] }),
@@ -75,7 +69,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
     }
   }, [cache, conversationID, turnStatus])
   const messages = conversation.data?.messages ?? []
-  const disabled = working || send.isPending || lookup.isPending || lookup.isError ||
+  const disabled = working || send.isPending ||
     (!!conversationID && !conversation.data)
   const liveText = live.at(-1)?.[1]
   useEffect(() => {
@@ -101,7 +95,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
         {working && !live.length && (
           <p className="document-chat-working" role="status"><LoaderCircle className="spin" size={15} /> Searching this document…</p>
         )}
-        {!messages.length && !lookup.isPending && (
+        {!messages.length && (
           <p className="document-chat-empty">Test our document extraction. Answers use only this document and don’t have access to other resources.</p>
         )}
         {failure && (
@@ -111,12 +105,12 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
           </div>
         )}
       </div>
-      {(lookup.error || conversation.error || events.error || send.error || stop.error) && (
+      {(conversation.error || events.error || send.error || stop.error) && (
         <p className="runtime-error" role="alert">
-          {errorMessage(lookup.error || conversation.error || events.error || send.error || stop.error)}
-          {(lookup.error || conversation.error) && (
+          {errorMessage(conversation.error || events.error || send.error || stop.error)}
+          {conversation.error && (
             <button className="secondary-button" type="button"
-              onClick={() => void (lookup.error ? lookup.refetch() : conversation.refetch())}>Retry</button>
+              onClick={() => void conversation.refetch()}>Retry</button>
           )}
         </p>
       )}
