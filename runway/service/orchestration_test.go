@@ -267,7 +267,7 @@ func TestQueuedTurnIncludesPrecedingReply(t *testing.T) {
 	var attempt model.ExecutionAttempt
 	f.db.First(&attempt, "turn_id = ? AND status = ?", second.Turn.ID, model.StatusQueued)
 	next := f.claim(t, attempt.ID)
-	if len(next.Messages) != 3 || next.Messages[1].Content != "First answer" || next.Messages[2].Content != "Second question" {
+	if len(next.Messages) != 3 || next.Messages[1].Content != "Second question" || next.Messages[2].Content != "First answer" {
 		t.Fatalf("history: %+v", next.Messages)
 	}
 }

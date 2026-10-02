@@ -315,7 +315,7 @@ func (s *ExecutionService) ClaimAttempt(ctx context.Context, id string, r ClaimR
 			waiting = turn.WaitingTaskID
 			result.Turn = &turn
 			result.Notifications = json.RawMessage(turn.Notifications)
-			if err := tx.Table("runway_message AS message").Select("message.*").Joins("JOIN runway_turn origin ON origin.id = message.turn_id").Where("message.conversation_id = ? AND (message.event_position <= ? OR (message.role = ? AND origin.input_position < ?))", c.ID, turn.InputPosition, "assistant", turn.InputPosition).Order("origin.input_position ASC, message.event_position ASC").Find(&result.Messages).Error; err != nil {
+			if err := tx.Table("runway_message AS message").Select("message.*").Joins("JOIN runway_turn origin ON origin.id = message.turn_id").Where("message.conversation_id = ? AND (message.event_position <= ? OR (message.role = ? AND origin.input_position < ?))", c.ID, turn.InputPosition, "assistant", turn.InputPosition).Order("message.event_position ASC").Find(&result.Messages).Error; err != nil {
 				return err
 			}
 			if err := tx.Model(&turn).Update("status", model.StatusRunning).Error; err != nil {

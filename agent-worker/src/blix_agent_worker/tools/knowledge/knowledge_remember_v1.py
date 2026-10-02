@@ -52,7 +52,9 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
     ) -> None:
         super().__init__(client)
         self._messages = {message.message_id: message for message in messages}
-        self._latest_message_id = messages[-1].message_id if messages else None
+        self._latest_message_id = next(
+            (message.message_id for message in reversed(messages) if message.role is ConversationMessageRole.USER), None
+        )
         self._caller = caller
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeRememberV1Input, url: str) -> JsonObject:

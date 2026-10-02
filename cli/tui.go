@@ -464,7 +464,7 @@ func (m *tuiModel) handleMessageAppended(message messageAppendedMsg) tea.Cmd {
 	}
 	m.current = &message.current
 	m.activeTurn.backendTurnID = message.result.Turn.ID
-	return pollEventsCmd(m.ctx, m.api, message.turnID, message.current.Conversation.ID, message.result.EventPosition)
+	return pollEventsCmd(m.ctx, m.api, message.turnID, message.current.Conversation.ID, m.backgroundCursor)
 }
 
 func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
@@ -475,8 +475,11 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 		return m.finishTurn("", message.err, message.after)
 	}
 
-	position := message.after
+	position := max(message.after, m.backgroundCursor)
 	for _, event := range message.events {
+		if event.Position <= m.backgroundCursor {
+			continue
+		}
 		position = event.Position
 		m.backgroundCursor = max(m.backgroundCursor, event.Position)
 		m.reconcileQueuedEvent(event)
@@ -486,7 +489,7 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 				m.backgroundExecutions[event.EntityID] = true
 			}
 		}
-		if event.SessionID == m.activeTurn.leadSessionID && event.Type == "model.call_v1" {
+		if event.TurnID == m.activeTurn.backendTurnID && event.SessionID == m.activeTurn.leadSessionID && event.Type == "model.call_v1" {
 			m.activeTurn.response = ""
 		}
 		if event.Type == "approval.requested_v1" {

@@ -369,7 +369,11 @@ class ApiRuntime:
                 if latest_state is not None
                 else await self.compact_history(execution, lease, base_model)
             )
-            agent_input = BlixV1Input(messages=messages, notifications=execution.notifications)
+            agent_input = BlixV1Input(
+                messages=messages,
+                notifications=execution.notifications,
+                reply_to_message_id=execution.turn.get("input_message_id") if execution.turn else None,
+            )
             agent = BlixV1Agent(
                 model=model,
                 on_before_model=model.prepare,
@@ -429,6 +433,11 @@ class ApiRuntime:
         if sum(len(m.content) for m in recent) <= ceiling or len(recent) <= 8:
             return recent
         cutoff = min(m.event_position for m in recent[-8:]) - 1
+        if execution.turn is not None:
+            reply_to = execution.turn.get("input_message_id")
+            anchor = next((m for m in recent if m.message_id == reply_to), None)
+            if anchor is not None:
+                cutoff = min(cutoff, anchor.event_position - 1)
         older = tuple(m for m in recent if m.event_position <= cutoff)
         retained = tuple(m for m in recent if m.event_position > cutoff)
         if not older:

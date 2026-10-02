@@ -85,3 +85,45 @@ func TestResumeRestoresConversationSessionAndCursor(t *testing.T) {
 		t.Fatalf("resume=%+v", result)
 	}
 }
+
+func TestNewQuestionPollsUnreadReplyBeforeItsInputPosition(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after") != "10" {
+			t.Errorf("poll skipped unread history: %s", r.URL.RawQuery)
+			w.Write([]byte(`{"events":[]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"events":[{"position":15,"turn_id":"turn_research","session_id":"session_lead","type":"message.assistant_v1","payload":{"content":"Completed research findings"}},{"position":20,"turn_id":"turn_active","session_id":"session_lead","type":"message.user_v1","payload":{"content":"Another question"}},{"position":21,"turn_id":"turn_active","session_id":"session_lead","type":"model.output.delta_v1","payload":{"delta":"New answer"}}]}`))
+	}))
+	defer server.Close()
+	m := testUI()
+	m.backgroundCursor = 10
+	m.api = &client{baseURL: server.URL, http: server.Client()}
+	appended := appendedMessage{EventPosition: 20}
+	appended.Turn.ID = "turn_active"
+	command := m.handleMessageAppended(messageAppendedMsg{turnID: 1, current: *m.current, result: appended})
+	m.handleExecutionEvents(command().(executionEventsMsg))
+	if len(m.blocks) != 2 || m.blocks[1].turn.response != "Completed research findings" {
+		t.Fatal("unread research reply was lost")
+	}
+	if m.activeTurn == nil || m.activeTurn.response != "New answer" || m.backgroundCursor != 21 {
+		t.Fatal("new question did not continue")
+	}
+}
+func TestOverlappingPollDoesNotRedisplayConsumedReply(t *testing.T) {
+	m := testUI()
+	m.backgroundCursor = 10
+	m.handleExecutionEvents(executionEventsMsg{turnID: 1, after: 0, events: []executionEvent{{Position: 5, TurnID: "turn_old", SessionID: "session_lead", Type: "message.assistant_v1", Payload: json.RawMessage(`{"content":"Already displayed"}`)}, {Position: 11, TurnID: "turn_active", SessionID: "session_lead", Type: "model.output.delta_v1", Payload: json.RawMessage(`{"delta":"Current"}`)}}})
+	if len(m.blocks) != 1 || m.backgroundCursor != 11 || m.activeTurn.response != "Current" {
+		t.Fatal("overlapping events were redisplayed")
+	}
+}
+func TestOtherLeadTurnDoesNotClearActiveStream(t *testing.T) {
+	m := testUI()
+	m.activeTurn.response = "Current answer"
+	m.handleExecutionEvents(executionEventsMsg{turnID: 1, events: []executionEvent{{Position: 1, TurnID: "turn_research", SessionID: "session_lead", Type: "model.call_v1", Payload: json.RawMessage(`{}`)}}})
+	if m.activeTurn.response != "Current answer" {
+		t.Fatal("another turn cleared the active response")
+	}
+}

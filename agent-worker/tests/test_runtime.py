@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import httpx
+from pydantic import ValidationError
 
 from blix_agent_worker.agents import AgentRegistry, AgentRunner
 from blix_agent_worker.agents.blix import BlixV1Agent, BlixV1Input
@@ -20,7 +21,7 @@ from blix_agent_worker.models.agent import (
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.context import CallerContext
 from blix_agent_worker.models.llm import ModelCallRequest, ModelMessage, ModelMessageRole, ModelResponse
-from blix_agent_worker.models.message import ConversationMessage
+from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
@@ -77,6 +78,42 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, {"message": "A quick answer"})
         self.assertEqual(result.usage.model_calls, 1)
         self.assertEqual(result.usage.delegation_calls, 0)
+
+    async def test_delayed_reply_preserves_current_question_and_delivery_order(self):
+        task = lead_task()
+        question = ConversationMessage.model_validate(task.input["messages"][0])
+        delayed = question.model_copy(
+            update={
+                "message_id": new_ulid("message"),
+                "role": ConversationMessageRole.ASSISTANT,
+                "content": "Earlier research",
+                "event_position": 2,
+            }
+        )
+        task = task.model_copy(
+            update={
+                "input": BlixV1Input(messages=(question, delayed), reply_to_message_id=question.message_id).model_dump(
+                    mode="json"
+                )
+            }
+        )
+        model = ScriptedModel(assistant("Current answer"))
+        result = await make_lead(model).run(task)
+        messages = model.requests[0].messages
+        self.assertIn(str(question.message_id), messages[0].content)
+        self.assertIn(question.content, messages[1].content)
+        self.assertEqual(messages[2].content, delayed.content)
+        self.assertEqual(messages[3].role, ModelMessageRole.USER)
+        self.assertIn(str(question.message_id), messages[3].content)
+        self.assertEqual(result.output, {"message": "Current answer"})
+
+    def test_reply_target_must_identify_an_existing_user_message(self):
+        question = ConversationMessage.model_validate(lead_task().input["messages"][0])
+        with self.assertRaises(ValidationError):
+            BlixV1Input(messages=(question,), reply_to_message_id=new_ulid("message"))
+        reply = question.model_copy(update={"role": ConversationMessageRole.ASSISTANT})
+        with self.assertRaises(ValidationError):
+            BlixV1Input(messages=(reply,), reply_to_message_id=reply.message_id)
 
     async def test_tool_checkpoint_resumes_without_repeating_tool(self):
         model = ScriptedModel(
@@ -246,7 +283,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
                 }
 
         caller = CallerContext(entity_id=new_ulid("ent"), entity_type="USER", user_id=new_ulid("usr"))
-        tool = KnowledgeRememberV1Tool(Knowledge(), (message,), caller)
+        delayed = message.model_copy(
+            update={
+                "message_id": new_ulid("message"),
+                "role": ConversationMessageRole.ASSISTANT,
+                "content": "Earlier answer",
+            }
+        )
+        tool = KnowledgeRememberV1Tool(Knowledge(), (message, delayed), caller)
         with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
             result = await tool.execute(
                 ToolCall(
@@ -301,11 +345,23 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-    async def test_runtime_routes_model_and_completes_quick_reply(self):
+    async def test_runtime_routes_model_and_answers_question_before_delayed_reply(self):
         from blix_agent_worker.clients.sentinel import SentinelUser
         from blix_agent_worker.worker import ApiRuntime
 
         execution = self.context()
+        question = execution.messages[0]
+        execution.messages = (
+            question,
+            question.model_copy(
+                update={
+                    "message_id": new_ulid("message"),
+                    "role": ConversationMessageRole.ASSISTANT,
+                    "content": "Earlier research",
+                    "event_position": 2,
+                }
+            ),
+        )
         caller = SentinelUser.model_construct(
             id=execution.conversation.caller_context.user_id,
             entity_id=execution.conversation.caller_context.entity_id,
@@ -339,6 +395,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operations[-1][0], "complete")
         self.assertEqual(operations[-1][1]["content"], "Quick reply")
         self.assertEqual(len(model.requests), 1)
+        self.assertIn(str(question.message_id), model.requests[0].messages[-1].content)
         self.assertTrue(any(op == "checkpoint" for op, _ in operations))
 
     async def test_compaction_preserves_late_replies_before_queued_questions(self):
@@ -373,6 +430,37 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summarized | remaining, {m.content for m in execution.messages})
         self.assertIn("message 10", remaining)
         self.assertEqual(updates[0]["through_position"], 3)
+
+    async def test_compaction_keeps_question_before_many_delayed_replies(self):
+        from blix_agent_worker.worker import ApiRuntime
+
+        execution = self.context()
+        question = execution.messages[0].model_copy(update={"event_position": 3})
+        template = question.model_copy(update={"message_id": new_ulid("message"), "event_position": 1})
+        delayed = tuple(
+            question.model_copy(
+                update={
+                    "message_id": new_ulid("message"),
+                    "role": ConversationMessageRole.ASSISTANT,
+                    "event_position": position,
+                    "content": "Delayed answer " + str(position),
+                }
+            )
+            for position in range(4, 14)
+        )
+        execution.messages = (template, question, *delayed)
+        updates = []
+
+        class Lease:
+            async def post(self, operation, payload):
+                updates.append(payload["memory"])
+                return {}
+
+        model = ScriptedModel(assistant("Summary"))
+        with patch.dict("os.environ", {"LEAD_HISTORY_MAX_CHARS": "1"}):
+            retained = await ApiRuntime({}, None, None, None, None, None).compact_history(execution, Lease(), model)
+        self.assertEqual(retained, (question, *delayed))
+        self.assertEqual(updates[0]["through_position"], 1)
 
 
 class TaskControlTests(unittest.IsolatedAsyncioTestCase):
