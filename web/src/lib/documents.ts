@@ -30,11 +30,32 @@ export interface TeamDocument {
   publisher: string
   version: string
   kind: "rules" | "roadmap" | "reference"
-  published_at: string
+  published_at: string | null
+  extracted_metadata: ExtractedDocumentMetadata | null
+  metadata_overrides: Record<string, boolean> | null
+  metadata_revision: number
   external_url: string
   page_count: number
   size_bytes: number
   created_at: string
+}
+export interface ExtractedDocumentMetadata {
+  title: string
+  publisher: string
+  version: string
+  kind: "rules" | "roadmap" | "reference" | ""
+  published_at: string
+  external_url: string
+  source_record_ids: string[]
+  warnings: string[]
+}
+export interface DocumentMetadataFields {
+  title: string
+  publisher: string
+  version: string
+  kind: TeamDocument["kind"]
+  published_at: string
+  external_url: string
 }
 export interface DocumentChunk {
   number: number
@@ -95,20 +116,20 @@ export async function listDocuments() {
   return (await api.get<{ documents: TeamDocument[] }>(`${root}/documents`))
     .data.documents
 }
+export function validateDocumentFile(file: File) {
+  if (!file.size || file.size > 20 * 1024 * 1024 || !/\.pdf$/i.test(file.name))
+    throw new Error("Choose a PDF up to 20 MiB.")
+}
 export async function importDocument(
-  form: FormData,
+  file: File,
   progress: (percent: number) => void,
 ) {
-  const file = form.get("file")
-  if (!(file instanceof File)) throw new Error("Choose a PDF.")
-  const metadata = Object.fromEntries(
-    [...form.entries()].filter(([key]) => key !== "file"),
-  )
+  validateDocumentFile(file)
   const intent = (
     await api.post<{
       document: TeamDocument
       upload: { upload_url: string; method: string }
-    }>(`${root}/documents/uploads`, { ...metadata, filename: file.name })
+    }>(`${root}/documents/uploads`, { filename: file.name })
   ).data
   await axios.put(intent.upload.upload_url, file, {
     headers: { "Content-Type": "application/pdf" },
@@ -120,6 +141,18 @@ export async function importDocument(
     await api.post<DocumentDetails>(
       `${root}/documents/${intent.document.document_id}/complete`,
     )
+  ).data
+}
+export async function updateDocumentMetadata(
+  id: string,
+  revision: number,
+  fields: Partial<DocumentMetadataFields>,
+) {
+  return (
+    await api.patch<DocumentDetails>(`${root}/documents/${id}/metadata`, {
+      revision,
+      ...fields,
+    })
   ).data
 }
 export async function controlDocument(

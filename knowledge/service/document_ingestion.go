@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,45 +31,24 @@ type DocumentUpload struct {
 	Upload   depot.Upload   `json:"upload"`
 }
 
-func validateDocumentMetadata(m DocumentMetadata) error {
-	for _, v := range []string{m.Title, m.Publisher, m.Version, m.Filename} {
-		if strings.TrimSpace(v) == "" || len(v) > 512 || strings.ContainsAny(v, "\x00\r\n") {
-			return ErrInvalid
-		}
-	}
-	if m.Kind != "rules" && m.Kind != "roadmap" && m.Kind != "reference" {
-		return ErrInvalid
-	}
-	if m.PublishedAt.IsZero() || !identifier.IsValid(m.UploadedBy, identifier.Entity) {
-		return ErrInvalid
-	}
-	if m.ExternalURL != "" {
-		parsed, err := url.ParseRequestURI(m.ExternalURL)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || len(m.ExternalURL) > 4096 {
-			return ErrInvalid
-		}
-	}
-	return nil
-}
-func (s *DocumentService) InitiateUpload(ctx context.Context, m DocumentMetadata, caller CallerContext, objective string) (DocumentUpload, error) {
+func (s *DocumentService) InitiateUpload(ctx context.Context, filename string, caller CallerContext) (DocumentUpload, error) {
 	if s.depot == nil || !s.depot.Configured() || s.runtime == nil {
 		return DocumentUpload{}, fmt.Errorf("%w: Depot integration is not configured", ErrUnavailable)
 	}
-	if err := validateDocumentMetadata(m); err != nil {
-		return DocumentUpload{}, err
+	filename = filepath.Base(strings.TrimSpace(filename))
+	if filename == "." || len(filename) > 512 || !utf8.ValidString(filename) || strings.ContainsAny(filename, "\x00\r\n") || !strings.EqualFold(filepath.Ext(filename), ".pdf") {
+		return DocumentUpload{}, fmt.Errorf("%w: choose a PDF", ErrInvalid)
 	}
-	if caller.EntityID != m.UploadedBy || caller.EntityType != "USER" || !identifier.IsValid(caller.UserID, identifier.User) {
+	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != "USER" || !identifier.IsValid(caller.UserID, identifier.User) {
 		return DocumentUpload{}, ErrForbidden
 	}
-	objective = strings.TrimSpace(objective)
-	if len(objective) > 4000 || !utf8.ValidString(objective) || strings.ContainsRune(objective, 0) {
-		return DocumentUpload{}, ErrInvalid
-	}
-	if objective == "" {
-		objective = "Read this document, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
+	objective := "Read this document, identify its title, publisher, edition, publication date, document type and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
+	title := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if title == "" {
+		title = filename
 	}
 	callerData, _ := json.Marshal(map[string]string{"entity_id": caller.EntityID, "entity_type": caller.EntityType, "user_id": caller.UserID})
-	doc := model.Document{ID: identifier.New(identifier.Document), Title: m.Title, Filename: filepath.Base(m.Filename), Publisher: m.Publisher, Version: m.Version, Kind: m.Kind, ExternalURL: m.ExternalURL, PublishedAt: m.PublishedAt, UploadedBy: m.UploadedBy, Status: "uploading", Objective: objective, Caller: callerData, Generation: 1}
+	doc := model.Document{ID: identifier.New(identifier.Document), Title: title, Filename: filename, Kind: "reference", UploadedBy: caller.EntityID, Status: "uploading", Objective: objective, Caller: callerData, Generation: 1}
 	if err := s.db.WithContext(ctx).Create(&doc).Error; err != nil {
 		return DocumentUpload{}, err
 	}
@@ -365,15 +343,15 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 			return nil
 		}
 		sources := NewSourceService(tx)
-		sourceData, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "publisher": doc.Publisher, "version": doc.Version, "kind": doc.Kind})
+		sourceData, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "filename": doc.Filename, "metadata_status": "unidentified"})
 		source, err := sources.CreateSource(ctx, CreateSourceInput{Kind: "pdf_document", ExternalID: id, Name: doc.Title, Metadata: sourceData})
 		if err != nil {
 			return err
 		}
 		pages := []model.DocumentPage{}
 		for i, content := range text {
-			metadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": i + 1, "document_kind": doc.Kind, "publisher": doc.Publisher, "version": doc.Version, "sha256": hash})
-			record, err := sources.IngestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.PublishedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"})
+			metadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash})
+			record, err := sources.IngestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"})
 			if err != nil {
 				return err
 			}
@@ -510,6 +488,9 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 		if err != nil {
 			return err
 		}
+		if outcome != "blocked" && len(doc.ExtractedMetadata) == 0 {
+			return ErrConflict
+		}
 		var remaining int64
 		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
 			return err
@@ -553,6 +534,9 @@ func (s *DocumentService) Reconcile(ctx context.Context, id string, e DocumentEx
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
 			return err
+		}
+		if len(doc.ExtractedMetadata) == 0 {
+			return ErrConflict
 		}
 		var remaining int64
 		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {

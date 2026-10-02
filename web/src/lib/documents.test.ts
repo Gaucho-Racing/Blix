@@ -6,9 +6,12 @@ import {
   documentProcessing,
   documentStatusLabel,
   importDocument,
+  updateDocumentMetadata,
 } from "@/lib/documents"
 
-vi.mock("@/lib/api", () => ({ api: { post: vi.fn(), get: vi.fn() } }))
+vi.mock("@/lib/api", () => ({
+  api: { post: vi.fn(), get: vi.fn(), patch: vi.fn() },
+}))
 vi.mock("axios", () => ({ default: { put: vi.fn() } }))
 
 beforeEach(() => vi.clearAllMocks())
@@ -18,9 +21,6 @@ describe("document upload handoff", () => {
     const file = new File(["%PDF-test"], "rules.pdf", {
       type: "application/pdf",
     })
-    const form = new FormData()
-    form.set("file", file)
-    form.set("title", "Rules")
     const queued = {
       document: { document_id: "document_test", status: "queued" },
     }
@@ -41,15 +41,19 @@ describe("document upload handoff", () => {
       expect(config?.headers).not.toHaveProperty("Authorization")
       return { data: null }
     })
-    expect(await importDocument(form, vi.fn())).toBe(queued)
+    expect(await importDocument(file, vi.fn())).toBe(queued)
+    expect(api.post).toHaveBeenNthCalledWith(
+      1,
+      "/knowledge/v1/documents/uploads",
+      { filename: "rules.pdf" },
+    )
     expect(api.post).toHaveBeenLastCalledWith(
       "/knowledge/v1/documents/document_test/complete",
     )
   })
 
   it("does not queue ingestion when the binary upload fails", async () => {
-    const form = new FormData()
-    form.set("file", new File(["%PDF-test"], "rules.pdf"))
+    const file = new File(["%PDF-test"], "rules.pdf")
     vi.mocked(api.post).mockResolvedValueOnce({
       data: {
         document: { document_id: "document_test" },
@@ -57,10 +61,35 @@ describe("document upload handoff", () => {
       },
     })
     vi.mocked(axios.put).mockRejectedValueOnce(new Error("Upload interrupted"))
-    await expect(importDocument(form, vi.fn())).rejects.toThrow(
+    await expect(importDocument(file, vi.fn())).rejects.toThrow(
       "Upload interrupted",
     )
     expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects invalid files before creating an upload and lets users clear extracted metadata", async () => {
+    await expect(
+      importDocument(new File(["text"], "notes.txt"), vi.fn()),
+    ).rejects.toThrow("Choose a PDF")
+    await expect(
+      importDocument(new File([], "rules.pdf"), vi.fn()),
+    ).rejects.toThrow("Choose a PDF")
+    expect(api.post).not.toHaveBeenCalled()
+    vi.mocked(api.patch).mockResolvedValueOnce({
+      data: { document: { metadata_revision: 3 } },
+    })
+    await updateDocumentMetadata("document_test", 2, {
+      published_at: "",
+      version: "Corrected edition",
+    })
+    expect(api.patch).toHaveBeenCalledWith(
+      "/knowledge/v1/documents/document_test/metadata",
+      {
+        revision: 2,
+        published_at: "",
+        version: "Corrected edition",
+      },
+    )
   })
 
   it("polls only active processing stages and sends retries to the ingestion endpoint", async () => {

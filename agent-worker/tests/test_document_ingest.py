@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from blix_agent_worker.agents.blix import BlixV1Input
-from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
+from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent, ExtractedDocumentMetadata
 from blix_agent_worker.agents.knowledge_curator.knowledge_curator_v1 import (
     KnowledgeCuratorV1Agent,
     KnowledgeCuratorV1Output,
@@ -113,6 +113,9 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
                     details["notes"] = {"revision": number, "notes": payload["notes"]}
                     if fail_after_save:
                         raise KnowledgeClientError("knowledge_unavailable", "Response was lost.", retryable=True)
+                if path.endswith("/metadata"):
+                    details["document"].update(payload["metadata"])
+                    details["document"]["extracted_metadata"] = payload["metadata"]
                 if path.endswith("/finish"):
                     details["document"]["status"] = "no_changes"
                 return copy.deepcopy(details)
@@ -126,6 +129,13 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
             async def complete(self, request):
                 requests.append(request)
                 body = json.loads(request.messages[-1].content)
+                if request.output_format.id == "document_metadata_v1":
+                    return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
+                        "title": "Formula SAE Rules", "publisher": "SAE", "version": "1",
+                        "kind": "rules", "published_at": "", "external_url": "",
+                        "source_record_ids": body["actual_page_ids"][:1],
+                        "warnings": ["Publication date is ambiguous."],
+                    })))
                 source = body["evidence"][0]["source_record_id"]
                 return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
                     "findings": f"Verified requirement and exception {source}",
@@ -161,12 +171,15 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
             result = await agent.run(task)
         self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
         self.assertEqual(result.agent_id, "document_ingest_v1")
-        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(requests), 3)
         second = json.loads(requests[1].messages[-1].content)
         self.assertIn(details["pages"][0]["source_record_id"], second["previous_notes"])
         self.assertEqual(curator_tasks[0].input["mode"], "propose")
         self.assertEqual(curator_tasks[0].input["document_id"], task.input["document_id"])
-        self.assertTrue(result.output["warnings"])
+        self.assertIn("Publication date is ambiguous.", result.output["warnings"])
+        self.assertEqual(curator_tasks[0].context["document"]["title"], "Formula SAE Rules")
+        self.assertEqual(requests[-1].output_format.id, "document_metadata_v1")
+        self.assertEqual(details["document"]["published_at"], "")
         self.assertTrue(all(call[2]["revision"] == i for i, call in enumerate(
             [call for call in calls if call[0] == "POST" and "/chunks/" in call[1]])))
 
@@ -175,9 +188,9 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
             result = await agent.run(task)
         self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests), 2)
         self.assertIn("Earlier exception", json.loads(requests[0].messages[-1].content)["previous_notes"])
-        self.assertFalse(any(path.endswith("/chunks/1") for _, path, _ in calls))
+        self.assertFalse(any(path.endswith("/chunks/1") and method == "POST" for method, path, _ in calls))
 
     async def test_lost_save_response_is_retryable_and_preserves_progress(self):
         agent, task, details, _, _, curator_tasks = self.fixture(fail_after_save=True)
@@ -188,6 +201,25 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details["notes"]["revision"], 1)
         self.assertIsNotNone(details["chunks"][0]["completed_at"])
         self.assertFalse(curator_tasks)
+
+    async def test_retry_reuses_extracted_metadata_and_user_overrides(self):
+        agent, task, details, calls, requests, curator_tasks = self.fixture(first_completed=True)
+        details["document"]["extracted_metadata"] = {"title": "Identified title", "warnings": []}
+        details["document"]["title"] = "User corrected title"
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await agent.run(task)
+        self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
+        self.assertEqual(len(requests), 1)
+        self.assertFalse(any(path.endswith("/metadata") for _, path, _ in calls))
+        self.assertEqual(curator_tasks[0].context["document"]["title"], "User corrected title")
+
+    def test_metadata_validation_accepts_unknowns_and_rejects_invented_date_formats(self):
+        metadata = {"title": "", "publisher": "", "version": "", "kind": "", "published_at": "",
+                    "external_url": "", "source_record_ids": [], "warnings": ["Metadata is not established."]}
+        ExtractedDocumentMetadata.model_validate(metadata)
+        for value in ["2026-02-30", "2026-9-1", "unknown"]:
+            with self.assertRaises(ValidationError):
+                ExtractedDocumentMetadata.model_validate({**metadata, "published_at": value})
 
     async def test_completed_document_does_not_repeat_model_or_curation(self):
         agent, task, details, _, requests, curator_tasks = self.fixture(first_completed=True)

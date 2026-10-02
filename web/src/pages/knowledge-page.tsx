@@ -7,7 +7,7 @@ import {
   Search,
   Upload,
 } from "lucide-react"
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
 import {
@@ -15,6 +15,7 @@ import {
   listDocuments,
   searchWiki,
   documentStatusLabel,
+  validateDocumentFile,
 } from "@/lib/documents"
 import { errorMessage } from "@/lib/runtime"
 
@@ -23,7 +24,10 @@ export function KnowledgePage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState("")
   const [search, setSearch] = useState("")
-  const [uploading, setUploading] = useState(false)
+  const picker = useRef<HTMLInputElement>(null)
+  const uploadBusy = useRef(false)
+  const [dragging, setDragging] = useState(false)
+  const [uploadName, setUploadName] = useState("")
   const [progress, setProgress] = useState(0)
   const [fileError, setFileError] = useState("")
   const allowed =
@@ -40,10 +44,84 @@ export function KnowledgePage() {
     enabled: allowed && !!search,
   })
   const upload = useMutation({
-    mutationFn: (form: FormData) => importDocument(form, setProgress),
+    mutationFn: (file: File) => importDocument(file, setProgress),
+    onSettled: () => {
+      uploadBusy.current = false
+    },
     onSuccess: (data) =>
       navigate(`/knowledge/documents/${data.document.document_id}`),
   })
+  const { mutate: uploadFile } = upload
+  const importFile = useCallback(
+    (file: File) => {
+      if (!allowed) return
+      if (uploadBusy.current) {
+        setFileError(
+          "An upload is in progress. Wait for it to finish before importing another PDF.",
+        )
+        return
+      }
+      try {
+        validateDocumentFile(file)
+      } catch (error) {
+        setFileError(errorMessage(error))
+        return
+      }
+      uploadBusy.current = true
+      setFileError("")
+      setProgress(0)
+      setUploadName(file.name)
+      uploadFile(file)
+    },
+    [allowed, uploadFile],
+  )
+  useEffect(() => {
+    let depth = 0
+    const hasFiles = (event: DragEvent) =>
+      event.dataTransfer?.types.includes("Files")
+    const enter = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      depth++
+      if (allowed) setDragging(true)
+    }
+    const over = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      if (event.dataTransfer)
+        event.dataTransfer.dropEffect =
+          allowed && !uploadBusy.current ? "copy" : "none"
+    }
+    const leave = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      depth = Math.max(0, depth - 1)
+      if (depth === 0) setDragging(false)
+    }
+    const drop = (event: DragEvent) => {
+      if (!hasFiles(event)) return
+      event.preventDefault()
+      depth = 0
+      setDragging(false)
+      if (!allowed) return
+      const files = event.dataTransfer?.files
+      if (!files?.length) return
+      if (files.length !== 1) {
+        setFileError("Import one PDF at a time.")
+        return
+      }
+      importFile(files[0])
+    }
+    window.addEventListener("dragenter", enter)
+    window.addEventListener("dragover", over)
+    window.addEventListener("dragleave", leave)
+    window.addEventListener("drop", drop)
+    return () => {
+      window.removeEventListener("dragenter", enter)
+      window.removeEventListener("dragover", over)
+      window.removeEventListener("dragleave", leave)
+      window.removeEventListener("drop", drop)
+    }
+  }, [allowed, importFile])
   return (
     <div className="workspace-page knowledge-page">
       <header className="workspace-toolbar">
@@ -57,9 +135,9 @@ export function KnowledgePage() {
         </div>
         <button
           className="primary-button"
-          disabled={!allowed}
+          disabled={!allowed || upload.isPending}
           type="button"
-          onClick={() => setUploading(!uploading)}
+          onClick={() => picker.current?.click()}
         >
           <Upload size={16} /> Import PDF
         </button>
@@ -76,137 +154,58 @@ export function KnowledgePage() {
           </p>
         </div>
       )}
-      {uploading && (
-        <section className="panel document-import">
-          <div className="content-heading">
-            <div>
-              <h2>Import a document</h2>
-              <span>
-                The original PDF and its page-level evidence are shared with the
-                team.
-              </span>
-            </div>
+      <input
+        ref={picker}
+        accept="application/pdf,.pdf"
+        aria-label="Choose PDF to import"
+        hidden
+        type="file"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ""
+          if (file) importFile(file)
+        }}
+      />
+      {dragging && <div className="document-drop-overlay" aria-hidden="true" />}
+      {allowed && (
+        <button
+          className={`document-import-target ${dragging ? "is-dragging" : ""}`}
+          disabled={upload.isPending}
+          onClick={() => picker.current?.click()}
+          type="button"
+        >
+          <span className="document-import-icon">
+            <Upload size={24} />
+          </span>
+          <span>
+            <strong>
+              {dragging ? "Drop your PDF here" : "Drop a PDF anywhere"}
+            </strong>
+            <small>
+              {dragging
+                ? "Ready to import"
+                : "Or click to choose a file. Blix will identify the details."}
+            </small>
+          </span>
+        </button>
+      )}
+      {(fileError || upload.error) && (
+        <p className="runtime-error" role="alert">
+          {fileError || errorMessage(upload.error)}
+        </p>
+      )}
+      {upload.isPending && (
+        <section className="panel document-upload-status" aria-live="polite">
+          <LoaderCircle className="spin" size={20} />
+          <div>
+            <strong>{uploadName}</strong>
+            <p>
+              {progress < 100
+                ? `Uploading ${progress}%`
+                : "Starting background ingestion…"}
+            </p>
+            <progress max={100} value={progress} />
           </div>
-          <form
-            className="document-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const form = new FormData(event.currentTarget)
-              const file = form.get("file")
-              if (
-                !(file instanceof File) ||
-                !file.size ||
-                file.size > 20 * 1024 * 1024
-              ) {
-                setFileError("Choose a PDF up to 20 MiB.")
-                return
-              }
-              setFileError("")
-              setProgress(0)
-              upload.mutate(form)
-            }}
-          >
-            <fieldset disabled={upload.isPending}>
-              <label className="document-file">
-                PDF file
-                <input
-                  accept="application/pdf,.pdf"
-                  name="file"
-                  required
-                  type="file"
-                />
-                <small>
-                  Selectable text required · up to 20 MiB · up to 500 pages
-                </small>
-              </label>
-              <div className="document-form-grid">
-                <label>
-                  Document title
-                  <input
-                    maxLength={512}
-                    name="title"
-                    placeholder="Formula SAE Rules 2027"
-                    required
-                  />
-                </label>
-                <label>
-                  Publisher
-                  <input
-                    maxLength={512}
-                    name="publisher"
-                    placeholder="SAE International"
-                    required
-                  />
-                </label>
-                <label>
-                  Version
-                  <input
-                    maxLength={512}
-                    name="version"
-                    placeholder="1.0"
-                    required
-                  />
-                </label>
-                <label>
-                  Publication / revision date
-                  <input name="published_at" required type="date" />
-                </label>
-                <label>
-                  Document type
-                  <select defaultValue="reference" name="kind">
-                    <option value="rules">Rules / requirements</option>
-                    <option value="roadmap">Roadmap / future guidance</option>
-                    <option value="reference">Reference material</option>
-                  </select>
-                </label>
-                <label>
-                  Official source URL (optional)
-                  <input
-                    name="external_url"
-                    placeholder="https://…"
-                    type="url"
-                  />
-                </label>
-              </div>
-              <label>
-                What should Blix learn? (optional)
-                <textarea
-                  name="objective"
-                  rows={3}
-                  maxLength={4000}
-                  placeholder="Build a useful rules reference with exact rule identifiers and exceptions."
-                />
-              </label>
-              <p className="document-help">
-                Use the date and version printed in the document. Import starts
-                background reading and a wiki draft for review. You can leave
-                the page while Blix works.
-              </p>
-              {(upload.error || fileError) && (
-                <p className="runtime-error" role="alert">
-                  {fileError || errorMessage(upload.error)}
-                </p>
-              )}
-              {upload.isPending && (
-                <div className="document-progress">
-                  <progress max={100} value={progress} />
-                  <span>
-                    {progress < 100
-                      ? `Uploading ${progress}%`
-                      : "Queuing background ingestion…"}
-                  </span>
-                </div>
-              )}
-              <button className="primary-button" type="submit">
-                {upload.isPending ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <Upload size={16} />
-                )}
-                {upload.isPending ? "Importing…" : "Upload & start ingestion"}
-              </button>
-            </fieldset>
-          </form>
         </section>
       )}
       <section className="knowledge-section">
@@ -298,21 +297,9 @@ export function KnowledgePage() {
           </p>
         )}
         {allowed && documents.data?.length === 0 && (
-          <div className="document-empty">
-            <FileText size={30} />
-            <h3>Your first source starts here.</h3>
-            <p>
-              Import official rules, design references, or team reports to build
-              a wiki grounded in evidence.
-            </p>
-            <button
-              className="secondary-button"
-              onClick={() => setUploading(true)}
-              type="button"
-            >
-              Import a PDF
-            </button>
-          </div>
+          <p className="document-help">
+            Your imported documents and wiki drafts will appear here.
+          </p>
         )}
         <div className="document-grid">
           {documents.data?.map((document) => (
@@ -328,12 +315,15 @@ export function KnowledgePage() {
               <FileText size={24} />
               <h3>{document.title}</h3>
               <p>
-                {document.publisher} · {document.version}
+                {[document.publisher, document.version]
+                  .filter(Boolean)
+                  .join(" · ") ||
+                  "Document details will be identified during ingestion"}
               </p>
               <footer>
                 {documentStatusLabel(document.status)} ·{" "}
                 {document.page_count || "—"} pages
-                <span>{document.published_at.slice(0, 10)}</span>
+                <span>{document.published_at?.slice(0, 10)}</span>
               </footer>
             </Link>
           ))}

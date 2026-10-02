@@ -4,7 +4,6 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gaucho-racing/blix/knowledge/service"
 	"github.com/gin-gonic/gin"
@@ -51,14 +50,7 @@ func (h *Handler) GetDocumentFile(c *gin.Context) {
 }
 func (h *Handler) InitiateDocumentUpload(c *gin.Context) {
 	var request struct {
-		Title       string `json:"title"`
-		Filename    string `json:"filename"`
-		Publisher   string `json:"publisher"`
-		Version     string `json:"version"`
-		Kind        string `json:"kind"`
-		ExternalURL string `json:"external_url"`
-		PublishedAt string `json:"published_at"`
-		Objective   string `json:"objective"`
+		Filename string `json:"filename"`
 	}
 	if c.ShouldBindJSON(&request) != nil {
 		respondError(c, service.ErrInvalid)
@@ -69,12 +61,7 @@ func (h *Handler) InitiateDocumentUpload(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	date, err := time.Parse("2006-01-02", request.PublishedAt)
-	if err != nil {
-		respondError(c, service.ErrInvalid)
-		return
-	}
-	result, err := h.documents.InitiateUpload(c.Request.Context(), service.DocumentMetadata{Title: request.Title, Filename: request.Filename, Publisher: request.Publisher, Version: request.Version, Kind: request.Kind, ExternalURL: request.ExternalURL, PublishedAt: date, UploadedBy: caller.EntityID}, caller, request.Objective)
+	result, err := h.documents.InitiateUpload(c.Request.Context(), request.Filename, caller)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -155,6 +142,41 @@ func (h *Handler) SaveDocumentChunk(c *gin.Context) {
 		return
 	}
 	result, err := h.documents.SaveChunk(c.Request.Context(), c.Param("documentID"), number, request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) UpdateDocumentMetadata(c *gin.Context) {
+	var request service.DocumentMetadataPatch
+	if c.ShouldBindJSON(&request) != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	result, err := h.documents.UpdateMetadata(c.Request.Context(), c.Param("documentID"), caller.EntityID, request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+func (h *Handler) SaveExtractedDocumentMetadata(c *gin.Context) {
+	var request struct {
+		service.DocumentExecution
+		Metadata service.ExtractedDocumentMetadata `json:"metadata"`
+	}
+	if c.ShouldBindJSON(&request) != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.documents.SaveExtractedMetadata(c.Request.Context(), c.Param("documentID"), request.DocumentExecution, request.Metadata)
 	if err != nil {
 		respondError(c, err)
 		return

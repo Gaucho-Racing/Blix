@@ -79,11 +79,14 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	service.SetIntegration(depot.NewClient(storage.URL, "blix-documents", "existing-sentinel-token"), NewDocumentRuntimeClient(runtime.URL, "internal"))
 	metadata := documentMetadata()
 	caller := CallerContext{EntityID: metadata.UploadedBy, EntityType: "USER", UserID: identifier.New(identifier.User)}
-	intent, err := service.InitiateUpload(ctx, metadata, caller, "Preserve braking rules and exceptions.")
+	intent, err := service.InitiateUpload(ctx, metadata.Filename, caller)
 	if err != nil {
 		t.Fatal(err)
 	}
 	docID = intent.Document.ID
+	if intent.Document.Title != "rules" || intent.Document.Publisher != "" || intent.Document.Version != "" || intent.Document.PublishedAt != nil {
+		t.Fatal("upload must use only the filename hint and leave unestablished metadata empty")
+	}
 	if extractor.calls != 0 || intent.Document.Status != "uploading" {
 		t.Fatal("upload initiation performed extraction")
 	}
@@ -107,6 +110,14 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	prepared, err := service.Prepare(ctx, docID, execution)
 	if err != nil {
 		t.Fatal(err)
+	}
+	automatic := ExtractedDocumentMetadata{Title: "Official braking rules", Publisher: "SAE International", Version: "1.0", Kind: "rules", PublishedAt: "", SourceRecordIDs: []string{prepared.Pages[0].SourceRecordID}, Warnings: []string{"Publication date is not established."}}
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); !errors.Is(err, ErrConflict) {
+		t.Fatalf("metadata was accepted before complete reading: %v", err)
+	}
+	manualTitle := "Corrected document title"
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("editing while processing was accepted: %v", err)
 	}
 	if len(prepared.Chunks) < 2 || len(prepared.Pages) != 3 || extractor.calls != 1 {
 		t.Fatalf("manifest: %+v", prepared)
@@ -156,6 +167,15 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil || cancelled.Document.Status != "cancelled" {
 		t.Fatalf("cancel status: %+v %v", cancelled, err)
 	}
+	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("foreign metadata editor accepted: %v", err)
+	}
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale metadata revision accepted: %v", err)
+	}
 	retry, err := service.Control(ctx, docID, caller.EntityID, "retry")
 	if err != nil {
 		t.Fatal(err)
@@ -197,12 +217,43 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	invalidMetadata := automatic
+	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, invalidMetadata); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invented metadata citation accepted: %v", err)
+	}
+	identified, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identified.Document.Title != manualTitle || identified.Document.Publisher != automatic.Publisher || identified.Document.PublishedAt != nil || identified.Document.MetadataRevision != 2 {
+		t.Fatalf("extraction must preserve user overrides and unknown dates: %+v", identified.Document)
+	}
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.Reconcile(ctx, docID, execution); err != nil {
 		t.Fatal(err)
 	}
 	final, err := service.Finish(ctx, docID, execution, "no_changes")
 	if err != nil || final.Document.Status != "no_changes" {
 		t.Fatalf("completion: %+v %v", final, err)
+	}
+	cleared := ""
+	edited, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 2, Publisher: &cleared})
+	if err != nil || edited.Document.Publisher != "" || edited.Document.MetadataRevision != 3 {
+		t.Fatalf("manual clearing failed: %+v %v", edited, err)
+	}
+	originalEvidence, err := service.Page(ctx, docID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var provenance map[string]any
+	if err := json.Unmarshal(originalEvidence.Metadata, &provenance); err != nil {
+		t.Fatal(err)
+	}
+	if provenance["publisher"] != nil || provenance["published_at"] != nil || provenance["metadata_status"] != "unidentified" {
+		t.Fatal("metadata corrections must not rewrite captured evidence")
 	}
 	var revisions int64
 	if err := db.Model(&model.DocumentNotesRevision{}).Where("document_id = ?", docID).Count(&revisions).Error; err != nil || int(revisions) != len(final.Chunks) {

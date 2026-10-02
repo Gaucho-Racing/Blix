@@ -21,10 +21,12 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
+import { DocumentMetadata } from "@/components/document-metadata"
 import { appendMessage, createConversation, errorMessage } from "@/lib/runtime"
 
 export function DocumentDetailsPage() {
   const { documentID = "" } = useParams()
+  const [params] = useSearchParams()
   const query = useQuery({
     queryKey: ["document", documentID],
     queryFn: ({ signal }) => getDocument(documentID, signal),
@@ -53,8 +55,15 @@ export function DocumentDetailsPage() {
         <>
           <DocumentHeader details={query.data} />
           <DocumentIngestion details={query.data} />
+          <DocumentMetadata
+            details={query.data}
+            key={`${documentID}:${query.data.document.metadata_revision}`}
+          />
           {query.data.pages.length > 0 && (
-            <DocumentWorkspace details={query.data} key={documentID} />
+            <DocumentWorkspace
+              details={query.data}
+              key={`${documentID}:${params.get("page") ?? ""}`}
+            />
           )}
         </>
       )}
@@ -108,7 +117,7 @@ function DocumentWorkspace({ details }: { details: DocumentDetails }) {
       if (!conversation.current)
         conversation.current = (await createConversation()).conversation_id
       const sourceIDs = selection.map((page) => page.source_record_id)
-      const content = `Draft wiki updates from this imported document. Delegate to knowledge_curator_v1 with mode="propose" and these source_record_ids: ${JSON.stringify(sourceIDs)}. Do not publish.\n\nDocument metadata: ${JSON.stringify({ title: document.title, publisher: document.publisher, version: document.version, kind: document.kind, published_at: document.published_at.slice(0, 10), document_id: document.document_id, pdf_pages: [first, last] })}\n\nObjective: ${objective.trim()}\n\nRead the original page records before drafting. Preserve rule identifiers, PDF page references, revision and source citations. Treat roadmap items as future guidance rather than current requirements. These documents do not establish Gaucho Racing's actual vehicle configuration or compliance. Compare with existing wiki pages, separate requirements from team decisions, and report proposal links and uncertainties.`
+      const content = `Draft wiki updates from this imported document. Delegate to knowledge_curator_v1 with mode="propose" and these source_record_ids: ${JSON.stringify(sourceIDs)}. Do not publish.\n\nDocument metadata: ${JSON.stringify({ title: document.title, publisher: document.publisher, version: document.version, kind: document.kind, published_at: document.published_at?.slice(0, 10) ?? "Unknown", document_id: document.document_id, pdf_pages: [first, last] })}\n\nObjective: ${objective.trim()}\n\nRead the original page records before drafting. Preserve rule identifiers, PDF page references, revision and source citations. Treat roadmap items as future guidance rather than current requirements. These documents do not establish Gaucho Racing's actual vehicle configuration or compliance. Compare with existing wiki pages, separate requirements from team decisions, and report proposal links and uncertainties.`
       await appendMessage(
         conversation.current,
         content,
@@ -475,10 +484,7 @@ function DocumentHeader({ details }: { details: DocumentDetails }) {
             TEAM DOCUMENT · {document.kind.toUpperCase()}
           </span>
           <h1>{document.title}</h1>
-          <p>
-            {document.publisher} · {document.version} · Revised{" "}
-            {document.published_at.slice(0, 10)}
-          </p>
+          <p>{document.filename}</p>
         </div>
         <button
           className="secondary-button"
