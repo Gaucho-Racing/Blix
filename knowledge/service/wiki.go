@@ -95,12 +95,15 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 		return nil, err
 	}
 	var documentPages []model.DocumentPage
-	if err := s.database.WithContext(ctx).Where("source_record_id IN ?", ids).Find(&documentPages).Error; err != nil {
+	if err := s.database.WithContext(ctx).Where("source_record_id IN ? OR visual_source_record_id IN ?", ids, ids).Find(&documentPages).Error; err != nil {
 		return nil, err
 	}
 	pageByRecord := make(map[string]model.DocumentPage, len(documentPages))
 	for _, page := range documentPages {
 		pageByRecord[page.SourceRecordID] = page
+		if page.VisualSourceRecordID != "" {
+			pageByRecord[page.VisualSourceRecordID] = page
+		}
 	}
 	sourceIDs := make([]string, 0, len(records))
 	identityIDs := make([]string, 0, len(records))
@@ -227,7 +230,7 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 	}
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var docs []model.Document
-		query := tx.Where("id IN (SELECT document_id FROM knowledge_document_page WHERE source_record_id IN ?)", referencedSources)
+		query := tx.Where("id IN (SELECT document_id FROM knowledge_document_page WHERE source_record_id IN ? OR visual_source_record_id IN ?)", referencedSources, referencedSources)
 		if input.SessionID != "" {
 			query = query.Or("session_id = ? AND conversation_id = ?", input.SessionID, input.ConversationID)
 		}

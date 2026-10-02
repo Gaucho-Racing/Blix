@@ -388,6 +388,10 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 	if err != nil {
 		return details, err
 	}
+	text, err = s.preparePageImages(ctx, details.Document, hash, temp.Name(), text, e)
+	if err != nil {
+		return details, err
+	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
@@ -408,8 +412,20 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 		}
 		pages := []model.DocumentPage{}
 		for i, content := range text {
-			metadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash})
-			record, err := sources.ingestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"}, false)
+			pageMetadata := map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash}
+			method := "document_upload"
+			var image model.DocumentPageImage
+			if err := tx.First(&image, "document_id = ? AND number = ?", id, i+1).Error; err == nil {
+				pageMetadata["page_image_sha256"] = image.SHA256
+				pageMetadata["text_method"] = image.TextMethod
+				if image.TextMethod == "ocr" {
+					method = "document_ocr"
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			metadata, _ := json.Marshal(pageMetadata)
+			record, err := sources.ingestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: method}, false)
 			if err != nil {
 				return err
 			}
@@ -495,10 +511,21 @@ func (s *DocumentService) ReadChunk(ctx context.Context, id string, number int) 
 	if err := json.Unmarshal(chunk.Evidence, &evidence); err != nil {
 		return nil, err
 	}
-	return map[string]any{"chunk": chunk, "evidence": evidence}, nil
+	images, err := s.ChunkImages(ctx, id, chunk.FirstPage, chunk.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"chunk": chunk, "evidence": evidence, "images": images}, nil
+}
+
+type VisualFinding struct {
+	Page        int      `json:"page"`
+	Description string   `json:"description"`
+	SectionIDs  []string `json:"section_ids"`
 }
 
 type SaveDocumentChunk struct {
+	VisualFindings []VisualFinding `json:"visual_findings"`
 	DocumentExecution
 	Revision        uint64   `json:"revision"`
 	Findings        string   `json:"findings"`
@@ -512,7 +539,17 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 	if strings.TrimSpace(r.Findings) == "" || len(r.Findings) > 16000 || strings.TrimSpace(r.Notes) == "" || len(r.Notes) > 32000 || !utf8.ValidString(r.Findings+r.Notes) || strings.ContainsRune(r.Findings+r.Notes, 0) {
 		return DocumentDetails{}, ErrInvalid
 	}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if len(r.VisualFindings) > 4 {
+		return DocumentDetails{}, ErrInvalid
+	}
+	if r.VisualFindings == nil {
+		r.VisualFindings = []VisualFinding{}
+	}
+	visualData, err := json.Marshal(r.VisualFindings)
+	if err != nil {
+		return DocumentDetails{}, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, r.DocumentExecution)
 		if err != nil {
 			return err
@@ -530,7 +567,7 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 			if err := json.Unmarshal(chunk.SourceRecordIDs, &savedSources); err != nil {
 				return err
 			}
-			if r.Revision+1 == revision.Revision && chunk.Findings == r.Findings && revision.Notes == r.Notes && slices.Equal(savedSources, r.SourceRecordIDs) && revision.InputTokens == r.InputTokens && revision.OutputTokens == r.OutputTokens {
+			if r.Revision+1 == revision.Revision && chunk.Findings == r.Findings && revision.Notes == r.Notes && slices.Equal(savedSources, r.SourceRecordIDs) && equalVisualFindings(chunk.VisualFindings, visualData) && revision.InputTokens == r.InputTokens && revision.OutputTokens == r.OutputTokens {
 				return nil
 			}
 			return ErrConflict
@@ -578,9 +615,12 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 				return ErrInvalid
 			}
 		}
+		if err := saveVisualFindings(ctx, tx, doc, chunk, r.VisualFindings); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		sourceData, _ := json.Marshal(r.SourceRecordIDs)
-		if err := tx.Model(&chunk).Updates(map[string]any{"findings": r.Findings, "source_record_ids": datatypes.JSON(sourceData), "completed_at": now}).Error; err != nil {
+		if err := tx.Model(&chunk).Updates(map[string]any{"findings": r.Findings, "visual_findings": datatypes.JSON(visualData), "source_record_ids": datatypes.JSON(sourceData), "completed_at": now}).Error; err != nil {
 			return err
 		}
 		revision := model.DocumentNotesRevision{DocumentID: id, Revision: r.Revision + 1, Notes: r.Notes, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens}
@@ -640,12 +680,12 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 			}
 			status = "ready"
 			var lowText int64
-			if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND character_count < 20", id).Count(&lowText).Error; err != nil {
+			if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND character_count < 20 AND visual_source_record_id = ''", id).Count(&lowText).Error; err != nil {
 				return err
 			}
 			if lowText > 0 {
 				status = "partial"
-				message = fmt.Sprintf("%d pages have little or no extracted text. Visual content has not been inspected.", lowText)
+				message = fmt.Sprintf("%d pages have little or no readable text after extraction and OCR. See their saved visual findings for available evidence.", lowText)
 			}
 		}
 		updates := map[string]any{"status": status, "error": message}

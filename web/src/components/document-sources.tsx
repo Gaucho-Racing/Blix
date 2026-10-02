@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react"
+import { DocumentPageImage } from "@/components/document-page-image"
 import { useState } from "react"
 import { getDocumentPage, type DocumentDetails } from "@/lib/documents"
 import { errorMessage } from "@/lib/runtime"
@@ -19,6 +20,7 @@ export function DocumentSources({ details }: { details: DocumentDetails }) {
       document.document_id,
       page?.page_number,
       page?.source_record_id,
+      page?.visual_source_record_id,
     ],
     queryFn: ({ signal }) =>
       getDocumentPage(document.document_id, page!.page_number, signal),
@@ -111,6 +113,21 @@ export function DocumentSources({ details }: { details: DocumentDetails }) {
                 <dd>{source.data.capture_method.replaceAll("_", " ")}</dd>
               </div>
             </dl>
+          )}
+          {source.data?.page_image && (
+            <details className="document-source-visual">
+              <summary>Page image</summary>
+              <DocumentPageImage src={`/knowledge/documents/${document.document_id}/pages/${page.page_number}/image`}
+                alt={`Original PDF page ${page.page_number}`} />
+            </details>
+          )}
+          {source.data?.visual_record && (
+            <details className="document-source-visual">
+              <summary>Visual findings</summary>
+              <p className="document-source-empty">Blix’s interpretation of this page’s diagrams and tables.</p>
+              <code>{source.data.visual_record.source_record_id}</code>
+              <pre>{source.data.visual_record.content}</pre>
+            </details>
           )}
           <div
             className="document-source-content"

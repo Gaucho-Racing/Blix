@@ -36,6 +36,8 @@ type DocumentSearchContext struct {
 }
 
 type DocumentPassage struct {
+	EvidenceType    string  `json:"evidence_type"`
+	CaptureMethod   string  `json:"capture_method"`
 	ChunkID         string  `json:"source_chunk_id"`
 	SourceRecordID  string  `json:"source_record_id"`
 	DocumentID      string  `json:"document_id"`
@@ -161,10 +163,10 @@ func (s *DocumentService) SearchSources(ctx context.Context, options DocumentSea
 		if err != nil {
 			return err
 		}
-		query = query.Joins("JOIN knowledge_document_page p ON p.document_id = d.id").Joins("JOIN knowledge_source_chunk c ON c.source_record_id = p.source_record_id AND c.chunker_version = ?", sourceChunkerVersion).
-			Joins(`CROSS JOIN (SELECT plainto_tsquery('english', ?) AS all_terms, replace(plainto_tsquery('english', ?)::text, ' & ', ' | ')::tsquery AS any_terms) q`, options.Query, options.Query).
+		query = query.Joins("JOIN knowledge_document_page p ON p.document_id = d.id").Joins("JOIN knowledge_source_chunk c ON (c.source_record_id = p.source_record_id OR c.source_record_id = p.visual_source_record_id) AND c.chunker_version = ?", sourceChunkerVersion).
+			Joins("JOIN knowledge_source_record r ON r.id = c.source_record_id").Joins(`CROSS JOIN (SELECT plainto_tsquery('english', ?) AS all_terms, replace(plainto_tsquery('english', ?)::text, ' & ', ' | ')::tsquery AS any_terms) q`, options.Query, options.Query).
 			Where("c.search_vector @@ q.any_terms").Where("c.rule_ids @> ?::jsonb", string(rulesJSON))
-		err = query.Select(`c.id AS chunk_id, c.source_record_id, d.id AS document_id, d.title, p.number AS pdf_page, c.ordinal, c.content, c.start_offset, c.end_offset,
+		err = query.Select(`r.evidence_type, r.capture_method, c.id AS chunk_id, c.source_record_id, d.id AS document_id, d.title, p.number AS pdf_page, c.ordinal, c.content, c.start_offset, c.end_offset,
           d.review_status, c.search_vector @@ q.all_terms AS matched_all_terms, ts_rank_cd(c.search_vector, q.any_terms, 32) AS score`).
 			Order("matched_all_terms DESC, score DESC, d.id ASC, p.number ASC, c.ordinal ASC").Limit(options.Limit + 1).Scan(&result.Results).Error
 		if err != nil {

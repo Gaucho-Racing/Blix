@@ -66,12 +66,40 @@ func (c *Client) request(ctx context.Context, method, path string, body any, out
 }
 func (c *Client) bucketPath() string { return "/buckets/" + url.PathEscape(c.bucket) }
 func (c *Client) Initiate(ctx context.Context, filename, documentID string) (Upload, error) {
+	return c.initiate(ctx, filename, "application/pdf", documentID)
+}
+func (c *Client) initiate(ctx context.Context, filename, contentType, documentID string) (Upload, error) {
 	var result Upload
-	err := c.request(ctx, "POST", c.bucketPath()+"/uploads", map[string]any{"original_name": filename, "content_type": "application/pdf", "public": false, "tags": map[string]string{"blix_document_id": documentID}}, &result)
+	err := c.request(ctx, "POST", c.bucketPath()+"/uploads", map[string]any{"original_name": filename, "content_type": contentType, "public": false, "tags": map[string]string{"blix_document_id": documentID}}, &result)
 	if err == nil && (result.File.ID == "" || result.Method != "PUT" || result.URL == "") {
 		err = fmt.Errorf("Depot returned an invalid upload intent")
 	}
 	return result, err
+}
+
+func (c *Client) UploadPageImage(ctx context.Context, filename, documentID string, data []byte) (File, error) {
+	upload, err := c.initiate(ctx, filename, "image/jpeg", documentID)
+	if err != nil {
+		return File{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", upload.URL, bytes.NewReader(data))
+	if err != nil {
+		return File{}, err
+	}
+	req.Header.Set("Content-Type", "image/jpeg")
+	res, err := c.http.Do(req)
+	if err != nil {
+		return File{}, fmt.Errorf("Depot page image upload failed: %w", err)
+	}
+	res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return File{}, fmt.Errorf("Depot image upload returned HTTP %d", res.StatusCode)
+	}
+	file, err := c.Complete(ctx, upload.File.ID)
+	if err == nil && (file.ID != upload.File.ID || file.Status != "ACTIVE" || file.ContentType != "image/jpeg" || file.SizeBytes != int64(len(data))) {
+		err = fmt.Errorf("Depot page image verification failed")
+	}
+	return file, err
 }
 func (c *Client) Complete(ctx context.Context, id string) (File, error) {
 	var result File

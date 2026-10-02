@@ -1,3 +1,4 @@
+import { DocumentPageImage } from "@/components/document-page-image"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -24,6 +25,7 @@ export function ChatMessage({ role, content, userAvatarURL }: ChatMessageProps) 
         <span className="chat-message-author">Blix</span>
         <Markdown
           components={{
+            img: ({ src, alt }) => <DocumentPageImage src={src} alt={alt} />,
             a: ({ children, ...properties }) => <a {...properties} rel="noreferrer" target="_blank">{children}</a>,
           }}
           remarkPlugins={[remarkGfm]}

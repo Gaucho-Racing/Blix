@@ -5,6 +5,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
     ContractError,
+    DocumentID,
     ContractModel,
     Identifier,
     JsonObject,
@@ -109,7 +110,19 @@ class ModelContinuation(ContractModel):
     state: JsonObject
 
 
+class DocumentImageReference(ContractModel):
+    document_id: DocumentID
+    page: Annotated[int, Field(ge=1, le=500)]
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+    @property
+    def uri(self) -> str:
+        return f"blix-document://{self.document_id}/{self.page}/{self.sha256}"
+
+
 class ModelRequest(ContractModel):
+    images: Annotated[tuple[DocumentImageReference, ...], Field(max_length=20)] = ()
+    image_data: dict[str, str] = Field(default_factory=dict, exclude=True)
     sequence: Annotated[int, Field(ge=1)] = 1
     messages: Annotated[tuple[ModelMessage, ...], Field(min_length=1)]
     callables: tuple[ModelCallableDefinition, ...] = ()

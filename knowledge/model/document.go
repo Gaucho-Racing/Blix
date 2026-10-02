@@ -61,15 +61,34 @@ type DocumentStage struct {
 func (Document) TableName() string { return "knowledge_document" }
 
 type DocumentPage struct {
-	DocumentID     string `json:"document_id" gorm:"primaryKey"`
-	Number         int    `json:"page_number" gorm:"primaryKey"`
-	SourceRecordID string `json:"source_record_id" gorm:"uniqueIndex;not null"`
-	CharacterCount int    `json:"character_count" gorm:"not null"`
+	VisualSourceRecordID string `json:"visual_source_record_id" gorm:"index;not null;default:''"`
+	DocumentID           string `json:"document_id" gorm:"primaryKey"`
+	Number               int    `json:"page_number" gorm:"primaryKey"`
+	SourceRecordID       string `json:"source_record_id" gorm:"uniqueIndex;not null"`
+	CharacterCount       int    `json:"character_count" gorm:"not null"`
 }
+
+type DocumentPageImage struct {
+	DocumentID  string    `json:"document_id" gorm:"primaryKey"`
+	Number      int       `json:"page_number" gorm:"primaryKey"`
+	PDFHash     string    `json:"pdf_hash" gorm:"not null"`
+	Version     int       `json:"version" gorm:"not null"`
+	SHA256      string    `json:"sha256" gorm:"not null"`
+	DepotFileID string    `json:"depot_file_id" gorm:"not null"`
+	Width       int       `json:"width" gorm:"not null"`
+	Height      int       `json:"height" gorm:"not null"`
+	Text        string    `json:"-" gorm:"type:text;not null"`
+	NativeText  string    `json:"-" gorm:"type:text;not null"`
+	TextMethod  string    `json:"text_method" gorm:"not null"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (DocumentPageImage) TableName() string { return "knowledge_document_page_image" }
 
 func (DocumentPage) TableName() string { return "knowledge_document_page" }
 
 type DocumentChunk struct {
+	VisualFindings  datatypes.JSON `json:"visual_findings" gorm:"type:jsonb;not null;default:'[]'"`
 	DocumentID      string         `json:"document_id" gorm:"primaryKey"`
 	Number          int            `json:"number" gorm:"primaryKey"`
 	FirstPage       int            `json:"first_page"`

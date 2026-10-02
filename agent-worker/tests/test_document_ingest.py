@@ -99,7 +99,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         calls = []
 
         class Client:
-            async def request(self, url, method, path, *, payload=None, params=None):
+            async def request(self, url, method, path, *, payload=None, params=None, timeout=60):
                 calls.append((method, path, payload))
                 if path.endswith("/prepare") and fail_after_save:
                     details["document"]["status"] = "reading"
@@ -139,6 +139,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
                     })))
                 source = body["evidence"][0]["source_record_id"]
                 return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
+                    "visual_findings": [],
                     "findings": f"Verified requirement and exception {source}",
                     "notes": body["previous_notes"] + f"\nNew requirement {source}",
                     "source_record_ids": [source],

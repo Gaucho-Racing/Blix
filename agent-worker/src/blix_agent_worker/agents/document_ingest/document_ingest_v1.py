@@ -23,7 +23,9 @@ from blix_agent_worker.models.agent import (
     AgentUsage,
 )
 from blix_agent_worker.models.common import ContractError, ContractModel, DocumentID, JsonObject, SourceRecordID
-from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole, ModelOutputFormat, ModelRequest, ModelResponse
+from blix_agent_worker.models.llm import (
+    DocumentImageReference, ModelMessage, ModelMessageRole, ModelOutputFormat, ModelRequest, ModelResponse,
+)
 
 
 class DocumentIngestV1Input(ContractModel):
@@ -39,7 +41,22 @@ class DocumentIngestV1Output(ContractModel):
     warnings: tuple[str, ...]
 
 
+class VisualFinding(ContractModel):
+    page: Annotated[int, Field(ge=1, le=500)]
+    description: Annotated[str, Field(min_length=1, max_length=8000)]
+    section_ids: Annotated[tuple[str, ...], Field(max_length=20)]
+
+    @model_validator(mode="after")
+    def validate_description(self) -> Self:
+        if len(self.description.encode()) > 8000 or "\x00" in self.description:
+            raise ValueError("visual descriptions must fit their UTF-8 budget")
+        if any(not re.fullmatch(r"[A-Z]{1,4}\.\d+(?:\.\d+)*", section) for section in self.section_ids):
+            raise ValueError("section IDs must be exact rule identifiers")
+        return self
+
+
 class ChunkReading(ContractModel):
+    visual_findings: Annotated[tuple[VisualFinding, ...], Field(max_length=4)]
     findings: Annotated[str, Field(min_length=1, max_length=16000)]
     notes: Annotated[str, Field(min_length=1, max_length=32000)]
     source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=4)]
@@ -146,7 +163,9 @@ class DocumentIngestV1Agent:
                 outcome = "no_changes" if details["document"]["status"] == "no_changes" else "proposed"
                 return self.result(task, details, outcome, "Document processing already completed.")
             if state is None:
-                details = await self.client.request(base_url, "POST", f"{path}/ingestion/prepare", payload=ownership)
+                details = await self.client.request(
+                    base_url, "POST", f"{path}/ingestion/prepare", payload=ownership, timeout=1200
+                )
             metadata_task = None
             if not details["document"].get("extracted_metadata"):
                 metadata_task = asyncio.create_task(self.identify_metadata(task, details, base_url, path, ownership))
@@ -159,8 +178,9 @@ class DocumentIngestV1Agent:
                 if metadata_task is not None:
                     metadata_task.cancel()
                     await asyncio.gather(metadata_task, return_exceptions=True)
-            details = await self.client.request(base_url, "POST", f"{path}/ingestion/reconcile", payload=ownership)
-            source_ids = tuple(page["source_record_id"] for page in details["pages"])
+            details = await self.client.request(base_url, "POST", f"{path}/ingestion/reconcile", payload=ownership, timeout=1200)
+            source_ids = tuple(source for page in details["pages"] for source in
+                               (page["source_record_id"], page.get("visual_source_record_id")) if source)
             curator_task = task.model_copy(update={
                 "agent_id": "knowledge_curator_v1",
                 "input": {"document_id": request.document_id, "source_record_ids": source_ids, "mode": "propose"},
@@ -229,9 +249,11 @@ class DocumentIngestV1Agent:
             "evidence": evidence["evidence"],
             "previous_notes": (details.get("notes") or {}).get("notes", ""),
         }, ensure_ascii=False)
+        images = tuple(DocumentImageReference.model_validate(image) for image in evidence.get("images", []))
         correction = ""
         for attempt in range(3):
             model_request = ModelRequest(
+                images=images,
                 sequence=evidence["chunk"]["number"] * 3 + attempt,
                 messages=(
                     ModelMessage(role=ModelMessageRole.SYSTEM, content=(
@@ -245,9 +267,17 @@ class DocumentIngestV1Agent:
                         "edition, useful topic tags, exact revision dates and printed official PDF URLs) with citations "
                         "in the notebook, including conflicting dates. Upload metadata is provisional. "
                         "Do not turn future roadmap guidance into current rules, "
-                        "or source requirements into claims about the team's car. Native text extraction does "
-                        "not establish that tables or diagrams were understood. Flag missing visual evidence "
-                        "and low-text pages; do not invent their contents. Preserve uncertainty. "
+                        "or source requirements into claims about the team's car. Inspect attached full-page images "
+                        "alongside the page text. For pages with diagrams, graphs, tables or meaningful pictures, "
+                        "save one visual_findings entry per page with a concise, searchable description and exact "
+                        "section_ids established by that page. Describe labels, boundaries, dimensions, units, "
+                        "legends, views and what the figure illustrates; associate each diagram with its own "
+                        "nearby heading, rule and exceptions. Do not mix similar figures from different sections. "
+                        "Retain numeric table data and row/column relationships when readable. "
+                        "Visual descriptions are agent interpretations, not direct quotations. Preserve uncertainty "
+                        "for small labels or ambiguous geometry; do not infer measurements from drawn proportions. "
+                        "Use an empty visual_findings list for text-only pages or if no page images are attached. "
+                        "Do not claim inspecting an image that was not attached. "
                         "Keep findings under 16000 UTF-8 bytes and notes under 32000 UTF-8 bytes. "
                         "source_record_ids must identify only this chunk's actual original evidence."
                     )),
@@ -264,6 +294,16 @@ class DocumentIngestV1Agent:
                 referenced = set(re.findall(r"sourcerecord_[0-9a-z]{26}", reading.findings))
                 if not referenced.issubset(source_ids):
                     raise ValueError("chunk findings may cite only this chunk's evidence; revise prior claims in notes")
+                image_pages = {image.page for image in images}
+                if len({finding.page for finding in reading.visual_findings}) != len(reading.visual_findings):
+                    raise ValueError("visual findings must use at most one entry per inspected page")
+                if any(finding.page not in image_pages for finding in reading.visual_findings):
+                    raise ValueError("visual findings require an attached original page image")
+                page_sources = {item["page"]: item["source_record_id"] for item in evidence["evidence"]}
+                for finding in reading.visual_findings:
+                    if any(source != page_sources[finding.page] for source in
+                           re.findall(r"sourcerecord_[0-9a-z]{26}", finding.description)):
+                        raise ValueError("visual descriptions may cite only their own original page evidence")
                 all_sources = {page["source_record_id"] for page in details["pages"]}
                 if not set(re.findall(r"sourcerecord_[0-9a-z]{26}", reading.notes)).issubset(all_sources):
                     raise ValueError("the notebook cannot invent source references")
@@ -280,19 +320,26 @@ class DocumentIngestV1Agent:
             raise ValueError("metadata extraction requires extracted document evidence")
         numbers = dict.fromkeys((chunks[0]["number"], chunks[-1]["number"]))
         evidence = []
+        images = []
         for number in numbers:
             chunk = await self.client.request(base_url, "GET", f"{path}/chunks/{number}",
                 params={"conversation_id": task.conversation_id, "session_id": task.session_id},
             )
             evidence.extend(chunk["evidence"])
+            images.extend(chunk.get("images", []))
         prompt = json.dumps({
             "filename_hint": details["document"].get("filename", ""),
             "original_opening_and_closing_evidence": evidence,
             "actual_page_ids": [page["source_record_id"] for page in evidence],
         }, ensure_ascii=False)
+        unique_images = {image["page"]: image for image in images}
+        selected_images = list(unique_images.values())
+        selected_images = selected_images[:2] + selected_images[-2:]
+        image_refs = {image["page"]: DocumentImageReference.model_validate(image) for image in selected_images}
         correction = ""
         for attempt in range(3):
             request = ModelRequest(
+                images=tuple(image_refs.values()),
                 sequence=len(chunks) * 3 + 1000 + attempt,
                 messages=(
                     ModelMessage(role=ModelMessageRole.SYSTEM, content=(
@@ -311,7 +358,8 @@ class DocumentIngestV1Agent:
                         "fixed taxonomy; avoid redundant or overly generic tags. Use at most 8 tags of at most "
                         "64 UTF-8 bytes each, or an empty list if the document has no identifiable topics. "
                         "Tags are organizational labels, not authoritative requirements or evidence of team "
-                        "decisions. Do not claim visually inspecting the PDF."
+                        "decisions. Inspect attached opening and closing page images for bibliographic facts; "
+                        "do not claim inspecting pages that are not attached."
                     )),
                     ModelMessage(role=ModelMessageRole.USER, content=prompt + correction),
                 ),
@@ -350,8 +398,6 @@ class DocumentIngestV1Agent:
             ])),
             warnings=tuple((curated or {}).get("warnings", ())) + tuple(
                 (details["document"].get("extracted_metadata") or {}).get("warnings") or ()
-            ) + (
-                "Text ingestion does not inspect images, diagrams, or verify visual table layout.",
             ),
         )
         return AgentResult(

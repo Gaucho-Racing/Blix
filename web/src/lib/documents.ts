@@ -99,10 +99,13 @@ export interface DocumentDetails {
   pages: {
     page_number: number
     source_record_id: string
+    visual_source_record_id?: string
     character_count: number
   }[]
 }
 export interface DocumentPage {
+  visual_record?: DocumentPage
+  page_image?: { document_id: string; page: number; sha256: string }
   source_record_id: string
   source_id: string
   record_type: string
@@ -222,7 +225,7 @@ export const documentStatusLabel = (status: TeamDocument["status"]) =>
     uploading: "Upload pending",
     upload_failed: "Upload failed",
     queued: "Queued",
-    extracting: "Extracting text",
+    extracting: "Extracting document",
     indexing: "Making document searchable",
     reading: "Reading document",
     identifying_metadata: "Identifying document details",
@@ -249,6 +252,11 @@ export async function getDocumentPage(
       signal,
     })
   ).data
+}
+export async function getDocumentPageImage(id: string, page: number, signal?: AbortSignal) {
+  return (await api.get<Blob>(`${root}/documents/${id}/pages/${page}/image`, {
+    responseType: "blob", timeout: 30_000, signal,
+  })).data
 }
 export async function getDocumentFile(id: string, signal?: AbortSignal) {
   return (

@@ -9,7 +9,7 @@ import type { DocumentStage, TeamDocument } from "@/lib/documents"
 
 const steps: { name: DocumentStage["name"]; label: string }[] = [
   { name: "uploading", label: "Upload document" },
-  { name: "extracting", label: "Extract text" },
+  { name: "extracting", label: "Extract document" },
   { name: "indexing", label: "Make searchable" },
   { name: "identifying_metadata", label: "Identify document details" },
   { name: "reading", label: "Read document" },

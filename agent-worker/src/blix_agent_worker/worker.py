@@ -33,6 +33,7 @@ from blix_agent_worker.clients.discord import DiscordClient
 from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.clients.runway import AttemptLease
 from blix_agent_worker.llm import OpenAIResponsesModel
+from blix_agent_worker.llm.document_images import hydrate_document_images
 from blix_agent_worker.llm.retrying import RetryingModel
 from blix_agent_worker.models.agent import (
     AgentExecutionState,
@@ -99,7 +100,11 @@ class Runtime(Protocol):
 
 
 class RuntimeModel:
-    def __init__(self, model: RetryingModel, lease: AttemptLease, commands: tuple[dict[str, object], ...]) -> None:
+    def __init__(self, model: RetryingModel, lease: AttemptLease, commands: tuple[dict[str, object], ...], *,
+                 knowledge: KnowledgeClient | None = None, conversation_id: str = "", session_id: str = "") -> None:
+        self.knowledge = knowledge
+        self.conversation_id = conversation_id
+        self.session_id = session_id
         self.model = model
         self.lease = lease
         self.initial_commands = list(commands)
@@ -131,6 +136,8 @@ class RuntimeModel:
         return request
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
+        if self.knowledge is not None:
+            request = await hydrate_document_images(request, self.knowledge, self.conversation_id, self.session_id)
         return await self.model.complete(request)
 
 
@@ -247,7 +254,9 @@ class ApiRuntime:
             )
 
         model = RuntimeModel(
-            RetryingModel(base_model, base_model.model, record_attempt, record_delta), lease, execution.commands
+            RetryingModel(base_model, base_model.model, record_attempt, record_delta), lease, execution.commands,
+            knowledge=self.knowledge, conversation_id=execution.conversation.conversation_id,
+            session_id=execution.session.session_id
         )
 
         async def save(state: AgentExecutionState, events: list[dict[str, object]] | None = None) -> None:

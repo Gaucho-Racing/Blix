@@ -50,6 +50,8 @@ type SourceQuery struct {
 }
 
 type SourceRecordDetail struct {
+	VisualRecord *model.SourceRecord     `json:"visual_record,omitempty"`
+	PageImage    *DocumentImageReference `json:"page_image,omitempty"`
 	model.SourceRecord
 	Author *model.SourceIdentity `json:"author"`
 }

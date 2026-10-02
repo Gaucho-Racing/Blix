@@ -36,6 +36,7 @@ class KnowledgeClient:
         *,
         params: dict[str, str | int] | None = None,
         payload: JsonObject | None = None,
+        timeout: float = 60,
     ) -> JsonObject:
         try:
             response = await self._client.request(
@@ -43,6 +44,7 @@ class KnowledgeClient:
                 f"{base_url.rstrip('/')}/internal/v1/{path}",
                 params=params,
                 json=payload,
+                timeout=timeout,
             )
         except httpx.RequestError as error:
             raise KnowledgeClientError(

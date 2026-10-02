@@ -17,7 +17,7 @@ from blix_agent_worker.tools.knowledge._sources import SourceRecordCapture
 
 
 class KnowledgeCuratorV1Input(ContractModel):
-    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(max_length=500)] = ()
+    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(max_length=1000)] = ()
     source_material: Annotated[tuple[SourceRecordCapture, ...], Field(max_length=20)] = ()
     document_id: DocumentID | None = None
     mode: Literal["propose", "apply"] = "propose"
@@ -127,6 +127,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         read_sources = set()
         inspected_document = False
         cited_sources = set()
+        visual_originals = {}
         for message in messages:
             if message.role is not ModelMessageRole.CALL_OUTPUT or not message.content:
                 continue
@@ -145,9 +146,12 @@ class KnowledgeCuratorV1Agent(ToolAgent):
                 and agent_input.document_id is not None
                 and result.output.get("document", {}).get("document_id") == agent_input.document_id
             ):
+                visual_originals.update({page["visual_source_record_id"]: page["source_record_id"]
+                                         for page in result.output.get("pages", []) if page.get("visual_source_record_id")})
                 chunks = result.output.get("chunks", [])
                 inspected_document = bool(chunks) and all(chunk.get("completed_at") for chunk in chunks)
-                if {page["source_record_id"] for page in result.output.get("pages", [])} != expected_sources:
+                if {source for page in result.output.get("pages", []) for source in
+                    (page["source_record_id"], page.get("visual_source_record_id")) if source} != expected_sources:
                     raise ValueError("document curation must identify all original page evidence")
             record_id = result.output.get("source_record_id")
             if request.callable_id == "knowledge_source_record_create_v1" and isinstance(record_id, str):
@@ -171,6 +175,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         if agent_input.document_id is not None and not cited_sources.issubset(expected_sources):
             raise ValueError("document proposals must cite supplied original page evidence")
         required_reads = expected_sources if agent_input.document_id is None else cited_sources
+        required_reads = required_reads | {visual_originals[source] for source in cited_sources if source in visual_originals}
         if output.outcome != "blocked" and not required_reads.issubset(read_sources):
             raise ValueError("the curator must read its source records before reporting completion")
         for reported in output.changesets:

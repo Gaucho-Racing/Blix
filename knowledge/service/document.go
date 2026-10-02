@@ -89,7 +89,7 @@ func (PopplerExtractor) Extract(ctx context.Context, path string) ([]string, err
 		if extractCtx.Err() != nil {
 			return nil, fmt.Errorf("%w: PDF extraction timed out", ErrInvalid)
 		}
-		return nil, fmt.Errorf("%w: PDF could not be extracted; upload an unencrypted PDF with selectable text", ErrInvalid)
+		return nil, fmt.Errorf("%w: PDF could not be extracted; upload an unencrypted PDF", ErrInvalid)
 	}
 	text := output.String()
 	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
@@ -102,18 +102,11 @@ func (PopplerExtractor) Extract(ctx context.Context, path string) ([]string, err
 	if len(pages) == 0 || len(pages) > 500 {
 		return nil, fmt.Errorf("%w: PDF must contain 1–500 pages", ErrInvalid)
 	}
-	readable := false
 	for i, page := range pages {
 		pages[i] = strings.TrimSpace(page)
 		if len(pages[i]) > 1024*1024 {
 			return nil, fmt.Errorf("%w: extracted page is too large", ErrInvalid)
 		}
-		if len(pages[i]) > 20 {
-			readable = true
-		}
-	}
-	if !readable {
-		return nil, fmt.Errorf("%w: PDF has no usable text; OCR is required", ErrInvalid)
 	}
 	return pages, nil
 }
@@ -254,7 +247,7 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 		if err := tx.Where("document_id = ?", id).Order("number").Find(&result.Pages).Error; err != nil {
 			return err
 		}
-		if err := tx.Omit("evidence", "findings").Where("document_id = ?", id).Order("number").Find(&result.Chunks).Error; err != nil {
+		if err := tx.Omit("evidence", "findings", "visual_findings").Where("document_id = ?", id).Order("number").Find(&result.Chunks).Error; err != nil {
 			return err
 		}
 		var notes []model.DocumentNotesRevision
@@ -299,7 +292,22 @@ func (s *DocumentService) Page(ctx context.Context, id string, number int) (Sour
 	if err := s.db.WithContext(ctx).First(&record, "id = ? AND source_id IN (SELECT source_id FROM knowledge_document WHERE id = ?)", page.SourceRecordID, id).Error; err != nil {
 		return SourceRecordDetail{}, mapDatabaseError(err)
 	}
-	return SourceRecordDetail{SourceRecord: record}, nil
+	detail := SourceRecordDetail{SourceRecord: record}
+	if page.VisualSourceRecordID != "" {
+		var visual model.SourceRecord
+		if err := s.db.WithContext(ctx).First(&visual, "id = ?", page.VisualSourceRecordID).Error; err != nil {
+			return SourceRecordDetail{}, err
+		}
+		detail.VisualRecord = &visual
+	}
+	images, err := s.ChunkImages(ctx, id, number, number)
+	if err != nil {
+		return SourceRecordDetail{}, err
+	}
+	if len(images) == 1 {
+		detail.PageImage = &images[0]
+	}
+	return detail, nil
 }
 func (s *DocumentService) File(ctx context.Context, id string) (string, string, error) {
 	details, err := s.Get(ctx, id)

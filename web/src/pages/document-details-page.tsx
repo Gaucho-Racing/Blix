@@ -277,7 +277,7 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
     case "queued":
       return "Your document is queued for Blix to read."
     case "extracting":
-      return "Blix is preparing the document for reading."
+      return "Blix is extracting page text and images, using OCR where needed."
     case "indexing":
       return "Blix is saving page evidence and making the document searchable."
     case "reading":

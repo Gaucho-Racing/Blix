@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strconv"
 
@@ -74,6 +75,12 @@ func (h *Handler) RetrieveDocumentEvidence(c *gin.Context) {
 		var documents []service.DocumentSearchContext
 		documents, err = h.documents.ListRetrievableDocuments(c.Request.Context(), scope)
 		result = gin.H{"documents": documents}
+	case "read_page_image":
+		var page int
+		page, err = strconv.Atoi(c.Query("page"))
+		if err == nil {
+			result, err = h.documents.EvidenceImage(c.Request.Context(), c.Query("document_id"), page, scope)
+		}
 	case "read_page":
 		var page, cursor int
 		page, err = strconv.Atoi(c.Query("page"))
@@ -94,4 +101,47 @@ func (h *Handler) RetrieveDocumentEvidence(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) GetAgentPageImage(c *gin.Context) {
+	scope, err := h.documents.AgentImageScope(c.Request.Context(), c.Query("conversation_id"), c.Query("session_id"))
+	if err == nil {
+		err = h.documents.AuthorizeImage(c.Request.Context(), c.Param("documentID"), scope)
+	}
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	data, asset, err := h.documents.ReadPageImage(c.Request.Context(), c.Param("documentID"), number)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	if err := h.documents.AuthorizeImage(c.Request.Context(), c.Param("documentID"), scope); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"document_id": asset.DocumentID, "page": asset.Number, "sha256": asset.SHA256, "data_url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(data)})
+}
+
+func (h *Handler) GetDocumentPageImage(c *gin.Context) {
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	data, _, err := h.documents.ReadPageImage(c.Request.Context(), c.Param("documentID"), number)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Data(http.StatusOK, "image/jpeg", data)
 }

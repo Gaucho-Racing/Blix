@@ -1,9 +1,11 @@
 package api
 
 import (
+	"errors"
 	"mime"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gaucho-racing/blix/knowledge/service"
 	"github.com/gin-gonic/gin"
@@ -120,6 +122,10 @@ func (h *Handler) ProcessDocument(c *gin.Context) {
 	var err error
 	switch c.Param("operation") {
 	case "prepare":
+		if deadlineErr := http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(20 * time.Minute)); deadlineErr != nil && !errors.Is(deadlineErr, http.ErrNotSupported) {
+			respondError(c, service.ErrUnavailable)
+			return
+		}
 		result, err = h.documents.Prepare(c.Request.Context(), c.Param("documentID"), request.DocumentExecution)
 	case "reconcile":
 		result, err = h.documents.Reconcile(c.Request.Context(), c.Param("documentID"), request.DocumentExecution)
