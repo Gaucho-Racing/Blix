@@ -194,7 +194,7 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
                 <GitPullRequest size={20} />
               </span>
               <div className="knowledge-review-row-copy">
-                <span className="workspace-kicker">Knowledge Changeset</span>
+                <span className="workspace-kicker">KNOWLEDGE CHANGESET</span>
                 <strong>{changeset.summary}</strong>
                 <div className="ingestion-changeset-status">
                   <StatusBadge status={changeset.status} />
