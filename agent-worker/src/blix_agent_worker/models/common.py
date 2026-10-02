@@ -5,8 +5,13 @@ import ulid
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, JsonValue, ValidationError
 
 IdentifierPrefix = Literal[
-    "run",
-    "execution",
+    "conversation",
+    "session",
+    "turn",
+    "task",
+    "attempt",
+    "artifact",
+    "action",
     "event",
     "message",
     "call",
@@ -18,6 +23,7 @@ IdentifierPrefix = Literal[
     "ent",
     "usr",
     "sa",
+    "document",
     "source",
     "sourcerecord",
     "changeset",
@@ -48,8 +54,12 @@ def _prefixed_ulid(prefix: IdentifierPrefix) -> object:
     ]
 
 
-RunID = _prefixed_ulid("run")
-ExecutionID = _prefixed_ulid("execution")
+DocumentID = _prefixed_ulid("document")
+ConversationID = _prefixed_ulid("conversation")
+SessionID = _prefixed_ulid("session")
+TurnID = _prefixed_ulid("turn")
+TaskID = _prefixed_ulid("task")
+AttemptID = _prefixed_ulid("attempt")
 EventID = _prefixed_ulid("event")
 MessageID = _prefixed_ulid("message")
 CallID = _prefixed_ulid("call")

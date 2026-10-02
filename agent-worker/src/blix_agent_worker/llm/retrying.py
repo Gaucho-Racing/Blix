@@ -46,6 +46,7 @@ class RetryingModel:
             await self._on_attempt(call)
             started = time.monotonic()
             try:
+
                 async def relay(delta: str) -> None:
                     if self._on_text_delta is not None:
                         await self._on_text_delta(call.call_id, request.sequence, attempt, delta)
@@ -73,7 +74,13 @@ class RetryingModel:
                     raise
                 logger.warning(
                     "model call %s sequence=%d attempt=%d/%d failed code=%s status=%s; retrying in %.2fs",
-                    call.call_id, request.sequence, attempt, self.MAX_ATTEMPTS, error.code, error.http_status, delay,
+                    call.call_id,
+                    request.sequence,
+                    attempt,
+                    self.MAX_ATTEMPTS,
+                    error.code,
+                    error.http_status,
+                    delay,
                 )
                 await asyncio.sleep(delay)
                 continue

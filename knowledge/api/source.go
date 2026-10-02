@@ -77,6 +77,10 @@ func (h *Handler) ListSources(c *gin.Context) {
 }
 
 func (h *Handler) GetSource(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
 	source, err := h.sources.GetSource(c.Request.Context(), c.Param("sourceID"))
 	if err != nil {
 		respondError(c, err)
@@ -86,6 +90,10 @@ func (h *Handler) GetSource(c *gin.Context) {
 }
 
 func (h *Handler) ListSourceRecords(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if err != nil {
 		respondError(c, service.ErrInvalid)
@@ -172,6 +180,10 @@ func (h *Handler) IngestSourceRecord(c *gin.Context) {
 }
 
 func (h *Handler) GetSourceRecord(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentRecord(c.Request.Context(), c.Param("sourceRecordID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
 	record, err := h.sources.ReadSourceRecord(c.Request.Context(), c.Param("sourceRecordID"))
 	if err != nil {
 		respondError(c, err)

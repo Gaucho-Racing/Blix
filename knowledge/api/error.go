@@ -22,8 +22,8 @@ func respondError(c *gin.Context, err error) {
 		message = "forbidden"
 	case errors.Is(err, service.ErrUnavailable):
 		status = http.StatusServiceUnavailable
-		message = "authentication service unavailable"
-		logger.SugarLogger.Errorf("authentication unavailable: %v", err)
+		message = "service unavailable"
+		logger.SugarLogger.Errorf("service unavailable: %v", err)
 	case errors.Is(err, service.ErrInvalid), errors.Is(err, repository.ErrInvalid):
 		status = http.StatusBadRequest
 		message = err.Error()

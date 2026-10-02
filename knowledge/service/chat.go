@@ -16,18 +16,18 @@ import (
 )
 
 type IngestChatRecordInput struct {
-	RunID       string    `json:"run_id"`
-	ExecutionID string    `json:"execution_id"`
-	MessageID   string    `json:"message_id"`
-	EntityID    string    `json:"entity_id"`
-	UserID      string    `json:"user_id"`
-	Content     string    `json:"content"`
-	OccurredAt  time.Time `json:"occurred_at"`
+	ConversationID string    `json:"conversation_id"`
+	SessionID      string    `json:"session_id"`
+	MessageID      string    `json:"message_id"`
+	EntityID       string    `json:"entity_id"`
+	UserID         string    `json:"user_id"`
+	Content        string    `json:"content"`
+	OccurredAt     time.Time `json:"occurred_at"`
 }
 
 func (s *SourceService) IngestChatRecord(ctx context.Context, input IngestChatRecordInput) (IngestedSourceRecord, error) {
-	if !identifier.IsValid(input.RunID, identifier.Run) ||
-		!identifier.IsValid(input.ExecutionID, identifier.Execution) ||
+	if !identifier.IsValid(input.ConversationID, identifier.Conversation) ||
+		!identifier.IsValid(input.SessionID, identifier.Session) ||
 		!identifier.IsValid(input.MessageID, identifier.Message) ||
 		!identifier.IsValid(input.EntityID, identifier.Entity) ||
 		!identifier.IsValid(input.UserID, identifier.User) {
@@ -38,7 +38,7 @@ func (s *SourceService) IngestChatRecord(ctx context.Context, input IngestChatRe
 		return IngestedSourceRecord{}, fmt.Errorf("%w: timestamp and nonempty UTF-8 content up to 1 MiB are required", ErrInvalid)
 	}
 	metadata, err := json.Marshal(map[string]any{
-		"run_id": input.RunID, "execution_id": input.ExecutionID, "message_id": input.MessageID,
+		"conversation_id": input.ConversationID, "session_id": input.SessionID, "message_id": input.MessageID,
 		"evidence_type": "human_statement",
 		"caller":        map[string]string{"entity_id": input.EntityID, "entity_type": "USER", "user_id": input.UserID},
 	})
@@ -48,8 +48,8 @@ func (s *SourceService) IngestChatRecord(ctx context.Context, input IngestChatRe
 	var ingested IngestedSourceRecord
 	err = s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		source := model.Source{
-			ID: identifier.New(identifier.Source), Kind: "blix_chat", ExternalID: input.RunID,
-			Name: "Blix conversation " + input.RunID, Status: model.SourceStatusActive, Metadata: datatypes.JSON([]byte("{}")),
+			ID: identifier.New(identifier.Source), Kind: "blix_chat", ExternalID: input.ConversationID,
+			Name: "Blix conversation " + input.ConversationID, Status: model.SourceStatusActive, Metadata: datatypes.JSON([]byte("{}")),
 		}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "kind"}, {Name: "external_id"}}, DoNothing: true,
@@ -57,15 +57,15 @@ func (s *SourceService) IngestChatRecord(ctx context.Context, input IngestChatRe
 			return err
 		}
 		var stored model.Source
-		if err := tx.Where("kind = ? AND external_id = ?", "blix_chat", input.RunID).First(&stored).Error; err != nil {
+		if err := tx.Where("kind = ? AND external_id = ?", "blix_chat", input.ConversationID).First(&stored).Error; err != nil {
 			return err
 		}
 		var err error
 		ingested, err = NewSourceService(tx).IngestSourceRecord(ctx, stored.ID, IngestSourceRecordInput{
 			ExternalID: input.MessageID, ExternalVersion: "1", RecordType: "chat_message",
-			ParentExternalID: input.RunID, Content: input.Content, Metadata: metadata, OccurredAt: input.OccurredAt,
+			ParentExternalID: input.ConversationID, Content: input.Content, Metadata: metadata, OccurredAt: input.OccurredAt,
 			Author: &SourceIdentityInput{Provider: "sentinel", ExternalID: input.EntityID}, EvidenceType: "human_statement",
-			CaptureMethod: "runtime_chat", CaptureRunID: input.RunID, CaptureExecutionID: input.ExecutionID,
+			CaptureMethod: "runtime_chat", CaptureConversationID: input.ConversationID, CaptureSessionID: input.SessionID,
 		})
 		return err
 	})

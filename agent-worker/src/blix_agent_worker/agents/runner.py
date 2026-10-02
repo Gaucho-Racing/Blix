@@ -40,12 +40,12 @@ class AgentRunner:
         request: ModelCallRequest,
         allowed_agent_ids: Collection[str],
     ) -> tuple[AgentTask, bool] | AgentResult:
-        execution_id = new_ulid("execution")
+        session_id = new_ulid("session")
         if request.callable_id not in allowed_agent_ids:
             return self._emit(
                 self._failure(
                     parent_task,
-                    execution_id,
+                    session_id,
                     request.callable_id,
                     "agent_not_allowed",
                     f"Agent {request.callable_id!r} is not allowed for this execution.",
@@ -57,7 +57,7 @@ class AgentRunner:
             return self._emit(
                 self._failure(
                     parent_task,
-                    execution_id,
+                    session_id,
                     request.callable_id,
                     "invalid_delegation_input",
                     "The delegated agent input is invalid.",
@@ -71,7 +71,7 @@ class AgentRunner:
             return self._emit(
                 self._failure(
                     parent_task,
-                    execution_id,
+                    session_id,
                     request.callable_id,
                     "agent_not_found",
                     f"Agent {request.callable_id!r} is not registered.",
@@ -79,9 +79,9 @@ class AgentRunner:
             )
 
         task = AgentTask(
-            run_id=parent_task.run_id,
-            execution_id=execution_id,
-            parent_execution_id=parent_task.execution_id,
+            conversation_id=parent_task.conversation_id,
+            session_id=session_id,
+            parent_session_id=parent_task.session_id,
             agent_id=agent.definition.id,
             objective=delegation.objective,
             input=delegation.input,
@@ -98,16 +98,16 @@ class AgentRunner:
 
     def validate_result(self, task: AgentTask, result: AgentResult) -> AgentResult:
         if (
-            result.run_id != task.run_id
-            or result.execution_id != task.execution_id
-            or result.parent_execution_id != task.parent_execution_id
+            result.conversation_id != task.conversation_id
+            or result.session_id != task.session_id
+            or result.parent_session_id != task.parent_session_id
             or result.agent_id != task.agent_id
         ):
             return self._emit(
                 AgentResult(
-                    run_id=task.run_id,
-                    execution_id=task.execution_id,
-                    parent_execution_id=task.parent_execution_id,
+                    conversation_id=task.conversation_id,
+                    session_id=task.session_id,
+                    parent_session_id=task.parent_session_id,
                     agent_id=task.agent_id,
                     status=AgentResultStatus.FAILED,
                     error=ContractError(
@@ -126,7 +126,7 @@ class AgentRunner:
     @staticmethod
     def _failure(
         parent_task: AgentTask,
-        execution_id: str,
+        session_id: str,
         agent_id: str,
         code: str,
         message: str,
@@ -134,9 +134,9 @@ class AgentRunner:
         details: JsonObject | None = None,
     ) -> AgentResult:
         return AgentResult(
-            run_id=parent_task.run_id,
-            execution_id=execution_id,
-            parent_execution_id=parent_task.execution_id,
+            conversation_id=parent_task.conversation_id,
+            session_id=session_id,
+            parent_session_id=parent_task.session_id,
             agent_id=agent_id,
             status=AgentResultStatus.FAILED,
             error=ContractError(

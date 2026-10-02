@@ -1,3 +1,4 @@
+import os
 from typing import Self
 
 import httpx
@@ -14,7 +15,12 @@ class KnowledgeClientError(Exception):
 
 class KnowledgeClient:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._client = httpx.AsyncClient(transport=transport, timeout=None, follow_redirects=False)
+        self._client = httpx.AsyncClient(
+            transport=transport,
+            timeout=60,
+            follow_redirects=False,
+            headers={"Authorization": f"Bearer {os.environ.get('BLIX_INTERNAL_TOKEN', '')}"},
+        )
 
     async def __aenter__(self) -> Self:
         return self
@@ -47,6 +53,7 @@ class KnowledgeClient:
         if not response.is_success:
             code = {
                 400: "invalid_knowledge_request",
+                403: "knowledge_forbidden",
                 404: "knowledge_not_found",
                 409: "knowledge_conflict",
             }.get(response.status_code, "knowledge_request_failed")
@@ -58,8 +65,14 @@ class KnowledgeClient:
                         "Read the source/record first; do not overwrite evidence or invent a version "
                         "to bypass a conflict."
                     )
+                elif path.endswith("/apply"):
+                    message += (
+                        " Publication may already be running or its base revision may have changed. "
+                        "Inspect this changeset and retry the same ID when appropriate. Do not replace "
+                        "a changeset whose publication outcome is unresolved."
+                    )
                 else:
-                    message += " Read the latest wiki revision and propose a new changeset; do not force the write."
+                    message += " Read the latest wiki revision; do not force the write."
             raise KnowledgeClientError(
                 code, message, retryable=response.status_code == 429 or response.status_code >= 500
             )

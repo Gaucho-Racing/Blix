@@ -52,7 +52,9 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
     ) -> None:
         super().__init__(client)
         self._messages = {message.message_id: message for message in messages}
-        self._latest_message_id = messages[-1].message_id if messages else None
+        self._latest_message_id = next(
+            (message.message_id for message in reversed(messages) if message.role is ConversationMessageRole.USER), None
+        )
         self._caller = caller
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeRememberV1Input, url: str) -> JsonObject:
@@ -61,8 +63,8 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
         if (
             message is None
             or message.role is not ConversationMessageRole.USER
-            or message.run_id != call.run_id
-            or message.parent_execution_id != call.parent_execution_id
+            or message.conversation_id != call.conversation_id
+            or message.session_id != call.parent_session_id
         ):
             raise KnowledgeClientError(
                 "chat_context_unavailable",
@@ -77,8 +79,8 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
             "POST",
             "chat-records",
             payload={
-                "run_id": call.run_id,
-                "execution_id": call.parent_execution_id,
+                "conversation_id": call.conversation_id,
+                "session_id": call.parent_session_id,
                 "message_id": message.message_id,
                 "entity_id": self._caller.entity_id,
                 "user_id": self._caller.user_id,

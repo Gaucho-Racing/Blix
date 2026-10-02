@@ -134,9 +134,9 @@ class WebExtractV1Tool:
             )
 
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )
@@ -151,9 +151,9 @@ class WebExtractV1Tool:
         details: JsonObject | None = None,
     ) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=ContractError(
                 code=code,

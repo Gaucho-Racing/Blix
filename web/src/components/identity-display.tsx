@@ -1,4 +1,5 @@
 import type { IdentitySummary } from "@/lib/types"
+import { useIdentities } from "@/lib/identity"
 
 function initials(name: string): string {
   return name
@@ -16,21 +17,28 @@ interface IdentityDisplayProps {
 }
 
 export function IdentityDisplay({ entityID, identity }: IdentityDisplayProps) {
-  const name = identity?.name || "Unknown caller"
-  const avatarURL = identity?.avatar_url || identity?.application?.icon_url
-  const subtitle = identity?.username || identity?.application?.name || identity?.type
+  const lookup = useIdentities(identity ? [] : [entityID])
+  const resolved =
+    identity ?? lookup.identities.find((item) => item.id === entityID)
+  const name =
+    resolved?.name ||
+    (lookup.isLoading ? "Loading identity…" : "Unknown entity")
+  const avatarURL = resolved?.avatar_url || resolved?.application?.icon_url
+  const username = resolved?.username?.trim().replace(/^@+/, "")
+  const subtitle = username ? `@${username}` : resolved?.application?.name
 
   return (
     <div className="identity-display">
       {avatarURL ? (
         <img alt="" className="identity-avatar" src={avatarURL} />
       ) : (
-        <span className="identity-avatar identity-avatar-fallback">{initials(name) || "?"}</span>
+        <span className="identity-avatar identity-avatar-fallback">
+          {initials(name) || "?"}
+        </span>
       )}
       <span className="identity-copy">
         <strong>{name}</strong>
         {subtitle && <span>{subtitle}</span>}
-        <code>{entityID || "—"}</code>
       </span>
     </div>
   )

@@ -4,7 +4,7 @@ from typing import Self
 
 from pydantic import ConfigDict, model_validator
 
-from blix_agent_worker.models.common import ContractModel, ExecutionID, MessageID, NonEmptyText, RunID
+from blix_agent_worker.models.common import ContractModel, ConversationID, MessageID, NonEmptyText, SessionID
 
 
 class ConversationMessageRole(StrEnum):
@@ -13,11 +13,13 @@ class ConversationMessageRole(StrEnum):
 
 
 class ConversationMessage(ContractModel):
-    model_config = ConfigDict(str_strip_whitespace=False)
+    model_config = ConfigDict(str_strip_whitespace=False, extra="ignore")
 
     message_id: MessageID
-    run_id: RunID
-    parent_execution_id: ExecutionID
+    conversation_id: ConversationID
+    session_id: SessionID
+    event_position: int = 0
+    turn_id: str = ""
     role: ConversationMessageRole
     content: NonEmptyText
     created_at: datetime

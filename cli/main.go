@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	agentID   = "general_conversation_v1"
+	agentID   = "blix_v1"
 	chatInset = 2
 )
 
@@ -57,30 +57,36 @@ type client struct {
 	user    *currentUser
 }
 
-type run struct {
-	ID              string `json:"run_id"`
-	RootExecutionID string `json:"root_execution_id"`
+type conversation struct {
+	ID            string `json:"conversation_id"`
+	LeadSessionID string `json:"lead_session_id"`
 }
 
-type execution struct {
-	ID string `json:"execution_id"`
+type agentSession struct {
+	ID string `json:"session_id"`
 }
 
-type createdRun struct {
-	Run       run       `json:"run"`
-	Execution execution `json:"execution"`
+type createdConversation struct {
+	Conversation conversation `json:"conversation"`
+	Session      agentSession `json:"session"`
 }
 
 type appendedMessage struct {
+	Turn struct {
+		ID string `json:"turn_id"`
+	} `json:"turn"`
 	EventPosition uint64 `json:"event_position"`
 }
 
 type executionEvent struct {
-	Position    uint64          `json:"position"`
-	ExecutionID string          `json:"execution_id"`
-	Type        string          `json:"type"`
-	EntityID    string          `json:"entity_id"`
-	Payload     json.RawMessage `json:"payload"`
+	TurnID    string          `json:"turn_id"`
+	TaskID    string          `json:"task_id"`
+	AttemptID string          `json:"attempt_id"`
+	Position  uint64          `json:"position"`
+	SessionID string          `json:"session_id"`
+	Type      string          `json:"type"`
+	EntityID  string          `json:"entity_id"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 type eventsResponse struct {
@@ -105,11 +111,13 @@ type toolResultPayload struct {
 }
 
 type agentCallPayload struct {
+	TaskID     string `json:"task_id"`
 	AgentID    string `json:"agent_id"`
 	Background bool   `json:"background"`
 }
 
 type agentResultPayload struct {
+	TaskID  string `json:"task_id"`
 	AgentID string `json:"agent_id"`
 	Status  string `json:"status"`
 }
@@ -149,12 +157,12 @@ func (e *httpStatusError) Error() string {
 }
 
 type renderedActivity struct {
-	key         string
-	executionID string
-	depth       int
-	kind        string
-	label       string
-	status      string
+	key       string
+	sessionID string
+	depth     int
+	kind      string
+	label     string
+	status    string
 }
 
 type activityTree struct {
@@ -224,42 +232,42 @@ func normalizeEndpoint(value string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
-func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
+func createConversationWithRetry(ctx context.Context, api *client) (createdConversation, error) {
 	var lastErr error
 	for attempt := 0; attempt < 15; attempt++ {
-		created, err := api.createRun(ctx)
+		created, err := api.createConversation(ctx)
 		if err == nil {
 			return created, nil
 		}
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return createdRun{}, ctx.Err()
+			return createdConversation{}, ctx.Err()
 		case <-time.After(time.Second):
 		}
 	}
-	return createdRun{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
+	return createdConversation{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
 }
 
-func newActivityTree(rootExecutionID string) *activityTree {
+func newActivityTree(leadSessionID string) *activityTree {
 	return &activityTree{
-		depthByExecution: map[string]int{rootExecutionID: 0},
-		agentByExecution: map[string]string{rootExecutionID: agentID},
+		depthByExecution: map[string]int{leadSessionID: 0},
+		agentByExecution: map[string]string{leadSessionID: agentID},
 	}
 }
 
-func (t *activityTree) executionDepth(executionID string) int {
-	depth, ok := t.depthByExecution[executionID]
+func (t *activityTree) executionDepth(sessionID string) int {
+	depth, ok := t.depthByExecution[sessionID]
 	if !ok {
 		return 0
 	}
 	return depth
 }
 
-func (t *activityTree) agentCall(parentExecutionID string, childExecutionID string, childAgentID string) int {
-	parentDepth := t.executionDepth(parentExecutionID)
-	t.depthByExecution[childExecutionID] = parentDepth + 1
-	t.agentByExecution[childExecutionID] = childAgentID
+func (t *activityTree) agentCall(parentSessionID string, childSessionID string, childAgentID string) int {
+	parentDepth := t.executionDepth(parentSessionID)
+	t.depthByExecution[childSessionID] = parentDepth + 1
+	t.agentByExecution[childSessionID] = childAgentID
 	return parentDepth
 }
 
@@ -269,10 +277,10 @@ func applyEvent(
 	tree *activityTree,
 ) (string, *renderedActivity, bool, error) {
 	switch event.Type {
-	case "agent.call_v1":
+	case "task.created_v1":
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
-			depth := tree.agentCall(event.ExecutionID, event.EntityID, payload.AgentID)
+			depth := tree.agentCall(event.SessionID, event.EntityID, payload.AgentID)
 			label := payload.AgentID
 			if payload.Background {
 				label += " · background"
@@ -280,17 +288,17 @@ func applyEvent(
 			activity := newRenderedActivity("agent:"+event.EntityID, event.EntityID, depth, "agent", label, "queued")
 			return "", &activity, false, nil
 		}
-	case "execution.claimed_v1":
-		agent, ok := tree.agentByExecution[event.ExecutionID]
-		if ok && event.ExecutionID != "" {
-			depth := tree.executionDepth(event.ExecutionID) - 1
+	case "attempt.claimed_v1":
+		agent, ok := tree.agentByExecution[event.SessionID]
+		if ok && event.SessionID != "" {
+			depth := tree.executionDepth(event.SessionID) - 1
 			if depth < 0 {
 				return "", nil, false, nil
 			}
-			activity := newRenderedActivity("agent:"+event.ExecutionID, event.ExecutionID, depth, "agent", agent, "running")
+			activity := newRenderedActivity("agent:"+event.SessionID, event.SessionID, depth, "agent", agent, "running")
 			return "", &activity, false, nil
 		}
-	case "agent.result_v1":
+	case "task.result_v1":
 		var payload agentResultPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			agent := payload.AgentID
@@ -300,7 +308,7 @@ func applyEvent(
 			activity := newRenderedActivity(
 				"agent:"+event.EntityID,
 				event.EntityID,
-				tree.executionDepth(event.ExecutionID),
+				tree.executionDepth(event.SessionID),
 				"agent",
 				agent,
 				payload.Status,
@@ -321,8 +329,8 @@ func applyEvent(
 			}
 			activity := newRenderedActivity(
 				"tool:"+event.EntityID,
-				event.ExecutionID,
-				tree.executionDepth(event.ExecutionID),
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
 				"tool",
 				toolID,
 				payload.Status,
@@ -333,9 +341,9 @@ func applyEvent(
 		var payload modelResponsePayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			activity := newRenderedActivity(
-				fmt.Sprintf("model:%s:%d", event.ExecutionID, payload.Sequence),
-				event.ExecutionID,
-				tree.executionDepth(event.ExecutionID),
+				fmt.Sprintf("model:%s:%d", event.SessionID, payload.Sequence),
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
 				"model",
 				fmt.Sprintf("call %d", payload.Sequence),
 				"done",
@@ -347,11 +355,11 @@ func applyEvent(
 		if json.Unmarshal(event.Payload, &payload) == nil && payload.Delta != "" {
 			return payload.Delta, nil, false, nil
 		}
-	case "execution.lease_expired_v1":
+	case "attempt.lease_expired_v1":
 		activity := newRenderedActivity(
-			"execution:"+event.ExecutionID,
-			event.ExecutionID,
-			tree.executionDepth(event.ExecutionID),
+			"execution:"+event.SessionID,
+			event.SessionID,
+			tree.executionDepth(event.SessionID),
 			"runtime",
 			"execution lease expired",
 			"requeued",
@@ -363,7 +371,9 @@ func applyEvent(
 			return "", nil, true, errors.New("Blix returned an invalid assistant message event")
 		}
 		return payload.Content, nil, true, nil
-	case "execution.failed_v1":
+	case "attempt.cancelled_v1":
+		return "", nil, true, errors.New("Turn cancelled")
+	case "attempt.failed_v1":
 		var payload failedPayload
 		if json.Unmarshal(event.Payload, &payload) == nil && payload.Error.Message != "" {
 			return "", nil, true, errors.New(payload.Error.Message)
@@ -373,31 +383,31 @@ func applyEvent(
 	return "", nil, false, nil
 }
 
-func (c *client) createRun(ctx context.Context) (createdRun, error) {
-	var created createdRun
-	err := c.request(ctx, http.MethodPost, "/api/v1/runs", map[string]string{"agent_id": agentID}, &created)
+func (c *client) createConversation(ctx context.Context) (createdConversation, error) {
+	var created createdConversation
+	err := c.request(ctx, http.MethodPost, "/api/v1/conversations", map[string]string{"agent_id": agentID}, &created)
 	return created, err
 }
 
-func (c *client) appendMessage(ctx context.Context, runID string, content string) (appendedMessage, error) {
+func (c *client) appendMessage(ctx context.Context, conversationID string, content string) (appendedMessage, error) {
 	var appended appendedMessage
 	err := c.request(
 		ctx,
 		http.MethodPost,
-		"/api/v1/runs/"+runID+"/messages",
+		"/api/v1/conversations/"+conversationID+"/messages",
 		map[string]string{"content": content},
 		&appended,
 	)
 	return appended, err
 }
 
-func (c *client) interruptRun(ctx context.Context, runID string) error {
-	return c.request(ctx, http.MethodPost, "/api/v1/runs/"+runID+"/interrupt", nil, nil)
+func (c *client) interruptConversation(ctx context.Context, conversationID string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/conversations/"+conversationID+"/interrupt", nil, nil)
 }
 
-func (c *client) listEvents(ctx context.Context, runID string, after uint64) ([]executionEvent, error) {
+func (c *client) listEvents(ctx context.Context, conversationID string, after uint64) ([]executionEvent, error) {
 	var response eventsResponse
-	path := fmt.Sprintf("/api/v1/runs/%s/events?after=%d", runID, after)
+	path := fmt.Sprintf("/api/v1/conversations/%s/events?after=%d", conversationID, after)
 	if err := c.request(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return nil, err
 	}
@@ -437,7 +447,7 @@ func canUseBlixIdentity(caller *callerContext, user *currentUser) bool {
 
 func accessMessage(caller *callerContext, user *currentUser) string {
 	if caller == nil {
-		return "Sign in with /login before starting a run."
+		return "Sign in with /login before starting a conversation."
 	}
 	if user == nil {
 		return "Your Sentinel profile could not be verified. Sign in again with /login."
@@ -498,7 +508,7 @@ func (c *client) doRequest(
 }
 
 func renderSessionPanel(
-	current *createdRun,
+	current *createdConversation,
 	caller *callerContext,
 	user *currentUser,
 	endpoint string,
@@ -558,18 +568,18 @@ func renderSessionPanel(
 	return style.Render(content)
 }
 
-func sessionMetadata(current *createdRun, caller *callerContext, endpoint string) string {
-	runID := "—"
-	executionID := "—"
+func sessionMetadata(current *createdConversation, caller *callerContext, endpoint string) string {
+	conversationID := "—"
+	sessionID := "—"
 	callerID := "not authenticated"
 	if current != nil {
-		runID = current.Run.ID
-		executionID = current.Execution.ID
+		conversationID = current.Conversation.ID
+		sessionID = current.Session.ID
 	}
 	if caller != nil {
 		callerID = caller.EntityID
 	}
-	labelStyle := lipgloss.NewStyle().Foreground(muted).Width(11)
+	labelStyle := lipgloss.NewStyle().Foreground(muted).Width(14)
 	valueStyle := lipgloss.NewStyle().Bold(true).Foreground(white)
 	rows := []struct {
 		label string
@@ -577,8 +587,8 @@ func sessionMetadata(current *createdRun, caller *callerContext, endpoint string
 	}{
 		{label: "agent", value: agentID},
 		{label: "caller", value: callerID},
-		{label: "run", value: runID},
-		{label: "execution", value: executionID},
+		{label: "conversation", value: conversationID},
+		{label: "session", value: sessionID},
 		{label: "endpoint", value: endpoint},
 	}
 	lines := make([]string, 0, len(rows))
@@ -644,7 +654,14 @@ func renderHelpPanel(width int) string {
 		{command: "/logout", detail: "Sign out and clear the saved session"},
 		{command: "/endpoint", detail: "Show or change the active Blix endpoint"},
 		{command: "/help", detail: "Show available commands"},
-		{command: "/reset", detail: "Start a fresh run"},
+		{command: "/reset", detail: "Start a fresh conversation"},
+		{command: "/tasks", detail: "List conversation tasks"},
+		{command: "/cancel", detail: "Cancel a task: /cancel <task_id>"},
+		{command: "/steer", detail: "Guide a task: /steer <task_id> <guidance>"},
+		{command: "/approve", detail: "Approve publication: /approve <approval_id>"},
+		{command: "/reject", detail: "Reject publication: /reject <approval_id>"},
+		{command: "/conversations", detail: "List saved conversations"},
+		{command: "/resume", detail: "Continue: /resume <conversation_id>"},
 		{command: "/quit", detail: "End the session"},
 	}
 	lines := make([]string, 0, len(commands)+1)
@@ -652,7 +669,7 @@ func renderHelpPanel(width int) string {
 	for _, command := range commands {
 		lines = append(lines, lipgloss.JoinHorizontal(
 			lipgloss.Top,
-			lipgloss.NewStyle().Bold(true).Foreground(white).Width(11).Render(command.command),
+			lipgloss.NewStyle().Bold(true).Foreground(white).Width(16).Render(command.command),
 			mutedStyle.Render(command.detail),
 		))
 	}
@@ -685,19 +702,19 @@ func errorPanel(message string) string {
 
 func newRenderedActivity(
 	key string,
-	executionID string,
+	sessionID string,
 	depth int,
 	kind string,
 	label string,
 	status string,
 ) renderedActivity {
 	return renderedActivity{
-		key:         key,
-		executionID: executionID,
-		depth:       depth,
-		kind:        kind,
-		label:       label,
-		status:      status,
+		key:       key,
+		sessionID: sessionID,
+		depth:     depth,
+		kind:      kind,
+		label:     label,
+		status:    status,
 	}
 }
 

@@ -43,19 +43,19 @@ type SourceIdentityInput struct {
 }
 
 type IngestSourceRecordInput struct {
-	ExternalID         string               `json:"external_id"`
-	ExternalVersion    string               `json:"external_version"`
-	RecordType         string               `json:"record_type"`
-	ParentExternalID   string               `json:"parent_external_id"`
-	ExternalURL        string               `json:"external_url"`
-	Content            string               `json:"content"`
-	Metadata           json.RawMessage      `json:"metadata"`
-	OccurredAt         time.Time            `json:"occurred_at"`
-	Author             *SourceIdentityInput `json:"author"`
-	EvidenceType       string               `json:"evidence_type"`
-	CaptureMethod      string               `json:"capture_method"`
-	CaptureRunID       string               `json:"capture_run_id"`
-	CaptureExecutionID string               `json:"capture_execution_id"`
+	ExternalID            string               `json:"external_id"`
+	ExternalVersion       string               `json:"external_version"`
+	RecordType            string               `json:"record_type"`
+	ParentExternalID      string               `json:"parent_external_id"`
+	ExternalURL           string               `json:"external_url"`
+	Content               string               `json:"content"`
+	Metadata              json.RawMessage      `json:"metadata"`
+	OccurredAt            time.Time            `json:"occurred_at"`
+	Author                *SourceIdentityInput `json:"author"`
+	EvidenceType          string               `json:"evidence_type"`
+	CaptureMethod         string               `json:"capture_method"`
+	CaptureConversationID string               `json:"capture_conversation_id"`
+	CaptureSessionID      string               `json:"capture_session_id"`
 }
 
 type IngestedSourceRecord struct {
@@ -115,7 +115,7 @@ func (s *SourceService) GetSourceRecord(ctx context.Context, recordID string) (m
 		return model.SourceRecord{}, fmt.Errorf("%w: source_record_id is invalid", ErrInvalid)
 	}
 	var record model.SourceRecord
-	if err := s.database.WithContext(ctx).First(&record, "id = ?", recordID).Error; err != nil {
+	if err := s.database.WithContext(ctx).First(&record, "id = ? AND source_id IN (SELECT id FROM knowledge_source WHERE status = ?)", recordID, model.SourceStatusActive).Error; err != nil {
 		return model.SourceRecord{}, mapDatabaseError(err)
 	}
 	return record, nil
@@ -126,6 +126,10 @@ func (s *SourceService) IngestSourceRecord(
 	sourceID string,
 	input IngestSourceRecordInput,
 ) (IngestedSourceRecord, error) {
+	return s.ingestSourceRecord(ctx, sourceID, input, true)
+}
+
+func (s *SourceService) ingestSourceRecord(ctx context.Context, sourceID string, input IngestSourceRecordInput, index bool) (IngestedSourceRecord, error) {
 	if !identifier.IsValid(sourceID, identifier.Source) {
 		return IngestedSourceRecord{}, fmt.Errorf("%w: source_id is invalid", ErrInvalid)
 	}
@@ -185,8 +189,8 @@ func (s *SourceService) IngestSourceRecord(
 			Content:                input.Content,
 			EvidenceType:           input.EvidenceType,
 			CaptureMethod:          input.CaptureMethod,
-			CaptureRunID:           input.CaptureRunID,
-			CaptureExecutionID:     input.CaptureExecutionID,
+			CaptureConversationID:  input.CaptureConversationID,
+			CaptureSessionID:       input.CaptureSessionID,
 			ContentHash:            contentHash,
 			RecordHash:             recordHash,
 			Metadata:               metadata,
@@ -201,6 +205,9 @@ func (s *SourceService) IngestSourceRecord(
 		}
 		if result.RowsAffected == 1 {
 			ingested = IngestedSourceRecord{Record: record, Created: true}
+			if index {
+				return indexSourceRecord(tx, record)
+			}
 			return nil
 		}
 		var existing model.SourceRecord
@@ -216,6 +223,9 @@ func (s *SourceService) IngestSourceRecord(
 			return fmt.Errorf("%w: immutable source record version has different content", ErrConflict)
 		}
 		ingested = IngestedSourceRecord{Record: existing, Created: false}
+		if index {
+			return indexSourceRecord(tx, existing)
+		}
 		return nil
 	})
 	if err != nil {

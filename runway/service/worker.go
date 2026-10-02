@@ -27,8 +27,9 @@ type WorkerService struct {
 }
 
 type WorkerRegistrationRequest struct {
-	WorkerID    string `json:"worker_id"`
-	Concurrency uint64 `json:"concurrency"`
+	WorkerID              string `json:"worker_id"`
+	Concurrency           uint64 `json:"concurrency"`
+	BackgroundConcurrency uint64 `json:"background_concurrency"`
 }
 
 type WorkerRegistration struct {
@@ -81,23 +82,25 @@ func NewWorkerService(database *gorm.DB, updates *WorkerHub, configuration confi
 }
 
 func (s *WorkerService) Register(ctx context.Context, request WorkerRegistrationRequest) (WorkerRegistration, error) {
-	if !identifier.IsValid(request.WorkerID, identifier.Worker) || request.Concurrency == 0 || request.Concurrency > 1024 {
+	if !identifier.IsValid(request.WorkerID, identifier.Worker) || request.Concurrency == 0 || request.Concurrency > 1024 || request.BackgroundConcurrency == 0 || request.BackgroundConcurrency >= request.Concurrency {
 		return WorkerRegistration{}, fmt.Errorf("%w: worker_id or concurrency is invalid", ErrInvalid)
 	}
 	now := time.Now().UTC()
 	worker := model.AgentWorker{
-		ID:           request.WorkerID,
-		Concurrency:  request.Concurrency,
-		LastSeenAt:   now,
-		RegisteredAt: now,
-		UpdatedAt:    now,
+		ID:                    request.WorkerID,
+		Concurrency:           request.Concurrency,
+		BackgroundConcurrency: request.BackgroundConcurrency,
+		LastSeenAt:            now,
+		RegisteredAt:          now,
+		UpdatedAt:             now,
 	}
 	err := s.database.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"concurrency":  request.Concurrency,
-			"last_seen_at": now,
-			"updated_at":   now,
+			"concurrency":            request.Concurrency,
+			"background_concurrency": request.BackgroundConcurrency,
+			"last_seen_at":           now,
+			"updated_at":             now,
 		}),
 	}).Create(&worker).Error
 	if err != nil {
@@ -176,12 +179,12 @@ func (s *WorkerService) workerSummaryQuery(ctx context.Context) *gorm.DB {
 			worker.*,
 			(
 				SELECT COUNT(*)
-				FROM runway_agent_execution execution
-				WHERE execution.claimed_by = worker.id
+				FROM runway_execution_attempt execution
+				WHERE execution.worker_id = worker.id
 					AND execution.status = ?
 					AND execution.lease_expires_at > ?
 			) AS active_executions
-		`, model.ExecutionStatusRunning, time.Now().UTC())
+		`, model.StatusRunning, time.Now().UTC())
 }
 
 func (s *WorkerService) summarize(row workerSummaryRow, now time.Time) WorkerSummary {
@@ -243,9 +246,9 @@ func (s *WorkerService) recordModelCall(tx *gorm.DB, workerID string, inputToken
 func (s *WorkerService) recordCompletion(tx *gorm.DB, workerID string, status string) error {
 	column := "executions_failed"
 	switch status {
-	case model.ExecutionStatusSucceeded:
+	case model.StatusSucceeded:
 		column = "executions_succeeded"
-	case model.ExecutionStatusCancelled:
+	case model.StatusCancelled:
 		column = "executions_cancelled"
 	}
 	return s.increment(tx, workerID, map[string]any{

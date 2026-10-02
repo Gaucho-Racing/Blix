@@ -121,9 +121,9 @@ class DiscordReadV1Tool:
         except ValidationError:
             return self._failure(call, "invalid_discord_response", "Discord returned an invalid response.")
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )
@@ -199,8 +199,7 @@ class DiscordReadV1Tool:
             else:
                 try:
                     canonical = await self._sentinel.resolve_external_user(
-                        sentinel_url=os.environ.get("SENTINEL_URL", "").strip()
-                        or "https://sso.gauchoracing.com",
+                        sentinel_url=os.environ.get("SENTINEL_URL", "").strip() or "https://sso.gauchoracing.com",
                         service_account_token=token,
                         provider="discord",
                         external_id=message.author.id,
@@ -229,9 +228,9 @@ class DiscordReadV1Tool:
         call: ToolCall, code: str, message: str, *, retryable: bool = False, details: JsonObject | None = None
     ) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=ContractError(code=code, message=message, retryable=retryable, details=details or {}),
         )

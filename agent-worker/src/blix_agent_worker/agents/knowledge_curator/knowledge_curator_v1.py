@@ -9,7 +9,7 @@ from blix_agent_worker.agents.knowledge_curator.prompt import (
 )
 from blix_agent_worker.agents.tool_agent import ToolAgent
 from blix_agent_worker.models.agent import AgentDefinition, AgentKind, AgentTask
-from blix_agent_worker.models.common import ChangesetID, ContractModel, NonEmptyText, SourceRecordID
+from blix_agent_worker.models.common import ChangesetID, ContractModel, DocumentID, NonEmptyText, SourceRecordID
 from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole
 from blix_agent_worker.models.tool import ToolDefinition, ToolResult, ToolResultStatus
 from blix_agent_worker.tools.knowledge._shared import CommitSHA, PagePath
@@ -17,8 +17,9 @@ from blix_agent_worker.tools.knowledge._sources import SourceRecordCapture
 
 
 class KnowledgeCuratorV1Input(ContractModel):
-    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(max_length=100)] = ()
+    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(max_length=500)] = ()
     source_material: Annotated[tuple[SourceRecordCapture, ...], Field(max_length=20)] = ()
+    document_id: DocumentID | None = None
     mode: Literal["propose", "apply"] = "propose"
     season_hint: Annotated[str, Field(max_length=64)] = ""
 
@@ -26,6 +27,10 @@ class KnowledgeCuratorV1Input(ContractModel):
     def unique_sources(self) -> Self:
         if not self.source_record_ids and not self.source_material:
             raise ValueError("provide source_record_ids or source_material")
+        if self.document_id is None and len(self.source_record_ids) > 100:
+            raise ValueError("ordinary curation accepts at most 100 source records")
+        if self.document_id is not None and self.source_material:
+            raise ValueError("document curation uses immutable original page records")
         if len(set(self.source_record_ids)) != len(self.source_record_ids):
             raise ValueError("source_record_ids must be unique")
         return self
@@ -88,6 +93,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             "knowledge_source_record_create_v1",
             "knowledge_propose_v1",
             "knowledge_apply_v1",
+            "knowledge_document_read_v1",
         ),
     )
 
@@ -104,6 +110,10 @@ class KnowledgeCuratorV1Agent(ToolAgent):
 
     def tool_definitions(self, agent_input: KnowledgeCuratorV1Input) -> tuple[ToolDefinition, ...]:
         ids = self.definition.tool_ids
+        if agent_input.document_id is not None:
+            ids = tuple(tool_id for tool_id in ids if tool_id not in {
+                "knowledge_source_create_v1", "knowledge_source_record_create_v1",
+            })
         if agent_input.mode == "propose":
             ids = tuple(tool_id for tool_id in ids if tool_id != "knowledge_apply_v1")
         return self._tool_runner.registry.definitions(ids)
@@ -115,6 +125,8 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         calls = {request.ref: request for message in messages for request in message.call_requests}
         receipts = {}
         read_sources = set()
+        inspected_document = False
+        cited_sources = set()
         for message in messages:
             if message.role is not ModelMessageRole.CALL_OUTPUT or not message.content:
                 continue
@@ -122,8 +134,21 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             if result.status is not ToolResultStatus.SUCCEEDED or not isinstance(result.output, dict):
                 continue
             request = calls.get(message.call_request_ref)
-            if request is None or result.run_id != task.run_id or result.parent_execution_id != task.execution_id:
+            if (
+                request is None
+                or result.conversation_id != task.conversation_id
+                or result.parent_session_id != task.session_id
+            ):
                 continue
+            if (
+                request.callable_id == "knowledge_document_read_v1"
+                and agent_input.document_id is not None
+                and result.output.get("document", {}).get("document_id") == agent_input.document_id
+            ):
+                chunks = result.output.get("chunks", [])
+                inspected_document = bool(chunks) and all(chunk.get("completed_at") for chunk in chunks)
+                if {page["source_record_id"] for page in result.output.get("pages", [])} != expected_sources:
+                    raise ValueError("document curation must identify all original page evidence")
             record_id = result.output.get("source_record_id")
             if request.callable_id == "knowledge_source_record_create_v1" and isinstance(record_id, str):
                 expected_sources.add(record_id)
@@ -134,19 +159,27 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             changeset = result.output.get("changeset")
             if isinstance(changeset, dict):
                 receipts[changeset.get("changeset_id")] = result.output
+
         if set(output.source_record_ids) != expected_sources or len(output.source_record_ids) != len(expected_sources):
             raise ValueError("result must identify exactly the supplied and captured source records")
         if output.outcome in {"proposed", "committed"} and pending_material:
             raise ValueError("the curator must capture all supplied source material before reporting completion")
-        if output.outcome != "blocked" and not expected_sources.issubset(read_sources):
+        if agent_input.document_id is not None and output.outcome != "blocked" and not inspected_document:
+            raise ValueError("the curator must inspect complete document coverage and notes")
+        for reported in output.changesets:
+            cited_sources.update(receipts.get(reported.changeset_id, {}).get("source_record_ids", []))
+        if agent_input.document_id is not None and not cited_sources.issubset(expected_sources):
+            raise ValueError("document proposals must cite supplied original page evidence")
+        required_reads = expected_sources if agent_input.document_id is None else cited_sources
+        if output.outcome != "blocked" and not required_reads.issubset(read_sources):
             raise ValueError("the curator must read its source records before reporting completion")
         for reported in output.changesets:
             receipt = receipts.get(reported.changeset_id, {})
             actual = receipt.get("changeset", {})
             files = receipt.get("files", [])
             if (
-                actual.get("run_id") != task.run_id
-                or actual.get("execution_id") != task.execution_id
+                actual.get("conversation_id") != task.conversation_id
+                or actual.get("session_id") != task.session_id
                 or actual.get("status") != reported.status
                 or (actual.get("result_commit_sha") or "") != reported.commit_sha
                 or {file.get("path") for file in files} != set(reported.paths)

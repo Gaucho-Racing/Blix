@@ -6,11 +6,11 @@ from pydantic import Field, JsonValue, field_validator, model_validator
 from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
-    ExecutionID,
+    ConversationID,
     Identifier,
     JsonObject,
     NonEmptyText,
-    RunID,
+    SessionID,
     VersionedIdentifier,
 )
 from blix_agent_worker.models.llm import ModelContinuation, ModelMessage
@@ -55,9 +55,9 @@ class AgentDefinition(ContractModel):
 
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: RunID
-    execution_id: ExecutionID
-    parent_execution_id: ExecutionID | None = None
+    conversation_id: ConversationID
+    session_id: SessionID
+    parent_session_id: SessionID | None = None
     agent_id: VersionedIdentifier
     objective: NonEmptyText
     input: JsonObject = Field(default_factory=dict)
@@ -77,7 +77,7 @@ class AgentTask(ContractModel):
 
     @model_validator(mode="after")
     def execution_cannot_parent_itself(self) -> Self:
-        if self.parent_execution_id == self.execution_id:
+        if self.parent_session_id == self.session_id:
             raise ValueError("an agent execution cannot be its own parent")
         return self
 
@@ -144,9 +144,9 @@ class AgentSuspension(ContractModel):
 
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
-    run_id: RunID
-    execution_id: ExecutionID
-    parent_execution_id: ExecutionID | None = None
+    conversation_id: ConversationID
+    session_id: SessionID
+    parent_session_id: SessionID | None = None
     agent_id: VersionedIdentifier
     status: AgentResultStatus
     output: JsonValue = None

@@ -65,11 +65,13 @@ class KnowledgeSourceRecordCreateV1Tool(KnowledgeTool):
                 "entity_id": canonical.entity_id,
                 "user_id": canonical.user_id,
             }
-        payload.update({
-            "capture_method": "agent_relay",
-            "capture_run_id": call.run_id,
-            "capture_execution_id": call.parent_execution_id,
-        })
+        payload.update(
+            {
+                "capture_method": "agent_relay",
+                "capture_conversation_id": call.conversation_id,
+                "capture_session_id": call.parent_session_id,
+            }
+        )
         body = await self._client.request(url, "POST", "source-records", payload=payload)
         try:
             stored = CapturedSourceRecord.model_validate(body)

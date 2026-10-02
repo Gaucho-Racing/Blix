@@ -43,9 +43,9 @@ class KnowledgeTool:
         except KnowledgeClientError as error:
             return self._failure(call, error.code, str(error), retryable=error.retryable)
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output,
         )
@@ -58,9 +58,9 @@ class KnowledgeTool:
         call: ToolCall, code: str, message: str, *, retryable: bool = False, details: JsonObject | None = None
     ) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=ContractError(code=code, message=message, retryable=retryable, details=details or {}),
         )

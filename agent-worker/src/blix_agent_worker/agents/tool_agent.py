@@ -42,6 +42,12 @@ from blix_agent_worker.tools import ToolRunner
 from blix_agent_worker.tools.registry import ToolRegistryError
 
 
+class AgentOutputValidationError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ToolAgent:
     definition: ClassVar[AgentDefinition]
     input_model: ClassVar[type[ContractModel]]
@@ -61,10 +67,12 @@ class ToolAgent:
         *,
         model: LanguageModel,
         tool_runner: ToolRunner,
+        on_before_model: Callable[[ModelRequest], Awaitable[ModelRequest]] | None = None,
         on_tool_result: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]] | None = None,
         on_model_response: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]] | None = None,
     ) -> None:
         self._model = model
+        self._on_before_model = on_before_model
         self._tool_runner = tool_runner
         self._on_tool_result = on_tool_result
         self._on_model_response = on_model_response
@@ -143,12 +151,14 @@ class ToolAgent:
                         details=validation_error_details(error),
                         usage=usage,
                     )
+                except AgentOutputValidationError as error:
+                    return self._failure(task, error.code, str(error), usage=usage)
                 except ValueError as error:
                     return self._failure(task, "invalid_agent_output", str(error), usage=usage)
                 return AgentResult(
-                    run_id=task.run_id,
-                    execution_id=task.execution_id,
-                    parent_execution_id=task.parent_execution_id,
+                    conversation_id=task.conversation_id,
+                    session_id=task.session_id,
+                    parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
                     output=output.model_dump(mode="json"),
@@ -158,18 +168,21 @@ class ToolAgent:
             if phase is AgentExecutionPhase.READY_FOR_MODEL:
                 model_calls = usage.model_calls + 1
                 try:
-                    response = await self._model.complete(
-                        ModelRequest(
-                            sequence=model_calls,
-                            messages=tuple(messages),
-                            callables=catalog.definitions,
-                            output_format=ModelOutputFormat(
-                                id=self.definition.id,
-                                json_schema=self.definition.output_schema,
-                            ),
-                            continuation=continuation,
-                        )
+                    request = ModelRequest(
+                        sequence=model_calls,
+                        messages=tuple(messages),
+                        callables=catalog.definitions,
+                        output_format=ModelOutputFormat(
+                            id=self.definition.id,
+                            json_schema=self.definition.output_schema,
+                        ),
+                        continuation=continuation,
                     )
+                    if self._on_before_model is not None:
+                        request = await self._on_before_model(request)
+                    messages = list(request.messages)
+                    continuation = request.continuation
+                    response = await self._model.complete(request)
                 except ModelClientError as error:
                     return self._failure(
                         task,
@@ -224,17 +237,18 @@ class ToolAgent:
 
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(
-                run_id=task.run_id,
+                conversation_id=task.conversation_id,
                 call_id=new_ulid("call"),
-                parent_execution_id=task.execution_id,
+                parent_session_id=task.session_id,
                 tool_id=model_call_request.callable_id,
                 arguments=model_call_request.arguments,
+                idempotency_key=model_call_request.ref,
             )
             if model_call_request.callable_id not in allowed_tool_ids:
                 tool_result = ToolResult(
-                    run_id=call.run_id,
+                    conversation_id=call.conversation_id,
                     call_id=call.call_id,
-                    parent_execution_id=call.parent_execution_id,
+                    parent_session_id=call.parent_session_id,
                     status=ToolResultStatus.FAILED,
                     error=ContractError(
                         code="tool_not_allowed",
@@ -319,9 +333,9 @@ class ToolAgent:
         usage: AgentUsage | None = None,
     ) -> AgentResult:
         return AgentResult(
-            run_id=task.run_id,
-            execution_id=task.execution_id,
-            parent_execution_id=task.parent_execution_id,
+            conversation_id=task.conversation_id,
+            session_id=task.session_id,
+            parent_session_id=task.parent_session_id,
             agent_id=task.agent_id,
             status=AgentResultStatus.FAILED,
             usage=usage or AgentUsage(),

@@ -11,12 +11,12 @@ services:
     stdin_open: true
     tty: true
     network_mode: host
-    user: "${BLIX_CLI_UID:-0}:${BLIX_CLI_GID:-0}"
+    user: "${BLIX_CLI_UID:?Set BLIX_CLI_UID in .env}:${BLIX_CLI_GID:?Set BLIX_CLI_GID in .env}"
     environment:
-      HOME: /home/blix
-      BLIX_URL: ${BLIX_URL:-http://host.docker.internal:10310}
+      HOME: ${BLIX_CLI_HOME:?Set BLIX_CLI_HOME in .env}
+      BLIX_URL: ${BLIX_URL:?Set BLIX_URL in .env}
     volumes:
-      - ${BLIX_CREDENTIALS_DIR:-/tmp/blix-cli-credentials}:/home/blix/.blix
+      - ${BLIX_CREDENTIALS_DIR:?Set BLIX_CREDENTIALS_DIR in .env}:/home/blix/.blix
 
   kerbecs:
     container_name: blix-kerbecs
@@ -26,7 +26,7 @@ services:
     volumes:
       - ./kerbecs.yaml:/etc/kerbecs/kerbecs.yaml:ro
     environment:
-      KERBECS_CONFIG: /etc/kerbecs/kerbecs.yaml
+      KERBECS_CONFIG: ${KERBECS_CONFIG:?Set KERBECS_CONFIG in .env}
     depends_on:
       - runway
       - knowledge
@@ -44,8 +44,8 @@ services:
       runway:
         condition: service_started
     environment:
-      WEB_RUNWAY_URL: http://runway:9999
-      WEB_KNOWLEDGE_URL: http://knowledge:9988
+      WEB_RUNWAY_URL: ${WEB_RUNWAY_URL:?Set WEB_RUNWAY_URL in .env}
+      WEB_KNOWLEDGE_URL: ${WEB_KNOWLEDGE_URL:?Set WEB_KNOWLEDGE_URL in .env}
 
   runway:
     container_name: blix-runway
@@ -62,26 +62,28 @@ services:
       nanomq:
         condition: service_started
     environment:
-      ENV: DEV
-      PORT: 9999
-      DATABASE_HOST: db
-      DATABASE_PORT: 5432
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: password
-      DATABASE_NAME: blix
-      MQTT_URL: mqtt://nanomq:1883
-      MQTT_CLIENT_ID: blix-runway
-      MQTT_EXECUTION_READY_TOPIC: blix/v1/executions/ready
-      MQTT_RUN_EVENT_TOPIC_PREFIX: blix/v1/runs
-      EXECUTION_LEASE_DURATION: ${EXECUTION_LEASE_DURATION:-30s}
-      EXECUTION_LEASE_SWEEP_INTERVAL: ${EXECUTION_LEASE_SWEEP_INTERVAL:-5s}
-      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-5s}
-      WORKER_OFFLINE_AFTER: ${WORKER_OFFLINE_AFTER:-15s}
-      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
-      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID:-}
-      SENTINEL_CLIENT_SECRET: ${SENTINEL_CLIENT_SECRET:-}
-      SENTINEL_SCOPES: ${SENTINEL_SCOPES:-user:read groups:read}
-      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      ENV: ${ENV:?Set ENV in .env}
+      PORT: ${RUNWAY_PORT:?Set RUNWAY_PORT in .env}
+      DATABASE_HOST: ${DATABASE_HOST:?Set DATABASE_HOST in .env}
+      DATABASE_PORT: ${DATABASE_PORT:?Set DATABASE_PORT in .env}
+      DATABASE_USER: ${DATABASE_USER:?Set DATABASE_USER in .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      DATABASE_NAME: ${DATABASE_NAME:?Set DATABASE_NAME in .env}
+      MQTT_URL: ${MQTT_URL:?Set MQTT_URL in .env}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:?Set MQTT_CLIENT_ID in .env}
+      MQTT_ATTEMPT_READY_TOPIC: ${MQTT_ATTEMPT_READY_TOPIC:?Set MQTT_ATTEMPT_READY_TOPIC in .env}
+      MQTT_CONVERSATION_EVENT_TOPIC_PREFIX: ${MQTT_CONVERSATION_EVENT_TOPIC_PREFIX:?Set MQTT_CONVERSATION_EVENT_TOPIC_PREFIX in .env}
+      EXECUTION_LEASE_DURATION: ${EXECUTION_LEASE_DURATION:?Set EXECUTION_LEASE_DURATION in .env}
+      EXECUTION_LEASE_SWEEP_INTERVAL: ${EXECUTION_LEASE_SWEEP_INTERVAL:?Set EXECUTION_LEASE_SWEEP_INTERVAL in .env}
+      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:?Set WORKER_HEARTBEAT_INTERVAL in .env}
+      WORKER_OFFLINE_AFTER: ${WORKER_OFFLINE_AFTER:?Set WORKER_OFFLINE_AFTER in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID?Set SENTINEL_CLIENT_ID in .env}
+      SENTINEL_CLIENT_SECRET: ${SENTINEL_CLIENT_SECRET?Set SENTINEL_CLIENT_SECRET in .env}
+      SENTINEL_SCOPES: ${SENTINEL_SCOPES:?Set SENTINEL_SCOPES in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
 
   knowledge:
     container_name: blix-knowledge
@@ -93,25 +95,32 @@ services:
       - ./knowledge:/app
       - knowledge_gopath:/go
       - knowledge_wiki:/data/wiki
+      - knowledge_documents:/data/documents
     depends_on:
       db:
         condition: service_healthy
     environment:
-      ENV: DEV
-      PORT: 9988
-      DATABASE_HOST: db
-      DATABASE_PORT: 5432
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: password
-      DATABASE_NAME: blix
-      WIKI_REPOSITORY_URL: https://github.com/gaucho-racing/blixwiki.git
-      WIKI_REPOSITORY_BRANCH: main
-      WIKI_REPOSITORY_PATH: /data/wiki
-      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
-      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
-      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID:-}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      ENV: ${ENV:?Set ENV in .env}
+      PORT: ${KNOWLEDGE_PORT:?Set KNOWLEDGE_PORT in .env}
+      DATABASE_HOST: ${DATABASE_HOST:?Set DATABASE_HOST in .env}
+      DATABASE_PORT: ${DATABASE_PORT:?Set DATABASE_PORT in .env}
+      DATABASE_USER: ${DATABASE_USER:?Set DATABASE_USER in .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      DATABASE_NAME: ${DATABASE_NAME:?Set DATABASE_NAME in .env}
+      DOCUMENT_STORAGE_PATH: ${DOCUMENT_STORAGE_PATH:?Set DOCUMENT_STORAGE_PATH in .env}
+      DEPOT_URL: ${DEPOT_URL?Set DEPOT_URL in .env}
+      DEPOT_BUCKET: ${DEPOT_BUCKET:?Set DEPOT_BUCKET in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      WIKI_REPOSITORY_URL: ${WIKI_REPOSITORY_URL:?Set WIKI_REPOSITORY_URL in .env}
+      WIKI_REPOSITORY_BRANCH: ${WIKI_REPOSITORY_BRANCH:?Set WIKI_REPOSITORY_BRANCH in .env}
+      WIKI_REPOSITORY_PATH: ${WIKI_REPOSITORY_PATH:?Set WIKI_REPOSITORY_PATH in .env}
+      GITHUB_APP_ID: ${GITHUB_APP_ID?Set GITHUB_APP_ID in .env}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID?Set GITHUB_APP_INSTALLATION_ID in .env}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY?Set GITHUB_APP_PRIVATE_KEY in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID?Set SENTINEL_CLIENT_ID in .env}
 
   agent-worker-1:
     container_name: blix-agent-worker-1
@@ -132,14 +141,15 @@ services:
     env_file:
       - ./.env
     environment:
-      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
-      RUNWAY_URL: http://runway:9999
-      KNOWLEDGE_URL: http://knowledge:9988
-      MQTT_HOST: nanomq
-      MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
-      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
-      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
+      MQTT_HOST: ${MQTT_HOST:?Set MQTT_HOST in .env}
+      MQTT_PORT: ${MQTT_PORT:?Set MQTT_PORT in .env}
+      MQTT_ATTEMPT_READY_TOPIC: ${MQTT_ATTEMPT_READY_TOPIC:?Set MQTT_ATTEMPT_READY_TOPIC in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
 
   agent-worker-2:
     container_name: blix-agent-worker-2
@@ -160,14 +170,15 @@ services:
     env_file:
       - ./.env
     environment:
-      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
-      RUNWAY_URL: http://runway:9999
-      KNOWLEDGE_URL: http://knowledge:9988
-      MQTT_HOST: nanomq
-      MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
-      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
-      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
+      MQTT_HOST: ${MQTT_HOST:?Set MQTT_HOST in .env}
+      MQTT_PORT: ${MQTT_PORT:?Set MQTT_PORT in .env}
+      MQTT_ATTEMPT_READY_TOPIC: ${MQTT_ATTEMPT_READY_TOPIC:?Set MQTT_ATTEMPT_READY_TOPIC in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
 
   agent-worker-3:
     container_name: blix-agent-worker-3
@@ -188,24 +199,25 @@ services:
     env_file:
       - ./.env
     environment:
-      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
-      RUNWAY_URL: http://runway:9999
-      KNOWLEDGE_URL: http://knowledge:9988
-      MQTT_HOST: nanomq
-      MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
-      SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
-      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
+      MQTT_HOST: ${MQTT_HOST:?Set MQTT_HOST in .env}
+      MQTT_PORT: ${MQTT_PORT:?Set MQTT_PORT in .env}
+      MQTT_ATTEMPT_READY_TOPIC: ${MQTT_ATTEMPT_READY_TOPIC:?Set MQTT_ATTEMPT_READY_TOPIC in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
 
   db:
     container_name: blix-db
     image: postgres:18-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: blix
+      POSTGRES_USER: ${DATABASE_USER:?Set DATABASE_USER in .env}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      POSTGRES_DB: ${DATABASE_NAME:?Set DATABASE_NAME in .env}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d blix"]
+      test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 2s
       timeout: 2s
       retries: 15
@@ -217,6 +229,7 @@ services:
     image: emqx/nanomq:0.25.6
 
 volumes:
+  knowledge_documents:
   agent_worker_1_venv:
   agent_worker_2_venv:
   agent_worker_3_venv:

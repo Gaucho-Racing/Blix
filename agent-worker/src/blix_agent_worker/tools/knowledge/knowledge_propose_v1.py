@@ -29,7 +29,7 @@ class KnowledgeProposeV1Input(ContractModel):
     base_commit_sha: CommitSHA
     type: Literal["content", "structural"] = "content"
     season_slug: Annotated[str, Field(pattern=r"^([a-z0-9][a-z0-9_-]{0,63})?$")] = ""
-    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=100)]
+    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=500)]
     files: Annotated[tuple[KnowledgeFileEdit, ...], Field(min_length=1, max_length=100)]
 
     @model_validator(mode="after")
@@ -65,5 +65,5 @@ class KnowledgeProposeV1Tool(KnowledgeTool):
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeProposeV1Input, url: str) -> JsonObject:
         payload = arguments.model_dump(mode="json")
-        payload.update(run_id=call.run_id, execution_id=call.parent_execution_id)
+        payload.update(conversation_id=call.conversation_id, session_id=call.parent_session_id)
         return await self._client.request(url, "POST", "changesets", payload=payload)

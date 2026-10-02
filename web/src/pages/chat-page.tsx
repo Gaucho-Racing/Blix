@@ -2,436 +2,545 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowUp,
   BookOpen,
-  Clock3,
-  FileSearch,
-  Hash,
+  Check,
   LoaderCircle,
-  LogIn,
   Plus,
-  Sparkles,
   Square,
-  TriangleAlert,
+  X,
 } from "lucide-react"
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react"
-import type { FormEvent, KeyboardEvent } from "react"
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
-
-import { ChatActivity } from "@/components/chat-activity"
-import { RunEventStream } from "@/components/event-stream"
-import { StatusBadge } from "@/components/status-badge"
-import { appendRunMessage, createRun, getRun, getRunEvents, interruptRun, listMyRuns } from "@/lib/api"
+import { useEffect, useRef, useState } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
-import { formatRelative, readString, runDisplayStatus } from "@/lib/format"
-import type { ExecutionEvent, ExecutionSummary } from "@/lib/types"
-import { useNow } from "@/lib/use-now"
+import {
+  activeStatus,
+  appendMessage,
+  controlTask,
+  createConversation,
+  decideApproval,
+  errorMessage,
+  getConversation,
+  interruptConversation,
+  listConversations,
+  liveOutputs,
+  loadEvents,
+} from "@/lib/runtime"
+import type { RuntimeEvent, RuntimeTask } from "@/lib/runtime"
 
-const prompts = [
-  {
-    icon: BookOpen,
-    label: "Explore Blix",
-    prompt: "What can you help me with right now?",
-  },
-  {
-    icon: FileSearch,
-    label: "Deep research",
-    prompt: "Research the biggest Formula SAE EV rule changes for 2026 and cite your sources.",
-  },
-  {
-    icon: Clock3,
-    label: "Use a tool",
-    prompt: "What time is it in Tokyo right now?",
-  },
-]
-
-const ChatMessage = lazy(() => import("@/components/chat-message").then((module) => ({ default: module.ChatMessage })))
-const noEvents: ExecutionEvent[] = []
-const noExecutions: ExecutionSummary[] = []
-
-interface PendingSubmission {
-  content: string
-  runID?: string
-  rootExecutionID?: string
-  eventPosition?: number
-  messageID?: string
-}
-
-interface ConversationTurn {
-  user?: ExecutionEvent
-  assistant?: ExecutionEvent
-  activity: ExecutionEvent[]
-  failure?: ExecutionEvent
-}
-
-function conversationTurns(events: ExecutionEvent[], rootExecutionID: string): ConversationTurn[] {
-  const sortedEvents = [...events].sort((left, right) => left.position - right.position)
-  const rootMessages = sortedEvents.filter(
-    (event) => event.execution_id === rootExecutionID &&
-      (event.type === "message.user_v1" || event.type === "message.assistant_v1"),
-  )
-
-  return rootMessages.flatMap((event, index): ConversationTurn[] => {
-    if (event.type === "message.assistant_v1") {
-      const previous = rootMessages[index - 1]
-      if (!previous || previous.type === "message.assistant_v1") {
-        const priorPosition = previous?.position ?? 0
-        return [{ assistant: event, activity: sortedEvents.filter(
-          (candidate) => candidate.position > priorPosition && candidate.position < event.position &&
-            candidate.type !== "message.user_v1" && candidate.type !== "message.assistant_v1",
-        ) }]
-      }
-      return []
-    }
-    const assistant = rootMessages.find(
-      (candidate) => candidate.type === "message.assistant_v1" &&
-        readString(candidate.payload, "turn_message_id") === event.entity_id,
-    ) ?? rootMessages
-      .slice(index + 1)
-      .find((candidate) => candidate.type === "message.assistant_v1" && !readString(candidate.payload, "turn_message_id"))
-    const nextUser = rootMessages.slice(index + 1).find((candidate) => candidate.type === "message.user_v1")
-    const endPosition = assistant?.position ?? nextUser?.position ?? Number.POSITIVE_INFINITY
-    const activity = sortedEvents.filter(
-      (candidate) => candidate.position > event.position &&
-        candidate.position < endPosition &&
-        candidate.type !== "message.user_v1",
-    )
-    const failure = activity.find((candidate) => candidate.type === "execution.failed_v1")
-    return [{ user: event, assistant, activity, failure }]
+function TaskCard({
+  task,
+  refresh,
+}: {
+  task: RuntimeTask
+  refresh: () => Promise<void>
+}) {
+  const [direction, setDirection] = useState("")
+  const mutation = useMutation({
+    mutationFn: ({
+      operation,
+      content,
+    }: {
+      operation: "cancel" | "steer"
+      content?: string
+    }) => controlTask(task.task_id, operation, content),
+    onSuccess: refresh,
   })
-}
-
-function eventContent(event: ExecutionEvent | undefined): string {
-  return event ? readString(event.payload, "content") ?? "" : ""
-}
-
-function failureContent(event: ExecutionEvent | undefined): string {
-  const error = event?.payload.error
-  if (error !== null && typeof error === "object" && !Array.isArray(error)) {
-    return readString(error as Record<string, unknown>, "message") ?? "The agent execution failed."
-  }
-  return "The agent execution failed. Start a new conversation to try again."
-}
-
-function requestErrorMessage(error: unknown): string {
-  const responseMessage = (error as { response?: { data?: { error?: string } } })?.response?.data?.error
-  if (responseMessage === "resource state conflict") {
-    return "This conversation is still working on its previous message."
-  }
-  return responseMessage || "Blix could not send that message. Please try again."
-}
-
-function enteringRunFromLocationState(value: unknown): string {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return ""
-  const enteringRunID = (value as Record<string, unknown>).enteringRunID
-  return typeof enteringRunID === "string" ? enteringRunID : ""
+  const output = task.result?.output
+  const summary =
+    typeof output?.summary === "string"
+      ? output.summary
+      : typeof output?.report === "string"
+        ? output.report
+        : ""
+  const changesets = Array.isArray(output?.changesets)
+    ? (output.changesets as { changeset_id: string; status: string }[])
+    : []
+  return (
+    <article className="runtime-task">
+      <div className="runtime-task-heading">
+        <span className={`runtime-task-status status-${task.status}`}>
+          {task.status}
+        </span>
+        <small>{task.background ? "Background" : "Delegated"}</small>
+      </div>
+      <strong>
+        {task.objective.length > 180
+          ? `${task.objective.slice(0, 180)}…`
+          : task.objective}
+      </strong>
+      {task.objective.length > 180 && (
+        <details className="runtime-task-instructions">
+          <summary>Full task instructions</summary>
+          <p>{task.objective}</p>
+        </details>
+      )}
+      {activeStatus(task.status) && (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (direction.trim())
+              mutation.mutate({ operation: "steer", content: direction })
+          }}
+        >
+          <input
+            aria-label="Task direction"
+            onChange={(event) => setDirection(event.target.value)}
+            placeholder="Give this task direction…"
+            value={direction}
+          />
+          <div className="runtime-controls">
+            <button
+              disabled={mutation.isPending || !direction.trim()}
+              type="submit"
+            >
+              Send direction
+            </button>
+            <button
+              disabled={mutation.isPending}
+              onClick={() => mutation.mutate({ operation: "cancel" })}
+              type="button"
+            >
+              Cancel task
+            </button>
+          </div>
+        </form>
+      )}
+      {summary && (
+        <details>
+          <summary>View findings</summary>
+          <ChatMessage role="assistant" content={summary} />
+        </details>
+      )}
+      {changesets.map((change) => (
+        <Link
+          className="runtime-proposal-link"
+          key={change.changeset_id}
+          to={`/knowledge/proposals/${change.changeset_id}`}
+        >
+          View wiki proposal · {change.status}
+        </Link>
+      ))}
+      {Array.isArray(output?.warnings) && output.warnings.length > 0 && (
+        <details>
+          <summary>Uncertainties & warnings</summary>
+          <ul>
+            {output.warnings
+              .filter(
+                (warning): warning is string => typeof warning === "string",
+              )
+              .map((warning, index) => (
+                <li key={index}>{warning}</li>
+              ))}
+          </ul>
+        </details>
+      )}
+      {task.error?.message && (
+        <p role="alert" className="runtime-error">
+          {task.error.message}
+        </p>
+      )}
+      {mutation.error && (
+        <p role="alert" className="runtime-error">
+          {errorMessage(mutation.error)}
+        </p>
+      )}
+    </article>
+  )
 }
 
 export function ChatPage() {
   const { runID = "" } = useParams()
+  return <ConversationChat key={runID || "new"} conversationID={runID} />
+}
+
+function ConversationChat({ conversationID }: { conversationID: string }) {
   const auth = useAuth()
-  const location = useLocation()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const now = useNow()
+  const cache = useQueryClient()
   const [draft, setDraft] = useState("")
-  const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null)
-  const [enteringRunID, setEnteringRunID] = useState(() => enteringRunFromLocationState(location.state))
-  const conversationEnd = useRef<HTMLDivElement>(null)
-  const hasBlixAccess = auth.user?.groups.includes("BlixUsers") ?? false
-  const canChat = auth.isAuthenticated && hasBlixAccess
-
-  const runQuery = useQuery({
-    queryKey: ["run", runID],
-    queryFn: () => getRun(runID),
-    enabled: canChat && Boolean(runID),
+  const pendingConversation = useRef("")
+  const end = useRef<HTMLDivElement>(null)
+  const scroll = useRef<HTMLDivElement>(null)
+  const [follow, setFollow] = useState(true)
+  const permitted =
+    auth.isAuthenticated && (auth.user?.groups.includes("BlixUsers") ?? false)
+  const recent = useQuery({
+    queryKey: ["conversations"],
+    queryFn: listConversations,
+    enabled: permitted,
+    refetchInterval: 10_000,
   })
-  const eventsQuery = useQuery({
-    queryKey: ["run-events", runID],
-    queryFn: () => getRunEvents(runID),
-    enabled: canChat && Boolean(runID),
+  const detail = useQuery({
+    queryKey: ["conversation", conversationID],
+    queryFn: ({ signal }) => getConversation(conversationID, signal),
+    enabled: permitted && !!conversationID,
+    refetchInterval: 1500,
   })
-  const recentRunsQuery = useQuery({
-    queryKey: ["my-runs"],
-    queryFn: listMyRuns,
-    enabled: canChat,
+  const eventQuery = useQuery({
+    queryKey: ["conversation-events", conversationID],
+    queryFn: ({ signal }) =>
+      loadEvents(
+        conversationID,
+        cache.getQueryData<RuntimeEvent[]>([
+          "conversation-events",
+          conversationID,
+        ]) ?? [],
+        signal,
+      ),
+    enabled: permitted && !!conversationID,
+    refetchInterval: 1000,
   })
-
-  const runDetails = runQuery.data
-  const run = runDetails?.run
-  const executions = runDetails?.executions ?? noExecutions
-  const events = eventsQuery.data ?? noEvents
-  const turns = useMemo(
-    () => conversationTurns(events, run?.root_execution_id ?? ""),
-    [events, run?.root_execution_id],
-  )
-  const rootExecution = executions.find((execution) => execution.execution_id === run?.root_execution_id)
-  const executionInFlight = rootExecution
-    ? ["queued", "running", "waiting"].includes(rootExecution.status)
-    : false
-  const pendingEventPosition = pendingSubmission?.eventPosition
-  const pendingRootExecutionID = run?.root_execution_id ?? pendingSubmission?.rootExecutionID
-  const pendingTerminalEvent = pendingEventPosition && pendingRootExecutionID
-    ? events.find(
-        (event) => event.position > pendingEventPosition &&
-          (event.type === "message.assistant_v1" || event.type === "execution.failed_v1") &&
-          event.execution_id === pendingRootExecutionID &&
-          (event.type === "execution.failed_v1" || !pendingSubmission?.messageID ||
-            readString(event.payload, "turn_message_id") === pendingSubmission.messageID),
-      )
-    : undefined
-  const pendingMatchesRun = !pendingSubmission?.runID || !runID || pendingSubmission.runID === runID
-  const activePendingSubmission = pendingMatchesRun && !pendingTerminalEvent ? pendingSubmission : null
-  const pendingEventPersisted = activePendingSubmission?.eventPosition
-    ? events.some((event) => event.position === activePendingSubmission.eventPosition)
-    : false
-  const optimisticSubmission = activePendingSubmission && !pendingEventPersisted ? activePendingSubmission : null
-  const currentTurn = turns.at(-1)
-  const currentTurnFinished = Boolean(currentTurn?.assistant || currentTurn?.failure)
-  const turnActive = Boolean(activePendingSubmission) || executionInFlight || Boolean(currentTurn && !currentTurnFinished)
-  const composerDisabled = !canChat || Boolean(runID && (runQuery.isPending || runQuery.isError))
-
-  useEffect(() => {
-    if (turns.length === 0 && !optimisticSubmission) return
-    const frame = window.requestAnimationFrame(() => conversationEnd.current?.scrollIntoView({ behavior: "smooth" }))
-    return () => window.cancelAnimationFrame(frame)
-  }, [events.length, optimisticSubmission, turns.length])
-
-  useEffect(() => {
-    if (!enteringRunID) return
-    const timer = window.setTimeout(() => {
-      setEnteringRunID("")
-      if (enteringRunFromLocationState(location.state) === enteringRunID) {
-        navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
-      }
-    }, 1_400)
-    return () => window.clearTimeout(timer)
-  }, [enteringRunID, location.pathname, location.search, location.state, navigate])
-
-  const sendMutation = useMutation({
+  const data = detail.data
+  const events = eventQuery.data ?? []
+  const streaming = liveOutputs(events, data)
+  const working = data?.turns.some((turn) => activeStatus(turn.status)) ?? false
+  const refresh = async () => {
+    await Promise.all([
+      cache.invalidateQueries({ queryKey: ["conversation", conversationID] }),
+      cache.invalidateQueries({
+        queryKey: ["conversation-events", conversationID],
+      }),
+      cache.invalidateQueries({ queryKey: ["conversations"] }),
+    ])
+  }
+  const send = useMutation({
     mutationFn: async (content: string) => {
-      let targetRunID = runID
-      let targetRootExecutionID = run?.root_execution_id
-      const createdNewRun = !targetRunID
-      if (!targetRunID) {
-        const created = await createRun()
-        targetRunID = created.run.run_id
-        targetRootExecutionID = created.run.root_execution_id
+      if (!conversationID && !pendingConversation.current) {
+        pendingConversation.current = (await createConversation()).conversation_id
       }
-      const appended = await appendRunMessage(targetRunID, content)
-      return { runID: targetRunID, rootExecutionID: targetRootExecutionID, appended, createdNewRun }
+      const id = conversationID || pendingConversation.current
+      await appendMessage(id, content)
+      return id
     },
-    scope: { id: "chat-send" },
-    onMutate: (content) => setPendingSubmission({ content, runID: runID || undefined, rootExecutionID: run?.root_execution_id }),
-    onSuccess: ({ runID: targetRunID, rootExecutionID, appended, createdNewRun }, content) => {
-      setPendingSubmission({
-        content,
-        runID: targetRunID,
-        rootExecutionID,
-        eventPosition: appended.event_position,
-        messageID: appended.message.message_id,
-      })
-      if (createdNewRun) setEnteringRunID(targetRunID)
-      if (runID !== targetRunID) {
-        navigate(`/chat/${targetRunID}`, {
-          replace: true,
-          state: createdNewRun ? { enteringRunID: targetRunID } : null,
-        })
-      }
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["run", targetRunID] }),
-        queryClient.invalidateQueries({ queryKey: ["run-events", targetRunID] }),
-        queryClient.invalidateQueries({ queryKey: ["my-runs"] }),
-      ])
-    },
-    onError: (_, content) => {
-      setPendingSubmission(null)
-      setDraft(content)
+    onSuccess: async (id) => {
+      setDraft("")
+      await cache.invalidateQueries({ queryKey: ["conversation", id] })
+      await cache.invalidateQueries({ queryKey: ["conversations"] })
+      if (id !== conversationID) navigate(`/chat/${id}`)
     },
   })
-  const interruptMutation = useMutation({
-    mutationFn: () => interruptRun(runID),
-    onSuccess: () => void Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["run", runID] }),
-      queryClient.invalidateQueries({ queryKey: ["run-events", runID] }),
-    ]),
+  const stop = useMutation({
+    mutationFn: () => interruptConversation(conversationID),
+    onSuccess: refresh,
   })
-
-  function submitMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const message = draft.trim()
-    if (!message) return
-    if (!auth.isAuthenticated) {
-      navigate("/auth/login", { state: { from: location } })
-      return
-    }
-    if (!hasBlixAccess || composerDisabled) return
-    setDraft("")
-    sendMutation.mutate(message)
-  }
-
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    event.currentTarget.form?.requestSubmit()
-  }
-
-  function startNewConversation() {
-    setDraft("")
-    setPendingSubmission(null)
-    sendMutation.reset()
-    navigate("/chat")
-  }
-
-  const recentRuns = (recentRunsQuery.data ?? []).slice(0, 8)
-  const displayName = auth.user?.first_name || auth.user?.username
-  const showWelcome = turns.length === 0 && !optimisticSubmission
-
+  const approval = useMutation({
+    mutationFn: ({
+      id,
+      decision,
+    }: {
+      id: string
+      decision: "approve" | "reject"
+    }) => decideApproval(id, decision),
+    onSuccess: refresh,
+  })
+  const activity = events
+    .filter((event) =>
+      [
+        "tool.call_v1",
+        "tool.result_v1",
+        "task.created_v1",
+        "attempt.failed_v1",
+      ].includes(event.type),
+    )
+    .slice(-8)
+  useEffect(() => {
+    if (follow)
+      end.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [data?.messages.length, events.length, follow])
   return (
     <div className="workspace-page chat-page">
       <header className="workspace-toolbar chat-toolbar">
         <div>
-          <span className="workspace-kicker">TEAM WORKSPACE</span>
-          <h1>{run?.name || "Chat"}</h1>
-          {run && <code>{run.run_id}</code>}
+          <span className="workspace-kicker">BLIX WORKSPACE</span>
+          <h1>{data?.conversation.name || "What should we work on?"}</h1>
+          <p>Quick answers. Research. Team knowledge.</p>
         </div>
-        <div className="chat-toolbar-actions">
-          {eventsQuery.data && run && (
-            <RunEventStream
-              initialCursor={events.at(-1)?.position ?? run.last_event_position}
-              key={run.run_id}
-              runID={run.run_id}
-            />
-          )}
-          <button className="secondary-button" onClick={startNewConversation} type="button"><Plus size={16} /> New conversation</button>
-        </div>
+        <Link className="secondary-button" to="/chat">
+          <Plus size={16} /> New conversation
+        </Link>
       </header>
-
       <div className="chat-layout">
         <main className="chat-stage">
-          <div className="chat-scroll" aria-live="polite">
-            {auth.isLoading ? (
-              <div className="chat-gate"><LoaderCircle className="spin" size={20} /><strong>Loading your workspace</strong></div>
-            ) : !auth.isAuthenticated ? (
-              <div className="chat-gate chat-gate-signin">
-                <div className="blix-spark"><Sparkles size={23} /></div>
-                <span className="workspace-kicker">BLIX</span>
-                <h2>Sign in to start a conversation</h2>
-                <p>Use your Gaucho Racing Sentinel account to give Blix the right identity and permissions.</p>
-                <button className="primary-button" onClick={() => navigate("/auth/login", { state: { from: location } })} type="button">
-                  <LogIn size={15} /> Continue with Sentinel
-                </button>
+          <div
+            ref={scroll}
+            className="chat-scroll"
+            onScroll={() => {
+              const element = scroll.current
+              if (element)
+                setFollow(
+                  element.scrollHeight -
+                    element.scrollTop -
+                    element.clientHeight <
+                    140,
+                )
+            }}
+          >
+            {!auth.isAuthenticated && !auth.isLoading && (
+              <div className="chat-gate">
+                <h2>Sign in to chat with Blix</h2>
+                <Link className="primary-button" to="/auth/login">
+                  Continue with Sentinel
+                </Link>
               </div>
-            ) : !hasBlixAccess ? (
-              <div className="chat-gate chat-gate-denied">
-                <span className="chat-gate-icon"><TriangleAlert size={20} /></span>
-                <h2>You do not have access to Blix</h2>
-                <p>Please request to join the <strong>BlixUsers</strong> group in Sentinel.</p>
-              </div>
-            ) : runID && runQuery.isPending ? (
-              <div className="chat-gate"><LoaderCircle className="spin" size={20} /><strong>Loading conversation</strong></div>
-            ) : runID && runQuery.isError ? (
-              <div className="chat-gate chat-gate-denied">
-                <span className="chat-gate-icon"><TriangleAlert size={20} /></span>
-                <h2>Conversation unavailable</h2>
-                <p>It may have been removed, or it belongs to another member.</p>
-                <button className="secondary-button" onClick={startNewConversation} type="button"><Plus size={15} /> Start a new conversation</button>
-              </div>
-            ) : showWelcome ? (
-              <>
-                <section className="chat-welcome">
-                  <div className="blix-spark"><Sparkles size={23} /></div>
-                  <span>BLIX</span>
-                  <h2>What should we work on{displayName ? `, ${displayName}` : ""}?</h2>
-                  <p>Ask a question, research a problem, or kick off work across Gaucho Racing.</p>
-                </section>
-                <section className="prompt-grid" aria-label="Suggested prompts">
-                  {prompts.map(({ icon: Icon, label, prompt }) => (
-                    <button className="prompt-card" key={label} onClick={() => setDraft(prompt)} type="button">
-                      <Icon size={17} />
-                      <span>{label}</span>
-                      <p>{prompt}</p>
+            )}
+            {auth.isAuthenticated && !permitted && (
+              <p role="alert">You need membership in BlixUsers to chat.</p>
+            )}
+            {(auth.isLoading ||
+              (permitted && conversationID && detail.isPending)) && (
+              <p>
+                <LoaderCircle className="spin" size={18} /> Loading
+                conversation…
+              </p>
+            )}
+            {permitted && !conversationID && (
+              <section className="chat-welcome">
+                <div className="blix-spark">B</div>
+                <h2>Your team's work, connected.</h2>
+                <p>
+                  Ask about a design, investigate a question, or turn documents
+                  into useful knowledge.
+                </p>
+                <div className="prompt-grid">
+                  {[
+                    "What do we know about GR26?",
+                    "Research a focused engineering question and cite your sources.",
+                  ].map((prompt) => (
+                    <button
+                      type="button"
+                      className="prompt-card"
+                      onClick={() => setDraft(prompt)}
+                      key={prompt}
+                    >
+                      {prompt}
                     </button>
                   ))}
-                </section>
-              </>
-            ) : (
-              <Suspense fallback={<div className="chat-gate"><LoaderCircle className="spin" size={20} /><strong>Rendering conversation</strong></div>}>
-                <section className="chat-conversation">
-                  {turns.map((turn, index) => {
-                    const isLast = index === turns.length - 1
-                    return (
-                      <div className="chat-turn" key={turn.user?.event_id ?? turn.assistant?.event_id}>
-                        {turn.user && <ChatMessage content={eventContent(turn.user)} role="user" userAvatarURL={auth.user?.avatar_url} />}
-                        <ChatActivity
-                          active={isLast && turnActive && !turn.assistant && !turn.failure}
-                          completedAt={turn.assistant?.created_at ?? turn.failure?.created_at}
-                          events={turn.activity}
-                          executions={executions}
-                          startedAt={turn.user?.created_at ?? turn.activity.at(0)?.created_at}
-                        />
-                        {turn.assistant && <ChatMessage content={eventContent(turn.assistant)} role="assistant" />}
-                        {turn.failure && <div className="chat-response-error"><TriangleAlert size={15} /><span>{failureContent(turn.failure)}</span></div>}
-                      </div>
-                    )
-                  })}
-                  {optimisticSubmission && (
-                    <div className="chat-turn">
-                      <ChatMessage content={optimisticSubmission.content} role="user" userAvatarURL={auth.user?.avatar_url} />
-                      <ChatActivity active events={[]} executions={executions} />
-                    </div>
-                  )}
-                  <div ref={conversationEnd} />
-                </section>
-              </Suspense>
-            )}
-          </div>
-
-          {canChat && !runQuery.isError && (
-            <form className="prompt-composer chat-prompt-composer" onSubmit={submitMessage}>
-              {sendMutation.isError && <div className="composer-error"><TriangleAlert size={13} /> {requestErrorMessage(sendMutation.error)}</div>}
-              <textarea
-                aria-label="Message Blix"
-                disabled={composerDisabled}
-                onChange={(event) => setDraft(event.currentTarget.value)}
-                onKeyDown={handleComposerKeyDown}
-                placeholder={turnActive ? "Queue another message…" : "Ask Blix anything…"}
-                rows={2}
-                value={draft}
-              />
-              <div className="composer-footer">
-                <span className="agent-mode"><Sparkles size={14} /> Agent mode</span>
-                <div className="composer-hint">Enter to send · Shift Enter for a new line</div>
-                {turnActive && runID && <button aria-label="Stop current turn" className="send-button" disabled={interruptMutation.isPending} onClick={() => interruptMutation.mutate()} type="button"><Square size={15} /></button>}
-                <button aria-label={turnActive ? "Queue message" : "Send message"} className="send-button" disabled={!draft.trim() || composerDisabled} type="submit"><ArrowUp size={18} /></button>
-              </div>
-            </form>
-          )}
-        </main>
-
-        <aside className="recent-work-panel chat-history-panel">
-          <div className="recent-work-heading">
-            <div><Hash size={15} /><h2>Recent conversations</h2></div>
-            {recentRunsQuery.isFetching && <LoaderCircle className="spin" size={14} />}
-          </div>
-          {recentRunsQuery.isError ? (
-            <div className="recent-work-empty">Recent conversations could not be loaded.</div>
-          ) : recentRuns.length === 0 ? (
-            <div className="recent-work-empty">Your conversations will appear here.</div>
-          ) : (
-            <div className="recent-thread-list">
-              {recentRuns.map((recentRun) => (
-                <Link
-                  className={`recent-thread${recentRun.run_id === runID ? " active" : ""}${recentRun.run_id === enteringRunID ? " entering" : ""}`}
-                  key={recentRun.run_id}
-                  to={`/chat/${recentRun.run_id}`}
-                >
-                  <span>{recentRun.name || "New conversation"}</span>
-                  <small>{formatRelative(recentRun.last_activity_at)} · {recentRun.event_count} events</small>
-                  <StatusBadge status={runDisplayStatus(recentRun, now)} />
+                </div>
+                <Link className="runtime-proposal-link" to="/knowledge">
+                  Import a team document <BookOpen size={15} />
                 </Link>
+              </section>
+            )}
+            {data?.messages.map((message) => (
+              <ChatMessage
+                key={message.message_id}
+                role={message.role}
+                content={message.display_content || message.content}
+                userAvatarURL={auth.user?.avatar_url}
+              />
+            ))}
+            {streaming.map(([id, content]) => (
+              <div className="runtime-stream" key={id}>
+                <ChatMessage role="assistant" content={content} />
+              </div>
+            ))}
+            {working && !streaming.length && (
+              <p className="runtime-working">
+                <LoaderCircle className="spin" size={15} /> Blix is working. You
+                can send another question.
+              </p>
+            )}
+            {data?.turns
+              .filter((turn) =>
+                ["failed", "cancelled", "expired"].includes(turn.status),
+              )
+              .slice(-3)
+              .map((turn) => (
+                <p className="runtime-error" key={turn.turn_id}>
+                  A request {turn.status}. You can send a follow-up to continue.
+                </p>
               ))}
+            {(detail.error || eventQuery.error) && (
+              <p role="alert" className="runtime-error">
+                {errorMessage(detail.error || eventQuery.error)}{" "}
+                <button type="button" onClick={() => void refresh()}>
+                  Retry
+                </button>
+              </p>
+            )}
+            <div ref={end} />
+          </div>
+          <form
+            className="runtime-composer"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (draft.trim() && permitted && !send.isPending)
+                send.mutate(draft.trim())
+            }}
+          >
+            {(send.error || stop.error) && (
+              <p role="alert" className="runtime-error">
+                {errorMessage(send.error || stop.error)}
+              </p>
+            )}
+            <textarea
+              aria-label="Message Blix"
+              disabled={
+                !permitted || send.isPending || (!!conversationID && !data)
+              }
+              placeholder="Ask Blix anything…"
+              rows={3}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+            />
+            <div>
+              <span>Enter to send · Shift + Enter for a new line</span>
+              {working && (
+                <button
+                  className="secondary-button"
+                  disabled={stop.isPending}
+                  onClick={() => stop.mutate()}
+                  type="button"
+                >
+                  <Square size={13} /> Stop
+                </button>
+              )}
+              <button
+                aria-label="Send message"
+                className="primary-button"
+                disabled={
+                  !permitted ||
+                  !draft.trim() ||
+                  send.isPending ||
+                  (!!conversationID && !data)
+                }
+                type="submit"
+              >
+                <ArrowUp size={17} />
+              </button>
             </div>
+          </form>
+        </main>
+        <aside className="runtime-sidebar">
+          {!!data?.pending_approvals.length && (
+            <section>
+              <h2>Needs your approval</h2>
+              {data.pending_approvals.map((item) => {
+                const action = data.approval_actions?.find(
+                  (action) => action.action_id === item.action_id,
+                )
+                return (
+                  <article className="runtime-task" key={item.approval_id}>
+                    <strong>
+                      {action?.tool_id === "knowledge_apply_v1"
+                        ? "Publish wiki changes"
+                        : "Approve an action"}
+                    </strong>
+                    {typeof action?.arguments.changeset_id === "string" && (
+                      <Link
+                        className="runtime-proposal-link"
+                        to={`/knowledge/proposals/${action.arguments.changeset_id}`}
+                      >
+                        Review proposed changes
+                      </Link>
+                    )}
+                    {action && (
+                      <details className="runtime-approval-details">
+                        <summary>
+                          {action.tool_id
+                            .replaceAll("_v1", "")
+                            .replaceAll("_", " ")}{" "}
+                          · action details
+                        </summary>
+                        <pre>{JSON.stringify(action.arguments, null, 2)}</pre>
+                      </details>
+                    )}
+                    <div className="runtime-controls">
+                      <button
+                        disabled={approval.isPending || !action}
+                        onClick={() =>
+                          approval.mutate({
+                            id: item.approval_id,
+                            decision: "approve",
+                          })
+                        }
+                        type="button"
+                      >
+                        <Check size={13} /> Approve
+                      </button>
+                      <button
+                        disabled={approval.isPending}
+                        onClick={() =>
+                          approval.mutate({
+                            id: item.approval_id,
+                            decision: "reject",
+                          })
+                        }
+                        type="button"
+                      >
+                        <X size={13} /> Reject
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+              {approval.error && (
+                <p role="alert" className="runtime-error">
+                  {errorMessage(approval.error)}
+                </p>
+              )}
+            </section>
           )}
-          <div className="recent-work-footer"><span className="healthy-dot" /> Conversations are checkpointed through Runway</div>
+          <section>
+            <h2>
+              Tasks <span>{data?.tasks.length ?? 0}</span>
+            </h2>
+            {data?.tasks.length ? (
+              data.tasks.map((task) => (
+                <TaskCard key={task.task_id} task={task} refresh={refresh} />
+              ))
+            ) : (
+              <p>Delegated research and curation will appear here.</p>
+            )}
+          </section>
+          {!!activity.length && (
+            <details>
+              <summary>Recent activity</summary>
+              <ul className="runtime-activity">
+                {activity.map((event) => (
+                  <li key={event.event_id}>
+                    {typeof event.payload.tool_id === "string"
+                      ? event.payload.tool_id
+                          .replaceAll("_v1", "")
+                          .replaceAll("_", " ")
+                      : event.type.split(".")[0]}{" "}
+                    <small>
+                      {typeof event.payload.status === "string"
+                        ? event.payload.status
+                        : event.type.includes("result")
+                          ? "finished"
+                          : "started"}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <section>
+            <h2>Recent conversations</h2>
+            {recent.data?.slice(0, 12).map((conversation) => (
+              <Link
+                className={`runtime-conversation ${conversationID === conversation.conversation_id ? "selected" : ""}`}
+                key={conversation.conversation_id}
+                to={`/chat/${conversation.conversation_id}`}
+              >
+                {conversation.name || "New conversation"}
+              </Link>
+            ))}
+            {recent.error && (
+              <p className="runtime-error">Could not load history.</p>
+            )}
+          </section>
         </aside>
       </div>
     </div>
