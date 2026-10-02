@@ -105,6 +105,8 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.POST("/documents/:documentID/chunks/:number", handler.SaveDocumentChunk)
 	internal.POST("/documents/:documentID/pages/:number/visual-analysis", handler.SaveDocumentVisualAnalysis)
 	internal.POST("/documents/:documentID/ingestion/:operation", handler.ProcessDocument)
+	internal.POST("/documents/:documentID/extraction/pages/:number", handler.SaveExtractionPage)
+	internal.POST("/documents/:documentID/extraction/:operation", handler.ExtractDocument)
 	internal.GET("/repository", handler.GetRepository)
 	internal.POST("/repository/seed", handler.SeedWiki)
 	internal.GET("/pages", handler.ListWikiPages)

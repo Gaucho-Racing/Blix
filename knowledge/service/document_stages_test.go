@@ -54,7 +54,7 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 	runtimeStatus.Store("running")
 	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/internal/v1/document-attempts/validate" {
-			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": sessionID, "run_id": runID, "attempt_number": 1, "input": map[string]any{"document_id": doc.ID, "generation": generation.Load()}})
+			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": sessionID, "run_id": runID, "profile_id": "document_ingest_v1", "attempt_number": 1, "input": map[string]any{"document_id": doc.ID, "generation": generation.Load()}})
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/internal/v1/tasks/") {

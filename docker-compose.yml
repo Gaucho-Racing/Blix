@@ -122,6 +122,42 @@ services:
       SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
       SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID?Set SENTINEL_CLIENT_ID in .env}
 
+  ingestion:
+    container_name: blix-ingestion
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    stop_grace_period: 20s
+    init: true
+    volumes:
+      - ./ingestion:/app
+      - ingestion_gopath:/go
+    depends_on:
+      runway:
+        condition: service_started
+      knowledge:
+        condition: service_started
+    environment:
+      ENV: ${ENV:?Set ENV in .env}
+      PORT: ${INGESTION_PORT:?Set INGESTION_PORT in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      KNOWLEDGE_URL: ${KNOWLEDGE_URL:?Set KNOWLEDGE_URL in .env}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      DEPOT_URL: ${DEPOT_URL?Set DEPOT_URL in .env}
+      DEPOT_BUCKET: ${DEPOT_BUCKET:?Set DEPOT_BUCKET in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
+      INGESTION_DOCUMENT_CONCURRENCY: ${INGESTION_DOCUMENT_CONCURRENCY:?Set INGESTION_DOCUMENT_CONCURRENCY in .env}
+      INGESTION_PAGE_CONCURRENCY: ${INGESTION_PAGE_CONCURRENCY:?Set INGESTION_PAGE_CONCURRENCY in .env}
+      INGESTION_GLOBAL_PAGE_CONCURRENCY: ${INGESTION_GLOBAL_PAGE_CONCURRENCY:?Set INGESTION_GLOBAL_PAGE_CONCURRENCY in .env}
+      INGESTION_POLL_INTERVAL: ${INGESTION_POLL_INTERVAL:?Set INGESTION_POLL_INTERVAL in .env}
+    healthcheck:
+      test: ["CMD-SHELL", 'wget -q -O /dev/null "http://127.0.0.1:$$PORT/ready"']
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 60s
+
   agent-worker-1:
     container_name: blix-agent-worker-1
     build:
@@ -229,6 +265,7 @@ services:
     image: emqx/nanomq:0.25.6
 
 volumes:
+  ingestion_gopath:
   knowledge_documents:
   agent_worker_1_venv:
   agent_worker_2_venv:

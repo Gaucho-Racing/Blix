@@ -63,7 +63,7 @@ func run(configuration config.Config) error {
 		}
 	}
 	auth := service.NewAuthService(sentinelClient)
-	documents := service.NewDocumentService(db, configuration.DocumentStoragePath, service.PopplerExtractor{})
+	documents := service.NewDocumentService(db, configuration.DocumentStoragePath, nil)
 	documents.SetIntegration(depot.NewClient(configuration.DepotURL, configuration.DepotBucket, configuration.SentinelServiceAccountToken), service.NewDocumentRuntimeClient(configuration.RunwayURL, os.Getenv("BLIX_INTERNAL_TOKEN")))
 	documentsDone := make(chan struct{})
 	go func() {

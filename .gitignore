@@ -10,3 +10,4 @@ cli/cli
 runway/tmp/
 knowledge/tmp/
 knowledge/.data/
+ingestion/tmp/

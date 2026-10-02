@@ -24,8 +24,9 @@ type DocumentIngestionRequest struct {
 	Objective  string              `json:"objective"`
 }
 type DocumentIngestionRun struct {
-	RunID  string `json:"run_id"`
-	TaskID string `json:"task_id"`
+	RunID            string `json:"run_id"`
+	TaskID           string `json:"task_id"`
+	ExtractionTaskID string `json:"extraction_task_id"`
 }
 
 func (s *ExecutionService) StartDocumentIngestion(ctx context.Context, r DocumentIngestionRequest) (DocumentIngestionRun, error) {
@@ -46,7 +47,11 @@ func (s *ExecutionService) StartDocumentIngestion(ctx context.Context, r Documen
 			if run.CallerEntityID != r.Caller.EntityID || existing.Objective != r.Objective || !sameDocumentInvocation(json.RawMessage(existing.Input), r.DocumentID, r.Generation) {
 				return ErrConflict
 			}
-			result = DocumentIngestionRun{existing.RunID, existing.ID}
+			var extraction model.Task
+			if err := tx.First(&extraction, "parent_target_id = ? AND delegation_ref = ?", existing.ID, "file-ingestion").Error; err != nil {
+				return err
+			}
+			result = DocumentIngestionRun{existing.RunID, existing.ID, extraction.ID}
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -75,17 +80,31 @@ func (s *ExecutionService) StartDocumentIngestion(ctx context.Context, r Documen
 		}
 		input := encoded(map[string]any{"document_id": r.DocumentID, "generation": r.Generation})
 		invocation := encoded(map[string]any{"run_id": runID, "session_id": session.ID, "parent_session_id": lead.ID, "agent_id": profile.ID, "objective": r.Objective, "input": json.RawMessage(input)})
-		task := model.Task{ID: identifier.New(identifier.Task), RunID: runID, ParentSessionID: lead.ID, SessionID: session.ID, ParentTargetID: "document-ingestion", DelegationRef: r.Key, Background: true, Objective: r.Objective, Input: input, Invocation: invocation, Status: model.StatusQueued, Policy: datatypes.NewJSONType(profile.Policy), DeadlineAt: time.Now().UTC().Add(time.Duration(profile.Policy.DeadlineSeconds) * time.Second)}
+		task := model.Task{ID: identifier.New(identifier.Task), RunID: runID, ParentSessionID: lead.ID, SessionID: session.ID, ParentTargetID: "document-ingestion", DelegationRef: r.Key, Background: true, Objective: r.Objective, Input: input, Invocation: invocation, Status: model.StatusWaiting, WaitingReason: "file_ingestion", Policy: datatypes.NewJSONType(profile.Policy), DeadlineAt: time.Now().UTC().Add(time.Duration(profile.Policy.DeadlineSeconds) * time.Second)}
+		extractionProfile := profiles["file_ingest_v1"]
+		extractionSession, err := s.createSession(tx, runID, &session.ID, extractionProfile, "")
+		if err != nil {
+			return err
+		}
+		extraction := model.Task{ID: identifier.New(identifier.Task), RunID: runID, ParentTaskID: &task.ID, ParentSessionID: session.ID, SessionID: extractionSession.ID, ParentTargetID: task.ID, DelegationRef: "file-ingestion", Objective: "Extract text and page evidence from the uploaded file.", Input: input, Status: model.StatusQueued, Policy: datatypes.NewJSONType(extractionProfile.Policy), DeadlineAt: task.DeadlineAt}
+		extraction.Invocation = encoded(map[string]any{"run_id": runID, "session_id": extraction.SessionID, "parent_session_id": session.ID, "agent_id": extractionProfile.ID, "objective": extraction.Objective, "input": json.RawMessage(input)})
+		task.WaitingTaskID = &extraction.ID
 		if err := tx.Create(&task).Error; err != nil {
 			return err
 		}
-		if _, err := s.newAttempt(tx, runID, session.ID, task.ID, nil, &task.ID, profile.Policy, task.DeadlineAt); err != nil {
+		if err := tx.Create(&extraction).Error; err != nil {
+			return err
+		}
+		if _, err := s.newAttempt(tx, runID, extraction.SessionID, extraction.ID, nil, &extraction.ID, extractionProfile.Policy, extraction.DeadlineAt); err != nil {
 			return err
 		}
 		if _, err := s.event(tx, model.ExecutionAttempt{RunID: runID, SessionID: lead.ID}, "task.created_v1", session.ID, map[string]any{"task_id": task.ID, "agent_id": profile.ID, "objective": task.Objective, "background": true}); err != nil {
 			return err
 		}
-		result = DocumentIngestionRun{runID, task.ID}
+		if _, err := s.event(tx, model.ExecutionAttempt{RunID: runID, SessionID: session.ID}, "task.created_v1", extraction.SessionID, map[string]any{"task_id": extraction.ID, "agent_id": extractionProfile.ID, "objective": extraction.Objective, "background": false}); err != nil {
+			return err
+		}
+		result = DocumentIngestionRun{runID, task.ID, extraction.ID}
 		return nil
 	})
 	return result, err
@@ -113,13 +132,13 @@ func (s *ExecutionService) ValidateDocumentAttempt(ctx context.Context, r Docume
 	if err := s.database.WithContext(ctx).First(&session, "id = ?", a.SessionID).Error; err != nil {
 		return nil, err
 	}
-	if session.ProfileID != "document_ingest_v1" {
+	if session.ProfileID != "document_ingest_v1" && session.ProfileID != "file_ingest_v1" {
 		return nil, ErrForbidden
 	}
 	if task.Status != model.StatusRunning {
 		return nil, ErrConflict
 	}
-	return map[string]any{"task_id": task.ID, "session_id": a.SessionID, "run_id": a.RunID, "input": json.RawMessage(task.Input), "attempt_number": a.Number}, nil
+	return map[string]any{"task_id": task.ID, "parent_task_id": task.ParentTaskID, "profile_id": session.ProfileID, "session_id": a.SessionID, "run_id": a.RunID, "input": json.RawMessage(task.Input), "attempt_number": a.Number}, nil
 }
 
 func sameDocumentInvocation(input json.RawMessage, id string, generation uint64) bool {

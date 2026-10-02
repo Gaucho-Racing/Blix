@@ -27,6 +27,7 @@ type WorkerService struct {
 }
 
 type WorkerRegistrationRequest struct {
+	RuntimeKind           string `json:"runtime_kind"`
 	WorkerID              string `json:"worker_id"`
 	Concurrency           uint64 `json:"concurrency"`
 	BackgroundConcurrency uint64 `json:"background_concurrency"`
@@ -38,6 +39,7 @@ type WorkerRegistration struct {
 }
 
 type WorkerSummary struct {
+	RuntimeKind          string    `json:"runtime_kind"`
 	WorkerID             string    `json:"worker_id"`
 	Status               string    `json:"status"`
 	Concurrency          uint64    `json:"concurrency"`
@@ -57,6 +59,7 @@ type WorkerSummary struct {
 }
 
 type workerSummaryRow struct {
+	RuntimeKind         string
 	ID                  string
 	Concurrency         uint64
 	ExecutionsClaimed   uint64
@@ -82,11 +85,15 @@ func NewWorkerService(database *gorm.DB, updates *WorkerHub, configuration confi
 }
 
 func (s *WorkerService) Register(ctx context.Context, request WorkerRegistrationRequest) (WorkerRegistration, error) {
-	if !identifier.IsValid(request.WorkerID, identifier.Worker) || request.Concurrency == 0 || request.Concurrency > 1024 || request.BackgroundConcurrency == 0 || request.BackgroundConcurrency >= request.Concurrency {
+	if request.RuntimeKind == "" {
+		request.RuntimeKind = "api"
+	}
+	if (request.RuntimeKind != "api" && request.RuntimeKind != "ingestion") || !identifier.IsValid(request.WorkerID, identifier.Worker) || request.Concurrency == 0 || request.Concurrency > 1024 || request.BackgroundConcurrency == 0 || request.BackgroundConcurrency > request.Concurrency || (request.RuntimeKind == "api" && request.BackgroundConcurrency == request.Concurrency) {
 		return WorkerRegistration{}, fmt.Errorf("%w: worker_id or concurrency is invalid", ErrInvalid)
 	}
 	now := time.Now().UTC()
 	worker := model.AgentWorker{
+		RuntimeKind:           request.RuntimeKind,
 		ID:                    request.WorkerID,
 		Concurrency:           request.Concurrency,
 		BackgroundConcurrency: request.BackgroundConcurrency,
@@ -97,6 +104,7 @@ func (s *WorkerService) Register(ctx context.Context, request WorkerRegistration
 	err := s.database.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.Assignments(map[string]any{
+			"runtime_kind":           request.RuntimeKind,
 			"concurrency":            request.Concurrency,
 			"background_concurrency": request.BackgroundConcurrency,
 			"last_seen_at":           now,
@@ -204,6 +212,7 @@ func (s *WorkerService) summarize(row workerSummaryRow, now time.Time) WorkerSum
 		}
 	}
 	return WorkerSummary{
+		RuntimeKind:          row.RuntimeKind,
 		WorkerID:             row.ID,
 		Status:               status,
 		Concurrency:          row.Concurrency,

@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -51,7 +50,6 @@ type DocumentDetails struct {
 type PDFExtractor interface {
 	Extract(context.Context, string) ([]string, error)
 }
-type PopplerExtractor struct{}
 type DocumentService struct {
 	db        *gorm.DB
 	directory string
@@ -65,53 +63,10 @@ func NewDocumentService(db *gorm.DB, directory string, extractor PDFExtractor) *
 	return &DocumentService{db: db, directory: directory, extractor: extractor, slots: make(chan struct{}, 2)}
 }
 
-type limitedOutput struct {
-	bytes.Buffer
-	limit int
-}
-
-func (w *limitedOutput) Write(data []byte) (int, error) {
-	if w.Len()+len(data) > w.limit {
-		return 0, fmt.Errorf("PDF extraction exceeds size limit")
-	}
-	return w.Buffer.Write(data)
-}
-func (PopplerExtractor) Extract(ctx context.Context, path string) ([]string, error) {
-	extractCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	output := &limitedOutput{limit: 10 * 1024 * 1024}
-	command := exec.CommandContext(extractCtx, "pdftotext", "-layout", "-enc", "UTF-8", path, "-")
-	command.Stdout = output
-	if err := command.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return nil, fmt.Errorf("%w: PDF extraction is not installed", ErrUnavailable)
-		}
-		if extractCtx.Err() != nil {
-			return nil, fmt.Errorf("%w: PDF extraction timed out", ErrInvalid)
-		}
-		return nil, fmt.Errorf("%w: PDF could not be extracted; upload an unencrypted PDF", ErrInvalid)
-	}
-	text := output.String()
-	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
-		return nil, fmt.Errorf("%w: PDF text has invalid encoding", ErrInvalid)
-	}
-	pages := strings.Split(text, "\f")
-	if len(pages) > 0 && strings.TrimSpace(pages[len(pages)-1]) == "" {
-		pages = pages[:len(pages)-1]
-	}
-	if len(pages) == 0 || len(pages) > 500 {
-		return nil, fmt.Errorf("%w: PDF must contain 1–500 pages", ErrInvalid)
-	}
-	for i, page := range pages {
-		pages[i] = strings.TrimSpace(page)
-		if len(pages[i]) > 1024*1024 {
-			return nil, fmt.Errorf("%w: extracted page is too large", ErrInvalid)
-		}
-	}
-	return pages, nil
-}
-
 func (s *DocumentService) Import(ctx context.Context, reader io.Reader, metadata DocumentMetadata) (DocumentDetails, error) {
+	if s.extractor == nil {
+		return DocumentDetails{}, ErrUnavailable
+	}
 	select {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()

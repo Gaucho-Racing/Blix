@@ -70,10 +70,12 @@ type DocumentExecution struct {
 	Generation   uint64 `json:"generation"`
 }
 type validatedDocumentExecution struct {
-	TaskID        string `json:"task_id"`
-	SessionID     string `json:"session_id"`
-	RunID         string `json:"run_id"`
-	AttemptNumber uint64 `json:"attempt_number"`
+	ProfileID     string  `json:"profile_id"`
+	ParentTaskID  *string `json:"parent_task_id"`
+	TaskID        string  `json:"task_id"`
+	SessionID     string  `json:"session_id"`
+	RunID         string  `json:"run_id"`
+	AttemptNumber uint64  `json:"attempt_number"`
 	Input         struct {
 		DocumentID string `json:"document_id"`
 		Generation uint64 `json:"generation"`

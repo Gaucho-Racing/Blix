@@ -286,7 +286,23 @@ func (s *ExecutionService) taskSettled(tx *gorm.DB, id string) error {
 	if parent.Status != model.StatusWaiting || parent.WaitingTaskID == nil || *parent.WaitingTaskID != task.ID {
 		return nil
 	}
-	if err := tx.Model(&parent).Update("status", model.StatusQueued).Error; err != nil {
+	updates := map[string]any{"status": model.StatusQueued}
+	if parent.WaitingReason == "file_ingestion" {
+		if task.Status != model.StatusSucceeded {
+			failure := json.RawMessage(task.Error)
+			if !object(failure) {
+				failure = json.RawMessage(`{"code":"extraction_failed","message":"File extraction did not complete."}`)
+			}
+			result := encoded(map[string]any{"schema_version": 1, "run_id": parent.RunID, "session_id": parent.SessionID, "parent_session_id": parent.ParentSessionID, "agent_id": "document_ingest_v1", "status": task.Status, "error": failure, "usage": map[string]any{}})
+			if err := tx.Model(&parent).Updates(map[string]any{"status": task.Status, "error": datatypes.JSON(failure), "result": result, "completed_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+			return s.taskSettled(tx, parent.ID)
+		}
+		updates["waiting_task_id"] = nil
+		updates["waiting_reason"] = ""
+	}
+	if err := tx.Model(&parent).Updates(updates).Error; err != nil {
 		return err
 	}
 	_, err := s.newAttempt(tx, parent.RunID, parent.SessionID, parent.ID, nil, &parent.ID, parent.Policy.Data(), parent.DeadlineAt)

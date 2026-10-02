@@ -120,8 +120,8 @@ type ExecutionAttempt struct {
 	TaskID         *string        `json:"task_id,omitempty"`
 	Number         uint64         `json:"number" gorm:"not null"`
 	Queue          string         `json:"queue" gorm:"index;not null"`
-	RuntimeKind    string         `json:"runtime_kind" gorm:"not null"`
-	Status         string         `json:"status" gorm:"index;not null"`
+	RuntimeKind    string         `json:"runtime_kind" gorm:"not null;index:idx_runway_attempt_ready,priority:1"`
+	Status         string         `json:"status" gorm:"index;not null;index:idx_runway_attempt_ready,priority:2"`
 	WorkerID       string         `json:"worker_id" gorm:"index;not null"`
 	FencingToken   string         `json:"fencing_token,omitempty"`
 	Version        uint64         `json:"version" gorm:"not null"`
@@ -130,7 +130,7 @@ type ExecutionAttempt struct {
 	RuntimeHandle  datatypes.JSON `json:"runtime_handle,omitempty" gorm:"type:jsonb"`
 	Error          datatypes.JSON `json:"error,omitempty" gorm:"type:jsonb"`
 	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
+	CreatedAt      time.Time      `json:"created_at" gorm:"index:idx_runway_attempt_ready,priority:3"`
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 

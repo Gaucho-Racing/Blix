@@ -215,6 +215,19 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.Status(http.StatusNoContent)
 	})
 	internal := router.Group("/internal/v1", internalAuthentication)
+	internal.GET("/attempts/ready", func(c *gin.Context) {
+		limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+		if err != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		attempts, err := h.executions.ReadyAttempts(c.Request.Context(), c.Query("runtime_kind"), limit)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"attempts": attempts})
+	})
 	internal.GET("/runs/:runID/retrieval-context", func(c *gin.Context) {
 		result, err := h.executions.RetrievalContext(c.Request.Context(), c.Param("runID"), c.Query("session_id"))
 		if err != nil {

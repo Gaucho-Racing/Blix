@@ -64,7 +64,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 				w.WriteHeader(409)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": session, "run_id": runID, "attempt_number": attempt, "input": map[string]any{"document_id": docID, "generation": generation}})
+			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": session, "run_id": runID, "profile_id": "document_ingest_v1", "attempt_number": attempt, "input": map[string]any{"document_id": docID, "generation": generation}})
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			status = "cancelled"
 			json.NewEncoder(w).Encode(map[string]any{})

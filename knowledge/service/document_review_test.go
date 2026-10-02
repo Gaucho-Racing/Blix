@@ -98,7 +98,7 @@ func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
-				json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.Document.SessionID, "run_id": doc.Document.RunID, "attempt_number": 1, "input": map[string]any{"document_id": doc.Document.ID, "generation": doc.Document.Generation}})
+				json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.Document.SessionID, "run_id": doc.Document.RunID, "profile_id": "document_ingest_v1", "attempt_number": 1, "input": map[string]any{"document_id": doc.Document.ID, "generation": doc.Document.Generation}})
 			}))
 			t.Cleanup(runtime.Close)
 			s.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "internal"))

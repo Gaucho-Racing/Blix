@@ -55,7 +55,7 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"document_ids": []string{id}, "profile_id": "document_qa_v1"})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"task_id": "task_test", "session_id": sid, "run_id": runID, "attempt_number": 1, "input": map[string]any{"document_id": id, "generation": 1}})
+		json.NewEncoder(w).Encode(map[string]any{"task_id": "task_test", "session_id": sid, "run_id": runID, "profile_id": "document_ingest_v1", "attempt_number": 1, "input": map[string]any{"document_id": id, "generation": 1}})
 	}))
 	defer runtime.Close()
 	service.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "test"))
@@ -181,21 +181,6 @@ func TestPageImageBoundsAndOCRHeuristics(t *testing.T) {
 	}
 	if _, err := readLimitedImage(strings.NewReader(strings.Repeat("x", maxPageImageBytes+1))); !errors.Is(err, ErrInvalid) {
 		t.Fatal("oversized image accepted")
-	}
-}
-
-func TestPopplerPageRendering(t *testing.T) {
-	path := os.Getenv("BLIX_TEST_PDF_PATH")
-	if path == "" {
-		t.Skip("BLIX_TEST_PDF_PATH is required")
-	}
-	data, err := (PopplerExtractor{}).RenderPage(context.Background(), path, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configuration, err := jpeg.DecodeConfig(bytes.NewReader(data))
-	if err != nil || configuration.Width > 2400 || configuration.Height > 2400 || configuration.Width < 1 {
-		t.Fatalf("rendered image invalid: %+v %v", configuration, err)
 	}
 }
 

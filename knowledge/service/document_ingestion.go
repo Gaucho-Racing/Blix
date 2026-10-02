@@ -140,15 +140,16 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				continue
 			}
 			var run struct {
-				RunID  string `json:"run_id"`
-				TaskID string `json:"task_id"`
+				RunID            string `json:"run_id"`
+				TaskID           string `json:"task_id"`
+				ExtractionTaskID string `json:"extraction_task_id"`
 			}
 			request := map[string]any{"title": doc.Title, "key": fmt.Sprintf("%s:%d", doc.ID, doc.Generation), "document_id": doc.ID, "generation": doc.Generation, "caller": json.RawMessage(doc.Caller), "objective": doc.Objective}
 			if err := s.runtime.request(ctx, "POST", "document-ingestions", request, &run); err != nil {
 				_ = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status = ?", doc.ID, doc.Generation, "queued").Update("error", "Waiting for runtime scheduling").Error
 				continue
 			}
-			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "run_id": run.RunID, "error": ""})
+			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "extraction_task_id": run.ExtractionTaskID, "run_id": run.RunID, "error": ""})
 			if saved.Error != nil {
 				return saved.Error
 			}
@@ -244,7 +245,7 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 				return ErrConflict
 			}
 			resetUnfinishedDocumentStages(&doc)
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "run_id": "", "error": ""})
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "extraction_task_id": "", "extraction_attempt_number": 0, "run_id": "", "error": ""})
 		default:
 			return ErrInvalid
 		}
@@ -311,6 +312,9 @@ func (s *DocumentService) lockedExecution(ctx context.Context, tx *gorm.DB, id s
 	if err != nil {
 		return doc, err
 	}
+	if access.ProfileID != "document_ingest_v1" {
+		return doc, ErrForbidden
+	}
 	if doc.TaskID != "" && doc.TaskID != access.TaskID {
 		return doc, ErrConflict
 	}
@@ -349,6 +353,9 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 	}
 	if prepared {
 		return s.prepareSearch(ctx, id, e)
+	}
+	if s.extractor == nil {
+		return details, fmt.Errorf("%w: file extraction has not completed", ErrConflict)
 	}
 	select {
 	case s.slots <- struct{}{}:
@@ -404,45 +411,7 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 		if count > 0 {
 			return nil
 		}
-		sources := NewSourceService(tx)
-		sourceData, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "filename": doc.Filename, "metadata_status": "unidentified"})
-		source, err := sources.CreateSource(ctx, CreateSourceInput{Kind: "pdf_document", ExternalID: id, Name: doc.Title, Metadata: sourceData})
-		if err != nil {
-			return err
-		}
-		pages := []model.DocumentPage{}
-		for i, content := range text {
-			pageMetadata := map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash}
-			method := "document_upload"
-			imageHash := ""
-			var image model.DocumentPageImage
-			if err := tx.First(&image, "document_id = ? AND number = ?", id, i+1).Error; err == nil {
-				imageHash = image.SHA256
-				pageMetadata["page_image_sha256"] = image.SHA256
-				pageMetadata["text_method"] = image.TextMethod
-				if image.TextMethod == "ocr" {
-					method = "document_ocr"
-				}
-			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-			metadata, _ := json.Marshal(pageMetadata)
-			record, err := sources.ingestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: method}, false)
-			if err != nil {
-				return err
-			}
-			pages = append(pages, model.DocumentPage{DocumentID: id, Number: i + 1, SourceRecordID: record.Record.ID, ImageSHA256: imageHash, CharacterCount: utf8.RuneCountInString(content)})
-		}
-		if err := tx.Create(&pages).Error; err != nil {
-			return err
-		}
-		chunks := buildDocumentChunks(id, pages, text)
-		if err := tx.Create(&chunks).Error; err != nil {
-			return err
-		}
-		setDocumentStage(&doc, "extracting", "completed")
-		setDocumentStage(&doc, "indexing", "running")
-		return saveDocumentProgress(tx, &doc, map[string]any{"sha256": hash, "source_id": source.ID, "page_count": len(pages), "size_bytes": len(data), "status": "indexing", "error": ""})
+		return s.saveExtractedDocument(ctx, tx, doc, hash, int64(len(data)), text)
 	})
 	if err != nil {
 		return details, err
@@ -740,4 +709,47 @@ var documentProcessingStatuses = []string{"queued", "extracting", "indexing", "a
 
 func documentIsProcessing(status string) bool {
 	return slices.Contains(documentProcessingStatuses, status)
+}
+
+func (s *DocumentService) saveExtractedDocument(ctx context.Context, tx *gorm.DB, doc model.Document, hash string, size int64, text []string) error {
+	id := doc.ID
+	sources := NewSourceService(tx)
+	sourceData, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "filename": doc.Filename, "metadata_status": "unidentified"})
+	source, err := sources.CreateSource(ctx, CreateSourceInput{Kind: "pdf_document", ExternalID: id, Name: doc.Title, Metadata: sourceData})
+	if err != nil {
+		return err
+	}
+	pages := []model.DocumentPage{}
+	for i, content := range text {
+		pageMetadata := map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash}
+		method := "document_upload"
+		imageHash := ""
+		var image model.DocumentPageImage
+		if err := tx.First(&image, "document_id = ? AND number = ?", id, i+1).Error; err == nil {
+			imageHash = image.SHA256
+			pageMetadata["page_image_sha256"] = image.SHA256
+			pageMetadata["text_method"] = image.TextMethod
+			if image.TextMethod == "ocr" {
+				method = "document_ocr"
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		metadata, _ := json.Marshal(pageMetadata)
+		record, err := sources.ingestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: fmt.Sprintf("page:%d", i+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: metadata, ExternalURL: doc.ExternalURL, OccurredAt: doc.CreatedAt, EvidenceType: "quoted_source", CaptureMethod: method}, false)
+		if err != nil {
+			return err
+		}
+		pages = append(pages, model.DocumentPage{DocumentID: id, Number: i + 1, SourceRecordID: record.Record.ID, ImageSHA256: imageHash, CharacterCount: utf8.RuneCountInString(content)})
+	}
+	if err := tx.Create(&pages).Error; err != nil {
+		return err
+	}
+	chunks := buildDocumentChunks(id, pages, text)
+	if err := tx.Create(&chunks).Error; err != nil {
+		return err
+	}
+	setDocumentStage(&doc, "extracting", "completed")
+	setDocumentStage(&doc, "indexing", "running")
+	return saveDocumentProgress(tx, &doc, map[string]any{"sha256": hash, "source_id": source.ID, "page_count": len(pages), "size_bytes": size, "status": "indexing", "error": ""})
 }

@@ -8,11 +8,8 @@ import (
 	"image/jpeg"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
@@ -56,56 +53,6 @@ func (s *DocumentService) ChunkImages(ctx context.Context, id string, first, las
 type PDFPageRenderer interface {
 	RenderPage(context.Context, string, int) ([]byte, error)
 	RecognizeText(context.Context, []byte) (string, error)
-}
-
-func (PopplerExtractor) RenderPage(ctx context.Context, path string, page int) ([]byte, error) {
-	directory, err := os.MkdirTemp("", "blix-page-*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(directory)
-	renderCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	prefix := filepath.Join(directory, "page")
-	command := exec.CommandContext(renderCtx, "pdftoppm", "-f", strconv.Itoa(page), "-l", strconv.Itoa(page), "-singlefile", "-scale-to", "2400", "-jpeg", "-jpegopt", "quality=90", path, prefix)
-	if err := command.Run(); err != nil {
-		return nil, fmt.Errorf("%w: PDF page %d could not be rendered", ErrUnavailable, page)
-	}
-	file, err := os.Open(prefix + ".jpg")
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	return readLimitedImage(file)
-}
-
-func (PopplerExtractor) RecognizeText(ctx context.Context, data []byte) (string, error) {
-	file, err := os.CreateTemp("", "blix-ocr-*.jpg")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(file.Name())
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	ocrCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-	output := &limitedOutput{limit: 1024 * 1024}
-	command := exec.CommandContext(ocrCtx, "tesseract", file.Name(), "stdout", "-l", "eng", "--psm", "3")
-	command.Env = append(os.Environ(), "OMP_THREAD_LIMIT=1")
-	command.Stdout = output
-	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("%w: OCR could not read this page", ErrUnavailable)
-	}
-	text := strings.TrimSpace(output.String())
-	if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
-		return "", fmt.Errorf("%w: OCR returned invalid text", ErrInvalid)
-	}
-	return text, nil
 }
 
 func requiresOCR(text string) bool {
@@ -309,6 +256,7 @@ func (s *DocumentService) createPageImage(ctx context.Context, renderer PDFPageR
 		if err != nil {
 			return asset, err
 		}
+		asset.OCRText = ocr
 		if utf8.RuneCountInString(ocr) > utf8.RuneCountInString(native) {
 			asset.Text = ocr
 			asset.TextMethod = "ocr"

@@ -3,6 +3,7 @@ package model
 import "time"
 
 type AgentWorker struct {
+	RuntimeKind           string    `json:"runtime_kind" gorm:"not null;default:api"`
 	ID                    string    `json:"worker_id" gorm:"primaryKey"`
 	BackgroundConcurrency uint64    `json:"background_concurrency" gorm:"not null"`
 	Concurrency           uint64    `json:"concurrency" gorm:"not null"`

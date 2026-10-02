@@ -329,7 +329,7 @@ func (s *ExecutionService) ClaimAttempt(ctx context.Context, id string, r ClaimR
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&worker, "id = ?", r.WorkerID).Error; err != nil {
 			return err
 		}
-		if !worker.LastSeenAt.Add(s.workers.offlineAfter).After(time.Now()) {
+		if worker.RuntimeKind != r.RuntimeKind || !worker.LastSeenAt.Add(s.workers.offlineAfter).After(time.Now()) {
 			return ErrConflict
 		}
 		var total, bg int64

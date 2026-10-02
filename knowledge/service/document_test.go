@@ -110,36 +110,6 @@ func TestDocumentRejectsInvalidInputAndExtractionFailure(t *testing.T) {
 		t.Fatalf("failed import left files: %v %v", files, err)
 	}
 }
-func TestPopplerExtractDocument(t *testing.T) {
-	path := os.Getenv("BLIX_TEST_PDF_PATH")
-	if path == "" {
-		t.Skip("BLIX_TEST_PDF_PATH is required for real PDF acceptance tests")
-	}
-	pages, err := (PopplerExtractor{}).Extract(context.Background(), path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pages) < 1 || len(pages[0]) < 20 {
-		t.Fatal("missing page text")
-	}
-	db, _, _, _ := indexFixture(t)
-	service := NewDocumentService(db, t.TempDir(), PopplerExtractor{})
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	metadata := documentMetadata()
-	metadata.Filename = filepath.Base(path)
-	result, err := service.Import(context.Background(), file, metadata)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Document.PageCount != len(pages) {
-		t.Fatalf("expected %d pages, got %d", len(pages), result.Document.PageCount)
-	}
-	t.Logf("extracted and retained %d pages", len(pages))
-}
 
 type blockingPDFExtractor struct {
 	started chan struct{}
