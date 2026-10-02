@@ -84,12 +84,12 @@ class OpenAIResponsesModel:
         if any(ord(char) < 33 or ord(char) > 126 for char in api_key.strip()):
             raise ValueError("LLM_GATEWAY_API_KEY must contain only printable non-whitespace ASCII characters")
         if not model.strip():
-            raise ValueError("LLM_MODEL cannot be empty")
+            raise ValueError("Model cannot be empty")
         if reasoning_effort is not None:
             try:
                 reasoning_effort = TypeAdapter(ReasoningEffort).validate_python(reasoning_effort)
             except ValidationError as error:
-                raise ValueError("LLM_REASONING_EFFORT is invalid") from error
+                raise ValueError("Reasoning effort is invalid") from error
 
         self._base_url = f"{str(endpoint).rstrip('/')}/"
         self._model = model.strip()
@@ -108,18 +108,27 @@ class OpenAIResponsesModel:
 
     @classmethod
     def from_environment(cls, profile: str = "lead") -> Self:
-        prefix = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR", "document_qa": "DOCUMENT_QA"}.get(profile, "LEAD")
-        model = os.environ.get(f"LLM_{prefix}_MODEL")
-        if profile == "document_qa" and not model:
-            raise ValueError("LLM_DOCUMENT_QA_MODEL must be configured for document questions.")
+        prefixes = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR", "document_qa": "DOCUMENT_QA"}
+        if profile not in prefixes:
+            raise ValueError(f"Unknown model profile: {profile!r}")
+        prefix = prefixes[profile]
+        model_key = f"LLM_{prefix}_MODEL"
+        effort_key = f"LLM_{prefix}_REASONING_EFFORT"
+        model = os.environ.get(model_key, "").strip()
+        effort = os.environ.get(effort_key, "").strip()
+        if not model:
+            raise ValueError(f"{model_key} must be configured for model profile {profile!r}.")
+        if not effort:
+            raise ValueError(f"{effort_key} must be configured for model profile {profile!r}.")
+        try:
+            reasoning_effort = TypeAdapter(ReasoningEffort).validate_python(effort)
+        except ValidationError as error:
+            raise ValueError(f"{effort_key} is invalid: {effort!r}") from error
         return cls(
             base_url=os.environ.get("LLM_GATEWAY_ENDPOINT", ""),
             api_key=os.environ.get("LLM_GATEWAY_API_KEY", ""),
-            model=model or os.environ.get("LLM_MODEL", "gpt-6-astra"),
-            reasoning_effort=(
-                os.environ.get(f"LLM_{prefix}_REASONING_EFFORT") or os.environ.get("LLM_REASONING_EFFORT", "")
-            ).strip()
-            or None,
+            model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     @property
