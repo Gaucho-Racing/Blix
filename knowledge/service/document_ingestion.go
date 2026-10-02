@@ -42,13 +42,13 @@ func (s *DocumentService) InitiateUpload(ctx context.Context, filename string, c
 	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != "USER" || !identifier.IsValid(caller.UserID, identifier.User) {
 		return DocumentUpload{}, ErrForbidden
 	}
-	objective := "Read this document, identify its title, publisher, edition, publication date, document type and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
+	objective := "Read this document, identify its title, publisher, edition, publication date, useful document tags and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
 	title := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if title == "" {
 		title = filename
 	}
 	callerData, _ := json.Marshal(map[string]string{"entity_id": caller.EntityID, "entity_type": caller.EntityType, "user_id": caller.UserID})
-	doc := model.Document{ID: identifier.New(identifier.Document), Title: title, Filename: filename, Kind: "reference", UploadedBy: caller.EntityID, Status: "uploading", Objective: objective, Caller: callerData, Generation: 1}
+	doc := model.Document{ID: identifier.New(identifier.Document), Title: title, Filename: filename, Tags: datatypes.NewJSONSlice([]string{}), UploadedBy: caller.EntityID, Status: "uploading", Objective: objective, Caller: callerData, Generation: 1}
 	if err := s.db.WithContext(ctx).Create(&doc).Error; err != nil {
 		return DocumentUpload{}, err
 	}

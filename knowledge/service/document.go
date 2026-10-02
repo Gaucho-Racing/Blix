@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/model"
 	"github.com/gaucho-racing/blix/knowledge/pkg/depot"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -30,7 +32,7 @@ type DocumentMetadata struct {
 	Filename    string
 	Publisher   string
 	Version     string
-	Kind        string
+	Tags        []string
 	ExternalURL string
 	PublishedAt time.Time
 	UploadedBy  string
@@ -129,9 +131,11 @@ func (s *DocumentService) Import(ctx context.Context, reader io.Reader, metadata
 			return DocumentDetails{}, ErrInvalid
 		}
 	}
-	if metadata.Kind != "rules" && metadata.Kind != "roadmap" && metadata.Kind != "reference" {
-		return DocumentDetails{}, ErrInvalid
+	tags, err := normalizeDocumentTags(metadata.Tags)
+	if err != nil {
+		return DocumentDetails{}, err
 	}
+	metadata.Tags = tags
 	if metadata.PublishedAt.IsZero() || !identifier.IsValid(metadata.UploadedBy, identifier.Entity) {
 		return DocumentDetails{}, ErrInvalid
 	}
@@ -209,18 +213,18 @@ func (s *DocumentService) Import(ctx context.Context, reader io.Reader, metadata
 			return err
 		}
 		id := identifier.New(identifier.Document)
-		sourceMetadata, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "publisher": metadata.Publisher, "version": metadata.Version, "kind": metadata.Kind})
+		sourceMetadata, _ := json.Marshal(map[string]any{"document_id": id, "sha256": hash, "publisher": metadata.Publisher, "version": metadata.Version, "tags": metadata.Tags})
 		sources := NewSourceService(tx)
 		source, err := sources.CreateSource(ctx, CreateSourceInput{Kind: "pdf_document", ExternalID: hash, Name: metadata.Title, Metadata: sourceMetadata})
 		if err != nil {
 			return err
 		}
-		document := model.Document{ID: id, SHA256: hash, SourceID: source.ID, Title: metadata.Title, Filename: filepath.Base(metadata.Filename), Publisher: metadata.Publisher, Version: metadata.Version, Kind: metadata.Kind, ExternalURL: metadata.ExternalURL, PublishedAt: &metadata.PublishedAt, UploadedBy: metadata.UploadedBy, PageCount: len(pages), SizeBytes: int64(len(data))}
+		document := model.Document{ID: id, SHA256: hash, SourceID: source.ID, Title: metadata.Title, Filename: filepath.Base(metadata.Filename), Publisher: metadata.Publisher, Version: metadata.Version, Tags: datatypes.NewJSONSlice(metadata.Tags), ExternalURL: metadata.ExternalURL, PublishedAt: &metadata.PublishedAt, UploadedBy: metadata.UploadedBy, PageCount: len(pages), SizeBytes: int64(len(data))}
 		if err := tx.Create(&document).Error; err != nil {
 			return err
 		}
 		for index, content := range pages {
-			pageMetadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": index + 1, "document_kind": metadata.Kind, "publisher": metadata.Publisher, "version": metadata.Version, "sha256": hash})
+			pageMetadata, _ := json.Marshal(map[string]any{"document_id": id, "page_number": index + 1, "document_tags": metadata.Tags, "publisher": metadata.Publisher, "version": metadata.Version, "sha256": hash})
 			record, err := sources.IngestSourceRecord(ctx, source.ID, IngestSourceRecordInput{ExternalID: "page:" + strconv.Itoa(index+1), ExternalVersion: hash, RecordType: "pdf_page", Content: content, Metadata: pageMetadata, ExternalURL: metadata.ExternalURL, OccurredAt: metadata.PublishedAt, EvidenceType: "quoted_source", CaptureMethod: "document_upload"})
 			if err != nil {
 				return err
@@ -290,5 +294,5 @@ func (s *DocumentService) File(ctx context.Context, id string) (string, string, 
 }
 
 func documentMetadataMatches(document model.Document, metadata DocumentMetadata) bool {
-	return document.Title == metadata.Title && document.Publisher == metadata.Publisher && document.Version == metadata.Version && document.Kind == metadata.Kind && document.PublishedAt != nil && document.PublishedAt.Equal(metadata.PublishedAt) && document.ExternalURL == metadata.ExternalURL
+	return document.Title == metadata.Title && document.Publisher == metadata.Publisher && document.Version == metadata.Version && slices.Equal(document.Tags, metadata.Tags) && document.PublishedAt != nil && document.PublishedAt.Equal(metadata.PublishedAt) && document.ExternalURL == metadata.ExternalURL
 }

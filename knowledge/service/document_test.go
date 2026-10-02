@@ -26,7 +26,7 @@ func (e *fixtureExtractor) Extract(context.Context, string) ([]string, error) {
 	return e.pages, e.err
 }
 func documentMetadata() DocumentMetadata {
-	return DocumentMetadata{Title: "Test official rules", Filename: "rules.pdf", Publisher: "Test publisher", Version: "1.0", Kind: "rules", PublishedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), UploadedBy: identifier.New(identifier.Entity)}
+	return DocumentMetadata{Title: "Test official rules", Filename: "rules.pdf", Publisher: "Test publisher", Version: "1.0", Tags: []string{"formula sae", "braking"}, PublishedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), UploadedBy: identifier.New(identifier.Entity)}
 }
 func TestDocumentImportPreservesEvidenceAndDeduplicates(t *testing.T) {
 	db, _, _, _ := indexFixture(t)

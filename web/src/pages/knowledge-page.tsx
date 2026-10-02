@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
 import { ProgressBar } from "@/components/progress-bar"
+import { DocumentTags } from "@/components/document-tags"
 import {
   importDocument,
   listDocuments,
@@ -310,7 +311,7 @@ export function KnowledgePage() {
               to={`/knowledge/documents/${document.document_id}`}
             >
               <div>
-                <span className="document-type">{document.kind}</span>
+                <DocumentTags tags={document.tags} />
                 <ArrowRight size={16} />
               </div>
               <FileText size={24} />

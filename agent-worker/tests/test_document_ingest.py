@@ -87,7 +87,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         details = {
             "document": {
                 "document_id": document_id, "title": "Official rules", "publisher": "SAE", "version": "1",
-                "kind": "rules", "published_at": "2026-09-01", "status": "reading",
+                "tags": ["formula sae", "braking"], "published_at": "2026-09-01", "status": "reading",
             },
             "pages": [{"page_number": i + 1, "source_record_id": source} for i, source in enumerate(sources)],
             "chunks": [{"number": i + 1, "completed_at": "saved" if i == 0 and first_completed else None}
@@ -132,7 +132,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
                 if request.output_format.id == "document_metadata_v1":
                     return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
                         "title": "Formula SAE Rules", "publisher": "SAE", "version": "1",
-                        "kind": "rules", "published_at": "", "external_url": "",
+                        "tags": ["formula sae", "braking"], "published_at": "", "external_url": "",
                         "source_record_ids": body["actual_page_ids"][:1],
                         "warnings": ["Publication date is ambiguous."],
                     })))
@@ -180,6 +180,8 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(curator_tasks[0].context["document"]["title"], "Formula SAE Rules")
         self.assertEqual(requests[-1].output_format.id, "document_metadata_v1")
         self.assertEqual(details["document"]["published_at"], "")
+        self.assertEqual(details["document"]["tags"], ["formula sae", "braking"])
+        self.assertEqual(curator_tasks[0].context["document"]["tags"], ["formula sae", "braking"])
         self.assertTrue(all(call[2]["revision"] == i for i, call in enumerate(
             [call for call in calls if call[0] == "POST" and "/chunks/" in call[1]])))
 
@@ -206,20 +208,33 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         agent, task, details, calls, requests, curator_tasks = self.fixture(first_completed=True)
         details["document"]["extracted_metadata"] = {"title": "Identified title", "warnings": []}
         details["document"]["title"] = "User corrected title"
+        details["document"]["tags"] = ["team reference"]
         with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
             result = await agent.run(task)
         self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
         self.assertEqual(len(requests), 1)
         self.assertFalse(any(path.endswith("/metadata") for _, path, _ in calls))
         self.assertEqual(curator_tasks[0].context["document"]["title"], "User corrected title")
+        self.assertEqual(curator_tasks[0].context["document"]["tags"], ["team reference"])
 
     def test_metadata_validation_accepts_unknowns_and_rejects_invented_date_formats(self):
-        metadata = {"title": "", "publisher": "", "version": "", "kind": "", "published_at": "",
+        metadata = {"title": "", "publisher": "", "version": "", "tags": [], "published_at": "",
                     "external_url": "", "source_record_ids": [], "warnings": ["Metadata is not established."]}
         ExtractedDocumentMetadata.model_validate(metadata)
         for value in ["2026-02-30", "2026-9-1", "unknown"]:
             with self.assertRaises(ValidationError):
                 ExtractedDocumentMetadata.model_validate({**metadata, "published_at": value})
+
+    def test_metadata_tags_are_free_form_bounded_and_grounded(self):
+        metadata = {"title": "", "publisher": "", "version": "", "tags": [], "published_at": "",
+                    "external_url": "", "source_record_ids": [new_ulid("sourcerecord")], "warnings": []}
+        tagged = ExtractedDocumentMetadata.model_validate({**metadata, "tags": [" Driverless ", "AUTONOMY", "driverless"]})
+        self.assertEqual(tagged.tags, ("driverless", "autonomy"))
+        for tags in [[""], ["  "], ["two\nlines"], ["nul\x00"], ["é" * 33], [str(i) for i in range(9)]]:
+            with self.assertRaises(ValidationError):
+                ExtractedDocumentMetadata.model_validate({**metadata, "tags": tags})
+        with self.assertRaises(ValidationError):
+            ExtractedDocumentMetadata.model_validate({**metadata, "tags": ["autonomy"], "source_record_ids": []})
 
     async def test_completed_document_does_not_repeat_model_or_curation(self):
         agent, task, details, _, requests, curator_tasks = self.fixture(first_completed=True)

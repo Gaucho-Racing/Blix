@@ -26,6 +26,7 @@ import { errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
 import { StatusBadge } from "@/components/status-badge"
 import { ThemedSelect } from "@/components/themed-select"
+import { DocumentTags } from "@/components/document-tags"
 
 export function DocumentDetailsPage() {
   const { documentID = "" } = useParams()
@@ -301,11 +302,10 @@ function DocumentHeader({ details }: { details: DocumentDetails }) {
     <>
       <header className="workspace-toolbar">
         <div>
-          <span className="workspace-kicker">
-            TEAM DOCUMENT · {document.kind.toUpperCase()}
-          </span>
+          <span className="workspace-kicker">TEAM DOCUMENT</span>
           <h1>{document.title}</h1>
           <p>{document.filename}</p>
+          <DocumentTags tags={document.tags} />
         </div>
         <button
           className="secondary-button"

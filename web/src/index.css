@@ -730,7 +730,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-card { padding: 24px; display: block; transition: border-color .15s; }
 .document-card:hover { border-color: #d9a2c7; }
 .document-card > div { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; color: #bca3b8; }
-.document-type { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; background: #f8edf5; color: #a04b84; padding: 4px 8px; border-radius: 5px; }
+.document-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.document-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 6px; color: var(--pink-strong); background: var(--pink-soft); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.document-card > div { gap: 12px; align-items: flex-start; }
+.document-card > div > svg { flex-shrink: 0; margin-left: auto; }
+.document-page > .workspace-toolbar .document-tags { margin-top: 12px; }
 .document-card > svg { color: #9a7592; }
 .document-card h3 { font-size: 15px; line-height: 1.5; margin: 12px 0 8px; }
 .document-card p { font-size: 12px; color: #88778a; }
@@ -841,3 +845,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .themed-select-option[data-state="checked"] { color: var(--pink-strong); font-weight: 600; }
 .themed-select-check { position: absolute; right: 9px; display: flex; color: var(--pink); }
 .themed-select-scroll { display: flex; align-items: center; justify-content: center; height: 26px; color: var(--muted); background: var(--surface-raised); }
+
+.document-metadata-tags { grid-column: 1 / -1; }
+.document-tag-editor { display: grid; gap: 10px; margin: 20px 0 12px; }
+.document-tag-editor > label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.document-tag-add { display: flex; align-items: stretch; gap: 8px; width: min(400px, 100%); }
+.document-tag-add input { min-width: 0; flex: 1; }
+.document-tag-add button { flex-shrink: 0; }
+.document-tag button { display: inline-flex; align-items: center; padding: 2px; border: 0; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; }
+.document-tag button:hover { color: var(--text); background: rgba(210, 10, 140, .08); }

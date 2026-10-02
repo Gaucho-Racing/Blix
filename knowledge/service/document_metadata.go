@@ -19,7 +19,7 @@ type ExtractedDocumentMetadata struct {
 	Title           string   `json:"title"`
 	Publisher       string   `json:"publisher"`
 	Version         string   `json:"version"`
-	Kind            string   `json:"kind"`
+	Tags            []string `json:"tags"`
 	PublishedAt     string   `json:"published_at"`
 	ExternalURL     string   `json:"external_url"`
 	SourceRecordIDs []string `json:"source_record_ids"`
@@ -27,13 +27,38 @@ type ExtractedDocumentMetadata struct {
 }
 
 type DocumentMetadataPatch struct {
-	Revision    uint64  `json:"revision"`
-	Title       *string `json:"title"`
-	Publisher   *string `json:"publisher"`
-	Version     *string `json:"version"`
-	Kind        *string `json:"kind"`
-	PublishedAt *string `json:"published_at"`
-	ExternalURL *string `json:"external_url"`
+	Revision    uint64    `json:"revision"`
+	Title       *string   `json:"title"`
+	Publisher   *string   `json:"publisher"`
+	Version     *string   `json:"version"`
+	Tags        *[]string `json:"tags"`
+	PublishedAt *string   `json:"published_at"`
+	ExternalURL *string   `json:"external_url"`
+}
+
+const maxDocumentTags = 8
+const maxDocumentTagBytes = 64
+
+func normalizeDocumentTags(tags []string) ([]string, error) {
+	if len(tags) > maxDocumentTags {
+		return nil, fmt.Errorf("%w: use at most %d document tags", ErrInvalid, maxDocumentTags)
+	}
+	normalized := make([]string, 0, len(tags))
+	seen := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		if !utf8.ValidString(tag) || strings.ContainsAny(tag, "\x00\r\n") {
+			return nil, fmt.Errorf("%w: tags must use valid single-line text", ErrInvalid)
+		}
+		tag = strings.ToLower(strings.Join(strings.Fields(tag), " "))
+		if tag == "" || len(tag) > maxDocumentTagBytes {
+			return nil, fmt.Errorf("%w: tags must contain 1–%d UTF-8 bytes", ErrInvalid, maxDocumentTagBytes)
+		}
+		if !seen[tag] {
+			normalized = append(normalized, tag)
+			seen[tag] = true
+		}
+	}
+	return normalized, nil
 }
 
 func documentMetadataDate(value string) (*time.Time, error) {
@@ -56,10 +81,6 @@ func validateDocumentMetadataValue(field, value string) error {
 		return ErrInvalid
 	}
 	switch field {
-	case "kind":
-		if value != "" && value != "rules" && value != "roadmap" && value != "reference" {
-			return ErrInvalid
-		}
 	case "external_url":
 		if value != "" {
 			parsed, err := url.ParseRequestURI(value)
@@ -75,7 +96,12 @@ func validateDocumentMetadataValue(field, value string) error {
 }
 
 func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, e DocumentExecution, metadata ExtractedDocumentMetadata) (DocumentDetails, error) {
-	values := map[string]string{"title": metadata.Title, "publisher": metadata.Publisher, "version": metadata.Version, "kind": metadata.Kind, "published_at": metadata.PublishedAt, "external_url": metadata.ExternalURL}
+	tags, err := normalizeDocumentTags(metadata.Tags)
+	if err != nil {
+		return DocumentDetails{}, err
+	}
+	metadata.Tags = tags
+	values := map[string]string{"title": metadata.Title, "publisher": metadata.Publisher, "version": metadata.Version, "published_at": metadata.PublishedAt, "external_url": metadata.ExternalURL}
 	for field, value := range values {
 		if err := validateDocumentMetadataValue(field, value); err != nil {
 			return DocumentDetails{}, err
@@ -89,7 +115,7 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 			return DocumentDetails{}, ErrInvalid
 		}
 	}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
 			return err
@@ -123,6 +149,9 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 			seen[sourceID] = true
 		}
 		if len(seen) == 0 {
+			if len(tags) > 0 {
+				return fmt.Errorf("%w: extracted tags must cite original evidence", ErrInvalid)
+			}
 			for _, value := range values {
 				if value != "" {
 					return fmt.Errorf("%w: extracted metadata must cite original evidence", ErrInvalid)
@@ -140,6 +169,9 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 			return err
 		}
 		updates := map[string]any{"extracted_metadata": datatypes.JSON(data), "metadata_revision": doc.MetadataRevision + 1}
+		if !overrides["tags"] {
+			updates["tags"] = datatypes.NewJSONSlice(tags)
+		}
 		for field, value := range values {
 			if overrides[field] {
 				continue
@@ -147,7 +179,7 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 			if field == "published_at" {
 				date, _ := documentMetadataDate(value)
 				updates[field] = date
-			} else if (field != "title" && field != "kind") || value != "" {
+			} else if field != "title" || value != "" {
 				updates[field] = value
 			}
 		}
@@ -160,7 +192,7 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 }
 
 func (s *DocumentService) UpdateMetadata(ctx context.Context, id, owner string, patch DocumentMetadataPatch) (DocumentDetails, error) {
-	values := map[string]*string{"title": patch.Title, "publisher": patch.Publisher, "version": patch.Version, "kind": patch.Kind, "published_at": patch.PublishedAt, "external_url": patch.ExternalURL}
+	values := map[string]*string{"title": patch.Title, "publisher": patch.Publisher, "version": patch.Version, "published_at": patch.PublishedAt, "external_url": patch.ExternalURL}
 	updates := map[string]any{}
 	for field, value := range values {
 		if value == nil {
@@ -170,7 +202,7 @@ func (s *DocumentService) UpdateMetadata(ctx context.Context, id, owner string, 
 		if err := validateDocumentMetadataValue(field, normalized); err != nil {
 			return DocumentDetails{}, err
 		}
-		if (field == "title" || field == "kind") && normalized == "" {
+		if field == "title" && normalized == "" {
 			return DocumentDetails{}, ErrInvalid
 		}
 		if field == "published_at" {
@@ -179,6 +211,13 @@ func (s *DocumentService) UpdateMetadata(ctx context.Context, id, owner string, 
 		} else {
 			updates[field] = normalized
 		}
+	}
+	if patch.Tags != nil {
+		tags, err := normalizeDocumentTags(*patch.Tags)
+		if err != nil {
+			return DocumentDetails{}, err
+		}
+		updates["tags"] = datatypes.NewJSONSlice(tags)
 	}
 	if len(updates) == 0 {
 		return DocumentDetails{}, ErrInvalid

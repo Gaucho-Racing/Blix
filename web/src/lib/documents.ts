@@ -29,7 +29,7 @@ export interface TeamDocument {
   filename: string
   publisher: string
   version: string
-  kind: "rules" | "roadmap" | "reference"
+  tags: string[]
   published_at: string | null
   extracted_metadata: ExtractedDocumentMetadata | null
   metadata_overrides: Record<string, boolean> | null
@@ -43,7 +43,7 @@ export interface ExtractedDocumentMetadata {
   title: string
   publisher: string
   version: string
-  kind: "rules" | "roadmap" | "reference" | ""
+  tags: string[]
   published_at: string
   external_url: string
   source_record_ids: string[]
@@ -53,7 +53,7 @@ export interface DocumentMetadataFields {
   title: string
   publisher: string
   version: string
-  kind: TeamDocument["kind"]
+  tags: string[]
   published_at: string
   external_url: string
 }

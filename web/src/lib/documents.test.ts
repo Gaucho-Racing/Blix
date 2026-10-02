@@ -81,6 +81,7 @@ describe("document upload handoff", () => {
     await updateDocumentMetadata("document_test", 2, {
       published_at: "",
       version: "Corrected edition",
+      tags: [],
     })
     expect(api.patch).toHaveBeenCalledWith(
       "/knowledge/v1/documents/document_test/metadata",
@@ -88,6 +89,7 @@ describe("document upload handoff", () => {
         revision: 2,
         published_at: "",
         version: "Corrected edition",
+        tags: [],
       },
     )
   })

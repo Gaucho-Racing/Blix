@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,12 +112,13 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	automatic := ExtractedDocumentMetadata{Title: "Official braking rules", Publisher: "SAE International", Version: "1.0", Kind: "rules", PublishedAt: "", SourceRecordIDs: []string{prepared.Pages[0].SourceRecordID}, Warnings: []string{"Publication date is not established."}}
+	automatic := ExtractedDocumentMetadata{Title: "Official braking rules", Publisher: "SAE International", Version: "1.0", Tags: []string{"formula sae", "braking"}, PublishedAt: "", SourceRecordIDs: []string{prepared.Pages[0].SourceRecordID}, Warnings: []string{"Publication date is not established."}}
 	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); !errors.Is(err, ErrConflict) {
 		t.Fatalf("metadata was accepted before complete reading: %v", err)
 	}
 	manualTitle := "Corrected document title"
-	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrConflict) {
+	manualTags := []string{"Team  Reference", "BRAKING", "braking"}
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("editing while processing was accepted: %v", err)
 	}
 	if len(prepared.Chunks) < 2 || len(prepared.Pages) != 3 || extractor.calls != 1 {
@@ -167,13 +169,13 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil || cancelled.Document.Status != "cancelled" {
 		t.Fatalf("cancel status: %+v %v", cancelled, err)
 	}
-	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrForbidden) {
+	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign metadata editor accepted: %v", err)
 	}
-	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); err != nil {
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrConflict) {
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale metadata revision accepted: %v", err)
 	}
 	retry, err := service.Control(ctx, docID, caller.EntityID, "retry")
@@ -225,6 +227,13 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	identified, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(identified.Document.Tags, []string{"team reference", "braking"}) {
+		t.Fatalf("extraction overwrote the user's tags: %v", identified.Document.Tags)
+	}
+	var originalMetadata ExtractedDocumentMetadata
+	if err := json.Unmarshal(identified.Document.ExtractedMetadata, &originalMetadata); err != nil || !slices.Equal(originalMetadata.Tags, automatic.Tags) {
+		t.Fatalf("original suggested tags were lost: %+v %v", originalMetadata, err)
 	}
 	if identified.Document.Title != manualTitle || identified.Document.Publisher != automatic.Publisher || identified.Document.PublishedAt != nil || identified.Document.MetadataRevision != 2 {
 		t.Fatalf("extraction must preserve user overrides and unknown dates: %+v", identified.Document)
