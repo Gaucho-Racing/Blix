@@ -11,6 +11,7 @@ const steps: { name: DocumentStage["name"]; label: string }[] = [
   { name: "uploading", label: "Upload document" },
   { name: "extracting", label: "Extract document" },
   { name: "indexing", label: "Make searchable" },
+  { name: "analyzing_visuals", label: "Extract visual evidence" },
   { name: "identifying_metadata", label: "Identify document details" },
   { name: "reading", label: "Read document" },
   { name: "reconciling", label: "Draft wiki updates" },

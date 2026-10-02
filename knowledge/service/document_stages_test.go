@@ -116,12 +116,12 @@ func TestStoppingConcurrentDocumentStagesPreservesCompletedWork(t *testing.T) {
 	setDocumentStage(&doc, "reading", "running")
 	setDocumentStage(&doc, "identifying_metadata", "running")
 	stopDocumentStage(&doc, "cancelled")
-	if doc.Stages[3].Status != "cancelled" || doc.Stages[4].Status != "cancelled" || !documentStageComplete(doc, "indexing") || doc.Stages[5].Status != "waiting" {
+	if doc.Stages[5].Status != "cancelled" || doc.Stages[4].Status != "cancelled" || !documentStageComplete(doc, "indexing") || doc.Stages[6].Status != "waiting" {
 		t.Fatalf("concurrent stages were not stopped correctly: %+v", doc.Stages)
 	}
 	doc.Generation++
 	resetUnfinishedDocumentStages(&doc)
-	if doc.Stages[3].Status != "waiting" || doc.Stages[4].Status != "waiting" || !documentStageComplete(doc, "indexing") {
+	if doc.Stages[5].Status != "waiting" || doc.Stages[4].Status != "waiting" || !documentStageComplete(doc, "indexing") {
 		t.Fatalf("retry lost completed work: %+v", doc.Stages)
 	}
 }

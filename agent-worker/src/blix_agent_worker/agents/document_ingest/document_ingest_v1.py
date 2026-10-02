@@ -9,6 +9,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
+from blix_agent_worker.agents.document_ingest.visual_extraction import DocumentVisualExtractor
 from blix_agent_worker.agents.knowledge_curator import KnowledgeCuratorV1Agent
 from blix_agent_worker.clients.knowledge import KnowledgeClient, KnowledgeClientError
 from blix_agent_worker.llm import LanguageModel
@@ -41,22 +42,7 @@ class DocumentIngestV1Output(ContractModel):
     warnings: tuple[str, ...]
 
 
-class VisualFinding(ContractModel):
-    page: Annotated[int, Field(ge=1, le=500)]
-    description: Annotated[str, Field(min_length=1, max_length=8000)]
-    section_ids: Annotated[tuple[str, ...], Field(max_length=20)]
-
-    @model_validator(mode="after")
-    def validate_description(self) -> Self:
-        if len(self.description.encode()) > 8000 or "\x00" in self.description:
-            raise ValueError("visual descriptions must fit their UTF-8 budget")
-        if any(not re.fullmatch(r"[A-Z]{1,4}\.\d+(?:\.\d+)*", section) for section in self.section_ids):
-            raise ValueError("section IDs must be exact rule identifiers")
-        return self
-
-
 class ChunkReading(ContractModel):
-    visual_findings: Annotated[tuple[VisualFinding, ...], Field(max_length=4)]
     findings: Annotated[str, Field(min_length=1, max_length=16000)]
     notes: Annotated[str, Field(min_length=1, max_length=32000)]
     source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=4)]
@@ -137,12 +123,14 @@ class DocumentIngestV1Agent:
         client: KnowledgeClient,
         model: LanguageModel,
         curator: KnowledgeCuratorV1Agent,
+        visual_extractor: DocumentVisualExtractor | None = None,
         execution: dict[str, str],
         on_response: Callable[[int, ModelResponse], Awaitable[None]],
     ) -> None:
         self.client = client
         self.model = model
         self.curator = curator
+        self.visual_extractor = visual_extractor
         self.execution = execution
         self.on_response = on_response
 
@@ -171,6 +159,14 @@ class DocumentIngestV1Agent:
                 metadata_task = asyncio.create_task(self.identify_metadata(task, details, base_url, path, ownership))
             try:
                 if state is None:
+                    pending_images = any(page.get("image_sha256") and not page.get("visual_analyzed_at")
+                                         for page in details["pages"])
+                    if pending_images:
+                        if self.visual_extractor is None:
+                            raise RuntimeError("Document visual extraction is not configured.")
+                        await self.visual_extractor.extract(task, details, base_url, path, ownership)
+                        details = await self.client.request(base_url, "GET", path,
+                            params={"run_id": task.run_id, "session_id": task.session_id})
                     details = await self.read_document(task, details, base_url, path, ownership)
                 if metadata_task is not None:
                     await metadata_task
@@ -242,18 +238,18 @@ class DocumentIngestV1Agent:
     ) -> tuple[ChunkReading, ModelResponse]:
         document = details["document"]
         source_ids = {item["source_record_id"] for item in evidence["evidence"]}
+        visual_ids = {item["source_record_id"] for item in evidence.get("visual_evidence", [])}
         prompt = json.dumps({
             "objective": task.objective,
             "document": {name: document[name] for name in ("title", "publisher", "version", "tags", "published_at")},
             "chunk": {name: evidence["chunk"][name] for name in ("number", "first_page", "last_page")},
             "evidence": evidence["evidence"],
+            "visual_evidence": evidence.get("visual_evidence", []),
             "previous_notes": (details.get("notes") or {}).get("notes", ""),
         }, ensure_ascii=False)
-        images = tuple(DocumentImageReference.model_validate(image) for image in evidence.get("images", []))
         correction = ""
         for attempt in range(3):
             model_request = ModelRequest(
-                images=images,
                 sequence=evidence["chunk"]["number"] * 3 + attempt,
                 messages=(
                     ModelMessage(role=ModelMessageRole.SYSTEM, content=(
@@ -267,19 +263,14 @@ class DocumentIngestV1Agent:
                         "edition, useful topic tags, exact revision dates and printed official PDF URLs) with citations "
                         "in the notebook, including conflicting dates. Upload metadata is provisional. "
                         "Do not turn future roadmap guidance into current rules, "
-                        "or source requirements into claims about the team's car. Inspect attached full-page images "
-                        "alongside the page text. For pages with diagrams, graphs, tables or meaningful pictures, "
-                        "save one visual_findings entry per page with a concise, searchable description and exact "
-                        "section_ids established by that page. Describe labels, boundaries, dimensions, units, "
-                        "legends, views and what the figure illustrates; associate each diagram with its own "
-                        "nearby heading, rule and exceptions. Do not mix similar figures from different sections. "
-                        "Retain numeric table data and row/column relationships when readable. "
-                        "Visual descriptions are agent interpretations, not direct quotations. Preserve uncertainty "
-                        "for small labels or ambiguous geometry; do not infer measurements from drawn proportions. "
-                        "Use an empty visual_findings list for text-only pages or if no page images are attached. "
-                        "Do not claim inspecting an image that was not attached. "
+                        "or source requirements into claims about the team's car. The separate visual extraction "
+                        "pass has already inspected the page images. Incorporate visual_evidence as cited agent "
+                        "interpretations associated with their original pages and sections; preserve uncertainty. "
+                        "Cite the original page source alongside each visual interpretation source. "
+                        "Do not invent visual details absent from that evidence or infer dimensions from proportions. "
                         "Keep findings under 16000 UTF-8 bytes and notes under 32000 UTF-8 bytes. "
-                        "source_record_ids must identify only this chunk's actual original evidence."
+                        "source_record_ids must identify only this chunk's actual original evidence, and every "
+                        "listed source must be cited in findings."
                     )),
                     ModelMessage(role=ModelMessageRole.USER, content=prompt + correction),
                 ),
@@ -292,21 +283,8 @@ class DocumentIngestV1Agent:
                 if not set(reading.source_record_ids).issubset(source_ids):
                     raise ValueError("reported source IDs must belong to this chunk")
                 referenced = set(re.findall(r"sourcerecord_[0-9a-z]{26}", reading.findings))
-                if not referenced.issubset(source_ids):
+                if not referenced.issubset(source_ids | visual_ids):
                     raise ValueError("chunk findings may cite only this chunk's evidence; revise prior claims in notes")
-                image_pages = {image.page for image in images}
-                if len({finding.page for finding in reading.visual_findings}) != len(reading.visual_findings):
-                    raise ValueError("visual findings must use at most one entry per inspected page")
-                if any(finding.page not in image_pages for finding in reading.visual_findings):
-                    raise ValueError("visual findings require an attached original page image")
-                page_sources = {item["page"]: item["source_record_id"] for item in evidence["evidence"]}
-                for finding in reading.visual_findings:
-                    if any(source != page_sources[finding.page] for source in
-                           re.findall(r"sourcerecord_[0-9a-z]{26}", finding.description)):
-                        raise ValueError("visual descriptions may cite only their own original page evidence")
-                all_sources = {page["source_record_id"] for page in details["pages"]}
-                if not set(re.findall(r"sourcerecord_[0-9a-z]{26}", reading.notes)).issubset(all_sources):
-                    raise ValueError("the notebook cannot invent source references")
                 return reading, response
             except (ValidationError, ValueError) as error:
                 correction = f"\nYour previous output failed validation: {error}. Return a corrected result."

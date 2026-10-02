@@ -211,3 +211,19 @@ func (h *Handler) ReviewDocument(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) SaveDocumentVisualAnalysis(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
+	var request service.SaveDocumentVisualAnalysis
+	number, err := strconv.Atoi(c.Param("number"))
+	if err != nil || c.ShouldBindJSON(&request) != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.documents.SaveVisualAnalysis(c.Request.Context(), c.Param("documentID"), number, request)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

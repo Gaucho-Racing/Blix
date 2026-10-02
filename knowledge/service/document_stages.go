@@ -4,19 +4,23 @@ import (
 	"time"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
-var documentStageNames = [...]string{"uploading", "extracting", "indexing", "reading", "identifying_metadata", "reconciling"}
+var documentStageNames = [...]string{"uploading", "extracting", "indexing", "analyzing_visuals", "identifying_metadata", "reading", "reconciling"}
 
 func initializeDocumentStages(doc *model.Document) {
-	if len(doc.Stages) > 0 {
-		return
-	}
-	doc.Stages = datatypes.NewJSONSlice(make([]model.DocumentStage, len(documentStageNames)))
-	for i, name := range documentStageNames {
-		doc.Stages[i] = model.DocumentStage{Name: name, Status: "waiting"}
+	for _, name := range documentStageNames {
+		found := false
+		for _, stage := range doc.Stages {
+			if stage.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			doc.Stages = append(doc.Stages, model.DocumentStage{Name: name, Status: "waiting"})
+		}
 	}
 }
 

@@ -146,6 +146,12 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
     auth.user?.entity_id === document.uploaded_by &&
     document.review_status !== "rejected"
   const completed = chunks.filter((chunk) => chunk.completed_at !== null)
+  const visual = document.status === "analyzing_visuals"
+  const visualPages = details.pages.filter((page) => page.image_sha256)
+  const visualCompleted = visualPages.filter((page) => page.visual_analyzed_at).length
+  const progressMax = visual ? visualPages.length : chunks.length
+  const progressValue = visual ? visualCompleted : completed.length
+  const progressLabel = visual ? "page images analyzed" : "reading chunks saved"
   const active = documentProcessing(document.status)
   const control = useMutation({
     mutationFn: (operation: "cancel" | "retry" | "complete") =>
@@ -207,13 +213,13 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
           {chunks.length > 0 && (
             <div className="document-progress">
               <ProgressBar
-                max={chunks.length}
-                value={completed.length}
-                label="Document reading progress"
-                valueText={`${completed.length} of ${chunks.length} reading chunks saved`}
+                max={progressMax}
+                value={progressValue}
+                label={visual ? "Visual extraction progress" : "Document reading progress"}
+                valueText={`${progressValue} of ${progressMax} ${progressLabel}`}
               />
               <span>
-                {completed.length} / {chunks.length} reading chunks saved ·{" "}
+                {progressValue} / {progressMax} {progressLabel} ·{" "}
                 {document.page_count} PDF pages
               </span>
             </div>
@@ -280,15 +286,17 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
       return "Blix is extracting page text and images, using OCR where needed."
     case "indexing":
       return "Blix is saving page evidence and making the document searchable."
+    case "analyzing_visuals":
+      return "Blix is analyzing page images and saving searchable visual evidence."
     case "reading":
       return chunks.length > 0 &&
         chunks.every((chunk) => chunk.completed_at !== null)
         ? document.extracted_metadata
           ? "Blix has finished reading and is preparing to draft wiki updates."
-          : "Blix has finished reading and is identifying the document details."
+          : "Blix is identifying the document details."
         : "Blix is reading the document and saving what it learns."
     case "identifying_metadata":
-      return "Blix has finished reading and is identifying the document details."
+      return "Blix is identifying the document details."
     case "reconciling":
       return "Blix is comparing its learnings with the wiki and preparing updates for review."
     case "ready":

@@ -38,7 +38,7 @@ func (e *imageFixtureExtractor) RecognizeText(context.Context, []byte) (string, 
 func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	db, _, _, _ := indexFixture(t)
 	ctx := context.Background()
-	renderer := &imageFixtureExtractor{fixtureExtractor: fixtureExtractor{pages: []string{""}}}
+	renderer := &imageFixtureExtractor{fixtureExtractor: fixtureExtractor{pages: []string{"", strings.Repeat("This page contains ordinary text. ", 10)}}}
 	service := NewDocumentService(db, t.TempDir(), renderer)
 	id, runID, sid := identifier.New(identifier.Document), identifier.New(identifier.Run), identifier.New(identifier.Session)
 	data := []byte("%PDF-test-" + id)
@@ -64,34 +64,58 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if renderer.rendered != 1 || renderer.recognized != 1 || !prepared.ReadyForQuestions {
+	if renderer.rendered != 2 || renderer.recognized != 1 || !prepared.ReadyForQuestions {
 		t.Fatalf("OCR not prepared: %+v", prepared)
 	}
 	page, err := service.Page(ctx, id, 1)
 	if err != nil || page.CaptureMethod != "document_ocr" || page.PageImage == nil || !strings.Contains(page.Content, "F.1.13") {
 		t.Fatalf("OCR provenance: %+v %v", page, err)
 	}
-	if _, err := service.Prepare(ctx, id, execution); err != nil || renderer.rendered != 1 || renderer.recognized != 1 {
+	if _, err := service.Prepare(ctx, id, execution); err != nil || renderer.rendered != 2 || renderer.recognized != 1 {
 		t.Fatalf("retry redid extraction: %v", err)
 	}
 	resumed, err := service.preparePageImages(ctx, prepared.Document, hash, "unused", []string{""}, execution)
-	if err != nil || resumed[0] != page.Content || renderer.rendered != 1 {
+	if err != nil || resumed[0] != page.Content || renderer.rendered != 2 {
 		t.Fatalf("image cache retry: %v", err)
 	}
-	reading := SaveDocumentChunk{DocumentExecution: execution, Findings: "Boundary per " + page.ID, Notes: "Rollover plane " + page.ID, SourceRecordIDs: []string{page.ID}, VisualFindings: []VisualFinding{{Page: 1, SectionIDs: []string{"F.1.13"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}}
-	saved, err := service.SaveChunk(ctx, id, 1, reading)
+	reading := SaveDocumentChunk{DocumentExecution: execution, Findings: "Boundary per " + page.ID, Notes: "Rollover plane " + page.ID, SourceRecordIDs: []string{page.ID}}
+	if _, err := service.SaveChunk(ctx, id, 1, reading); !errors.Is(err, ErrConflict) {
+		t.Fatalf("reading was saved before visual extraction: %v", err)
+	}
+	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}
+	wrongHash := visual
+	wrongHash.ImageSHA256 = strings.Repeat("0", 64)
+	if _, err := service.SaveVisualAnalysis(ctx, id, 1, wrongHash); !errors.Is(err, ErrConflict) {
+		t.Fatalf("visual analysis accepted a different page image: %v", err)
+	}
+	visualPage, err := service.SaveVisualAnalysis(ctx, id, 1, visual)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SaveChunk(ctx, id, 1, reading); err != nil {
-		t.Fatalf("replayed visual findings: %v", err)
+	if _, err := service.SaveVisualAnalysis(ctx, id, 1, visual); err != nil {
+		t.Fatalf("replayed visual analysis: %v", err)
 	}
-	altered := reading
-	altered.VisualFindings = []VisualFinding{{Page: 1, Description: "Changed interpretation."}}
-	if _, err := service.SaveChunk(ctx, id, 1, altered); !errors.Is(err, ErrConflict) {
+	altered := visual
+	altered.Finding = &VisualFinding{Page: 1, Description: "Changed interpretation."}
+	if _, err := service.SaveVisualAnalysis(ctx, id, 1, altered); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed replay accepted: %v", err)
 	}
-	visualID := saved.Pages[0].VisualSourceRecordID
+	if _, err := service.SaveChunk(ctx, id, 1, reading); !errors.Is(err, ErrConflict) {
+		t.Fatalf("reader started while another page still needed analysis: %v", err)
+	}
+	textOnly, err := service.SaveVisualAnalysis(ctx, id, 2, SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision"})
+	if err != nil || textOnly.VisualAnalyzedAt == nil || textOnly.VisualSourceRecordID != "" {
+		t.Fatalf("text-only analysis created visual evidence or did not complete: %+v %v", textOnly, err)
+	}
+	beforeReading, err := service.Get(ctx, id)
+	if err != nil || beforeReading.Notes != nil || beforeReading.Chunks[0].CompletedAt != nil || !documentStageComplete(beforeReading.Document, "analyzing_visuals") {
+		t.Fatalf("visual analysis was coupled to wiki reading: %+v %v", beforeReading, err)
+	}
+	chunk, err := service.ReadChunk(ctx, id, 1)
+	if err != nil || len(chunk["visual_evidence"].([]model.SourceRecord)) != 1 {
+		t.Fatalf("reader cannot consume extracted visuals: %+v %v", chunk, err)
+	}
+	visualID := visualPage.VisualSourceRecordID
 	record, err := NewSourceService(db).GetSourceRecord(ctx, visualID)
 	if err != nil || record.EvidenceType != "agent_summary" || record.CaptureMethod != "document_vision" || record.ParentExternalID != "page:1" {
 		t.Fatalf("visual provenance: %+v %v", record, err)
@@ -100,6 +124,9 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	hits, err := service.SearchSources(ctx, DocumentSearchOptions{Query: "dashed", Limit: 8}, scope)
 	if err != nil || len(hits.Results) != 1 || hits.Results[0].SourceRecordID != visualID || hits.Results[0].PDFPage != 1 || hits.Results[0].EvidenceType != "agent_summary" {
 		t.Fatalf("visual search: %+v %v", hits, err)
+	}
+	if _, err := service.SaveChunk(ctx, id, 1, reading); err != nil {
+		t.Fatal(err)
 	}
 	team := DocumentRetrievalScope{Team: true}
 	hits, err = service.SearchSources(ctx, DocumentSearchOptions{Query: "dashed", Limit: 8}, team)

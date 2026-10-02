@@ -109,7 +109,7 @@ class OpenAIResponsesModel:
 
     @classmethod
     def from_environment(cls, profile: str = "lead") -> Self:
-        prefixes = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR", "document_qa": "DOCUMENT_QA"}
+        prefixes = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR", "document_qa": "DOCUMENT_QA", "document_vision": "DOCUMENT_VISION"}
         if profile not in prefixes:
             raise ValueError(f"Unknown model profile: {profile!r}")
         prefix = prefixes[profile]

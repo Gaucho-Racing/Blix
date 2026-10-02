@@ -10,6 +10,7 @@ export interface DocumentStage {
     | "uploading"
     | "extracting"
     | "indexing"
+    | "analyzing_visuals"
     | "reading"
     | "identifying_metadata"
     | "reconciling"
@@ -35,6 +36,7 @@ export interface TeamDocument {
     | "queued"
     | "extracting"
     | "indexing"
+    | "analyzing_visuals"
     | "reading"
     | "identifying_metadata"
     | "reconciling"
@@ -101,6 +103,8 @@ export interface DocumentDetails {
     source_record_id: string
     visual_source_record_id?: string
     character_count: number
+    image_sha256?: string
+    visual_analyzed_at?: string | null
   }[]
 }
 export interface DocumentPage {
@@ -112,7 +116,7 @@ export interface DocumentPage {
   evidence_type: string
   capture_method: string
   content: string
-  metadata: { page_number: number }
+  metadata: { page_number: number; section_ids?: string[] }
   occurred_at: string
   ingested_at: string
 }
@@ -215,6 +219,7 @@ export const documentProcessing = (status: TeamDocument["status"]) =>
     "queued",
     "extracting",
     "indexing",
+    "analyzing_visuals",
     "reading",
     "identifying_metadata",
     "reconciling",
@@ -227,6 +232,7 @@ export const documentStatusLabel = (status: TeamDocument["status"]) =>
     queued: "Queued",
     extracting: "Extracting document",
     indexing: "Making document searchable",
+    analyzing_visuals: "Extracting visual evidence",
     reading: "Reading document",
     identifying_metadata: "Identifying document details",
     reconciling: "Drafting wiki changes",

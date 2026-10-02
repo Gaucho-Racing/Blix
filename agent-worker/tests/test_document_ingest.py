@@ -139,7 +139,6 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
                     })))
                 source = body["evidence"][0]["source_record_id"]
                 return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
-                    "visual_findings": [],
                     "findings": f"Verified requirement and exception {source}",
                     "notes": body["previous_notes"] + f"\nNew requirement {source}",
                     "source_record_ids": [source],
@@ -369,3 +368,44 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
         self.assertFalse(requests)
         self.assertFalse(curator_tasks)
+
+    async def test_reader_waits_for_visuals_and_receives_descriptions_without_images(self):
+        agent, task, details, calls, requests, curator_tasks = self.fixture()
+        visual_id = new_ulid("sourcerecord")
+        for page in details["pages"]:
+            page["image_sha256"] = "a" * 64
+        finished = False
+
+        class VisualExtractor:
+            async def extract(self, *args):
+                nonlocal finished
+                await asyncio.sleep(0)
+                for page in details["pages"]:
+                    page["visual_analyzed_at"] = "saved"
+                details["pages"][0]["visual_source_record_id"] = visual_id
+                finished = True
+
+        agent.visual_extractor = VisualExtractor()
+        original_request = agent.client.request
+        original_complete = agent.model.complete
+
+        async def request(url, method, path, **kwargs):
+            response = await original_request(url, method, path, **kwargs)
+            if method == "GET" and "/chunks/" in path:
+                response["images"] = [{"document_id": task.input["document_id"], "page": 1, "sha256": "a" * 64}]
+                response["visual_evidence"] = [{"source_record_id": visual_id, "content": "Labeled envelope diagram."}]
+            return response
+
+        async def complete(request):
+            if request.output_format.id == "document_chunk_reading_v1":
+                self.assertTrue(finished)
+                self.assertFalse(request.images)
+                self.assertIn(visual_id, request.messages[-1].content)
+            return await original_complete(request)
+
+        agent.client.request = request
+        agent.model.complete = complete
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await asyncio.wait_for(agent.run(task), 1)
+        self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
+        self.assertIn(visual_id, curator_tasks[0].input["source_record_ids"])

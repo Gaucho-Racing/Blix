@@ -6,69 +6,156 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
-func equalVisualFindings(left, right []byte) bool {
-	var a, b []VisualFinding
+type SaveDocumentVisualAnalysis struct {
+	DocumentExecution
+	ImageSHA256  string         `json:"image_sha256"`
+	Finding      *VisualFinding `json:"finding"`
+	Model        string         `json:"model"`
+	InputTokens  uint64         `json:"input_tokens"`
+	OutputTokens uint64         `json:"output_tokens"`
+}
+
+func equalVisualAnalysis(left, right []byte) bool {
+	var a, b *VisualFinding
 	if json.Unmarshal(left, &a) != nil || json.Unmarshal(right, &b) != nil {
 		return false
 	}
 	return reflect.DeepEqual(a, b)
 }
 
-func saveVisualFindings(ctx context.Context, tx *gorm.DB, doc model.Document, chunk model.DocumentChunk, findings []VisualFinding) error {
-	seen := map[int]bool{}
-	for _, finding := range findings {
-		if seen[finding.Page] || finding.Page < chunk.FirstPage || finding.Page > chunk.LastPage || strings.TrimSpace(finding.Description) == "" || len(finding.Description) > 8000 || !utf8.ValidString(finding.Description) || strings.ContainsRune(finding.Description, 0) || len(finding.SectionIDs) > 20 {
-			return ErrInvalid
+func (s *DocumentService) SaveVisualAnalysis(ctx context.Context, id string, number int, r SaveDocumentVisualAnalysis) (model.DocumentPage, error) {
+	var page model.DocumentPage
+	if number < 1 || number > 500 || strings.TrimSpace(r.Model) == "" || len(r.Model) > 128 || !utf8.ValidString(r.Model) || strings.ContainsAny(r.Model, "\x00\r\n") {
+		return page, ErrInvalid
+	}
+	data, err := json.Marshal(r.Finding)
+	if err != nil {
+		return page, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		doc, err := s.lockedExecution(ctx, tx, id, r.DocumentExecution)
+		if err != nil {
+			return err
 		}
-		seen[finding.Page] = true
-		for _, section := range finding.SectionIDs {
-			if section == "" || ruleIdentifier.FindString(section) != section {
-				return fmt.Errorf("%w: visual section IDs must be exact rule identifiers", ErrInvalid)
-			}
+		if !documentStageComplete(doc, "indexing") {
+			return ErrConflict
 		}
-		var asset model.DocumentPageImage
-		if err := tx.First(&asset, "document_id = ? AND number = ?", doc.ID, finding.Page).Error; err != nil {
+		if err := tx.First(&page, "document_id = ? AND number = ?", id, number).Error; err != nil {
 			return mapDatabaseError(err)
 		}
-		var page model.DocumentPage
-		if err := tx.First(&page, "document_id = ? AND number = ?", doc.ID, finding.Page).Error; err != nil {
+		var image model.DocumentPageImage
+		if err := tx.First(&image, "document_id = ? AND number = ?", id, number).Error; err != nil {
 			return mapDatabaseError(err)
 		}
-		for _, sourceID := range sourceRecordReferencePattern.FindAllString(finding.Description, -1) {
-			if sourceID != page.SourceRecordID {
-				return ErrInvalid
-			}
+		if image.SHA256 != r.ImageSHA256 || page.ImageSHA256 != r.ImageSHA256 {
+			return ErrConflict
 		}
-		content := fmt.Sprintf("PDF page %d visual interpretation. Sections: %s\n%s", finding.Page, strings.Join(finding.SectionIDs, ", "), finding.Description)
-		if page.VisualSourceRecordID != "" {
-			var previous model.SourceRecord
-			if err := tx.First(&previous, "id = ?", page.VisualSourceRecordID).Error; err != nil {
+		if page.VisualAnalyzedAt != nil {
+			if !equalVisualAnalysis(page.VisualAnalysis, data) || page.VisualModel != r.Model || page.VisualInputTokens != r.InputTokens || page.VisualOutputTokens != r.OutputTokens {
+				return ErrConflict
+			}
+			return nil
+		}
+		if r.Finding != nil {
+			if err := saveVisualFinding(ctx, tx, doc, &page, image, *r.Finding, r.Model); err != nil {
 				return err
 			}
-			content = previous.Content + "\n\n" + content
 		}
-		metadata, err := json.Marshal(map[string]any{"document_id": doc.ID, "page_number": finding.Page, "original_source_record_id": page.SourceRecordID, "page_image_sha256": asset.SHA256, "section_ids": finding.SectionIDs, "reading_chunk": chunk.Number})
-		if err != nil {
+		now := time.Now().UTC()
+		page.VisualAnalyzedAt = &now
+		page.VisualAnalysis = datatypes.JSON(data)
+		page.VisualModel = r.Model
+		page.VisualInputTokens, page.VisualOutputTokens = r.InputTokens, r.OutputTokens
+		if err := tx.Save(&page).Error; err != nil {
 			return err
 		}
-		record, err := NewSourceService(tx).ingestSourceRecord(ctx, doc.SourceID, IngestSourceRecordInput{
-			ExternalID: fmt.Sprintf("page:%d:visual", finding.Page), ExternalVersion: hashBytes([]byte(content)), ParentExternalID: fmt.Sprintf("page:%d", finding.Page), RecordType: "pdf_page_visual", Content: content, Metadata: metadata, OccurredAt: doc.CreatedAt, EvidenceType: "agent_summary", CaptureMethod: "document_vision", CaptureRunID: doc.RunID, CaptureSessionID: doc.SessionID,
-		}, false)
-		if err != nil {
-			return err
+		return advanceDocumentReading(tx, &doc)
+	})
+	return page, err
+}
+
+func saveVisualFinding(ctx context.Context, tx *gorm.DB, doc model.Document, page *model.DocumentPage, image model.DocumentPageImage, finding VisualFinding, modelName string) error {
+	if finding.Page != page.Number || strings.TrimSpace(finding.Description) == "" || len(finding.Description) > 8000 || !utf8.ValidString(finding.Description) || strings.ContainsRune(finding.Description, 0) || len(finding.SectionIDs) > 20 {
+		return ErrInvalid
+	}
+	seen := map[string]bool{}
+	for _, section := range finding.SectionIDs {
+		if section == "" || seen[section] || ruleIdentifier.FindString(section) != section {
+			return fmt.Errorf("%w: visual section IDs must be unique exact rule identifiers", ErrInvalid)
 		}
-		if err := indexSourceRecord(tx, record.Record); err != nil {
-			return err
-		}
-		if err := tx.Model(&page).Update("visual_source_record_id", record.Record.ID).Error; err != nil {
-			return err
+		seen[section] = true
+	}
+	for _, sourceID := range sourceRecordReferencePattern.FindAllString(finding.Description, -1) {
+		if sourceID != page.SourceRecordID {
+			return ErrInvalid
 		}
 	}
+	metadata, err := json.Marshal(map[string]any{"document_id": doc.ID, "page_number": finding.Page, "original_source_record_id": page.SourceRecordID, "page_image_sha256": image.SHA256, "section_ids": finding.SectionIDs, "model": modelName})
+	if err != nil {
+		return err
+	}
+	content := fmt.Sprintf("PDF page %d visual interpretation. Sections: %s\n%s", finding.Page, strings.Join(finding.SectionIDs, ", "), finding.Description)
+	record, err := NewSourceService(tx).ingestSourceRecord(ctx, doc.SourceID, IngestSourceRecordInput{
+		ExternalID: fmt.Sprintf("page:%d:visual", finding.Page), ExternalVersion: hashBytes([]byte(content)), ParentExternalID: fmt.Sprintf("page:%d", finding.Page), RecordType: "pdf_page_visual", Content: content, Metadata: metadata, OccurredAt: doc.CreatedAt, EvidenceType: "agent_summary", CaptureMethod: "document_vision", CaptureRunID: doc.RunID, CaptureSessionID: doc.SessionID,
+	}, false)
+	if err != nil {
+		return err
+	}
+	if err := indexSourceRecord(tx, record.Record); err != nil {
+		return err
+	}
+	page.VisualSourceRecordID = record.Record.ID
 	return nil
+}
+
+func advanceDocumentReading(tx *gorm.DB, doc *model.Document) error {
+	if len(doc.ExtractedMetadata) == 0 {
+		setDocumentStage(doc, "identifying_metadata", "running")
+	}
+	setDocumentStage(doc, "analyzing_visuals", "running")
+	var pending int64
+	if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND image_sha256 <> '' AND visual_analyzed_at IS NULL", doc.ID).Count(&pending).Error; err != nil {
+		return err
+	}
+	if pending > 0 {
+		return startDocumentStage(tx, doc, "analyzing_visuals")
+	}
+	setDocumentStage(doc, "analyzing_visuals", "completed")
+	var remaining int64
+	if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", doc.ID).Count(&remaining).Error; err != nil {
+		return err
+	}
+	if remaining > 0 {
+		return startDocumentStage(tx, doc, "reading")
+	}
+	setDocumentStage(doc, "reading", "completed")
+	if len(doc.ExtractedMetadata) == 0 {
+		return startDocumentStage(tx, doc, "identifying_metadata")
+	}
+	return saveDocumentProgress(tx, doc, map[string]any{})
+}
+
+func addChunkVisualSources(tx *gorm.DB, id string, first, last int, allowed map[string]bool) error {
+	var ids []string
+	if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND number BETWEEN ? AND ? AND visual_source_record_id <> ''", id, first, last).Pluck("visual_source_record_id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	return nil
+}
+
+func (s *DocumentService) chunkVisualEvidence(ctx context.Context, id string, first, last int) ([]model.SourceRecord, error) {
+	records := []model.SourceRecord{}
+	err := s.db.WithContext(ctx).Where("id IN (SELECT visual_source_record_id FROM knowledge_document_page WHERE document_id = ? AND number BETWEEN ? AND ?)", id, first, last).Order("external_id").Find(&records).Error
+	return records, err
 }

@@ -145,3 +145,11 @@ func (h *Handler) GetDocumentPageImage(c *gin.Context) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Data(http.StatusOK, "image/jpeg", data)
 }
+
+func (h *Handler) ReadAgentDocumentPage(c *gin.Context) {
+	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("run_id"), c.Query("session_id")); err != nil {
+		respondError(c, err)
+		return
+	}
+	h.GetDocumentPage(c)
+}

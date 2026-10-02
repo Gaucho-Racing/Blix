@@ -136,7 +136,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 	}
 	extractionCompleted := *prepared.Document.Stages[1].CompletedAt
-	if prepared.Document.Stages[3].Status != "running" || prepared.Document.Stages[4].Status != "running" {
+	if prepared.Document.Stages[5].Status != "running" || prepared.Document.Stages[4].Status != "running" {
 		t.Fatal("reading and metadata did not start concurrently")
 	}
 	invalidMetadata := automatic
@@ -201,7 +201,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if err != nil || cancelled.Document.Status != "cancelled" || cancelled.Document.ReviewStatus != model.DocumentReviewPending {
 		t.Fatalf("cancel status: %+v %v", cancelled, err)
 	}
-	if cancelled.Document.Stages[3].Status != "cancelled" || !documentStageComplete(cancelled.Document, "indexing") {
+	if cancelled.Document.Stages[5].Status != "cancelled" || !documentStageComplete(cancelled.Document, "indexing") {
 		t.Fatal("cancellation lost the completed stages or stopped the wrong stage")
 	}
 	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
@@ -232,7 +232,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if extractor.calls != 1 {
 		t.Fatal("retry repeated extraction")
 	}
-	if !resumed.Document.Stages[1].CompletedAt.Equal(extractionCompleted) || resumed.Document.Stages[3].Status != "running" || resumed.Document.Stages[3].Generation != 2 {
+	if !resumed.Document.Stages[1].CompletedAt.Equal(extractionCompleted) || resumed.Document.Stages[5].Status != "running" || resumed.Document.Stages[5].Generation != 2 {
 		t.Fatal("retry did not preserve extraction and resume reading")
 	}
 	for _, chunk := range resumed.Chunks[1:] {

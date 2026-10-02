@@ -82,7 +82,9 @@ func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 				}
 			})
 			ctx := context.Background()
-			if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reconciling", "review_status": model.DocumentReviewPending, "extracted_metadata": datatypes.JSON([]byte("{}"))}).Error; err != nil {
+			setDocumentStage(&doc.Document, "analyzing_visuals", "running")
+			setDocumentStage(&doc.Document, "analyzing_visuals", "completed")
+			if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reconciling", "stages": doc.Document.Stages, "review_status": model.DocumentReviewPending, "extracted_metadata": datatypes.JSON([]byte("{}"))}).Error; err != nil {
 				t.Fatal(err)
 			}
 			if tc.lowText {

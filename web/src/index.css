@@ -1015,3 +1015,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-source-visual { margin-bottom: 16px; font-size: 14px; }
 .document-source-visual summary { cursor: pointer; font-weight: 600; }
 .document-source-visual pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+
+.document-source-views { margin-bottom: 24px; }
+.document-visual-evidence { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.document-visual-evidence .document-page-image { margin-top: 0; }
+.document-visual-evidence pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 14px; line-height: 1.6; }
+.document-visual-sections { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.document-visual-sections span { padding: 5px 9px; color: var(--pink-strong); background: var(--pink-soft); border-radius: 7px; font-size: 14px; }
+@media (max-width: 1100px) { .document-visual-evidence { grid-template-columns: minmax(0, 1fr); } }

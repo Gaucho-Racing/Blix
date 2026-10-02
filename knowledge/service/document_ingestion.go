@@ -414,8 +414,10 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 		for i, content := range text {
 			pageMetadata := map[string]any{"document_id": id, "page_number": i + 1, "filename": doc.Filename, "metadata_status": "unidentified", "published_at": doc.PublishedAt, "sha256": hash}
 			method := "document_upload"
+			imageHash := ""
 			var image model.DocumentPageImage
 			if err := tx.First(&image, "document_id = ? AND number = ?", id, i+1).Error; err == nil {
+				imageHash = image.SHA256
 				pageMetadata["page_image_sha256"] = image.SHA256
 				pageMetadata["text_method"] = image.TextMethod
 				if image.TextMethod == "ocr" {
@@ -429,7 +431,7 @@ func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExec
 			if err != nil {
 				return err
 			}
-			pages = append(pages, model.DocumentPage{DocumentID: id, Number: i + 1, SourceRecordID: record.Record.ID, CharacterCount: utf8.RuneCountInString(content)})
+			pages = append(pages, model.DocumentPage{DocumentID: id, Number: i + 1, SourceRecordID: record.Record.ID, ImageSHA256: imageHash, CharacterCount: utf8.RuneCountInString(content)})
 		}
 		if err := tx.Create(&pages).Error; err != nil {
 			return err
@@ -479,23 +481,7 @@ func (s *DocumentService) prepareSearch(ctx context.Context, id string, e Docume
 			}
 			setDocumentStage(&doc, "indexing", "completed")
 		}
-		var remaining int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
-			return err
-		}
-		if len(doc.ExtractedMetadata) == 0 {
-			setDocumentStage(&doc, "identifying_metadata", "running")
-		}
-		if remaining > 0 {
-			setDocumentStage(&doc, "reading", "running")
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "reading", "error": ""})
-		}
-		setDocumentStage(&doc, "reading", "completed")
-		if len(doc.ExtractedMetadata) == 0 {
-			setDocumentStage(&doc, "identifying_metadata", "running")
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "identifying_metadata", "error": ""})
-		}
-		return saveDocumentProgress(tx, &doc, map[string]any{})
+		return advanceDocumentReading(tx, &doc)
 	})
 	if err != nil {
 		return DocumentDetails{}, err
@@ -515,7 +501,11 @@ func (s *DocumentService) ReadChunk(ctx context.Context, id string, number int) 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"chunk": chunk, "evidence": evidence, "images": images}, nil
+	visualEvidence, err := s.chunkVisualEvidence(ctx, id, chunk.FirstPage, chunk.LastPage)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"chunk": chunk, "evidence": evidence, "images": images, "visual_evidence": visualEvidence}, nil
 }
 
 type VisualFinding struct {
@@ -525,7 +515,6 @@ type VisualFinding struct {
 }
 
 type SaveDocumentChunk struct {
-	VisualFindings []VisualFinding `json:"visual_findings"`
 	DocumentExecution
 	Revision        uint64   `json:"revision"`
 	Findings        string   `json:"findings"`
@@ -539,20 +528,13 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 	if strings.TrimSpace(r.Findings) == "" || len(r.Findings) > 16000 || strings.TrimSpace(r.Notes) == "" || len(r.Notes) > 32000 || !utf8.ValidString(r.Findings+r.Notes) || strings.ContainsRune(r.Findings+r.Notes, 0) {
 		return DocumentDetails{}, ErrInvalid
 	}
-	if len(r.VisualFindings) > 4 {
-		return DocumentDetails{}, ErrInvalid
-	}
-	if r.VisualFindings == nil {
-		r.VisualFindings = []VisualFinding{}
-	}
-	visualData, err := json.Marshal(r.VisualFindings)
-	if err != nil {
-		return DocumentDetails{}, err
-	}
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, r.DocumentExecution)
 		if err != nil {
 			return err
+		}
+		if !documentStageComplete(doc, "analyzing_visuals") {
+			return ErrConflict
 		}
 		var chunk model.DocumentChunk
 		if err := tx.First(&chunk, "document_id = ? AND number = ?", id, number).Error; err != nil {
@@ -567,7 +549,7 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 			if err := json.Unmarshal(chunk.SourceRecordIDs, &savedSources); err != nil {
 				return err
 			}
-			if r.Revision+1 == revision.Revision && chunk.Findings == r.Findings && revision.Notes == r.Notes && slices.Equal(savedSources, r.SourceRecordIDs) && equalVisualFindings(chunk.VisualFindings, visualData) && revision.InputTokens == r.InputTokens && revision.OutputTokens == r.OutputTokens {
+			if r.Revision+1 == revision.Revision && chunk.Findings == r.Findings && revision.Notes == r.Notes && slices.Equal(savedSources, r.SourceRecordIDs) && revision.InputTokens == r.InputTokens && revision.OutputTokens == r.OutputTokens {
 				return nil
 			}
 			return ErrConflict
@@ -584,12 +566,17 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 			return err
 		}
 		allowed := map[string]bool{}
+		originals := map[string]bool{}
 		for _, p := range evidence {
 			allowed[p.SourceRecordID] = true
+			originals[p.SourceRecordID] = true
+		}
+		if err := addChunkVisualSources(tx, id, chunk.FirstPage, chunk.LastPage, allowed); err != nil {
+			return err
 		}
 		seen := map[string]bool{}
 		for _, sourceID := range r.SourceRecordIDs {
-			if seen[sourceID] || !allowed[sourceID] || !strings.Contains(r.Findings, sourceID) {
+			if seen[sourceID] || !originals[sourceID] || !strings.Contains(r.Findings, sourceID) {
 				return fmt.Errorf("%w: chunk findings must cite their original page evidence", ErrInvalid)
 			}
 			seen[sourceID] = true
@@ -609,18 +596,18 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 		documentSources := map[string]bool{}
 		for _, p := range pages {
 			documentSources[p.SourceRecordID] = true
+			if p.VisualSourceRecordID != "" {
+				documentSources[p.VisualSourceRecordID] = true
+			}
 		}
 		for _, sourceID := range sourceRecordReferencePattern.FindAllString(r.Notes, -1) {
 			if !documentSources[sourceID] {
 				return ErrInvalid
 			}
 		}
-		if err := saveVisualFindings(ctx, tx, doc, chunk, r.VisualFindings); err != nil {
-			return err
-		}
 		now := time.Now().UTC()
 		sourceData, _ := json.Marshal(r.SourceRecordIDs)
-		if err := tx.Model(&chunk).Updates(map[string]any{"findings": r.Findings, "visual_findings": datatypes.JSON(visualData), "source_record_ids": datatypes.JSON(sourceData), "completed_at": now}).Error; err != nil {
+		if err := tx.Model(&chunk).Updates(map[string]any{"findings": r.Findings, "source_record_ids": datatypes.JSON(sourceData), "completed_at": now}).Error; err != nil {
 			return err
 		}
 		revision := model.DocumentNotesRevision{DocumentID: id, Revision: r.Revision + 1, Notes: r.Notes, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens}
@@ -653,6 +640,9 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
 			return err
+		}
+		if !documentStageComplete(doc, "analyzing_visuals") {
+			return ErrConflict
 		}
 		if outcome != "blocked" && len(doc.ExtractedMetadata) == 0 {
 			return ErrConflict
@@ -708,7 +698,7 @@ func (s *DocumentService) Reconcile(ctx context.Context, id string, e DocumentEx
 		if err != nil {
 			return err
 		}
-		if len(doc.ExtractedMetadata) == 0 {
+		if len(doc.ExtractedMetadata) == 0 || !documentStageComplete(doc, "analyzing_visuals") {
 			return ErrConflict
 		}
 		var remaining int64
@@ -746,7 +736,7 @@ func (s *DocumentService) ReadOriginal(ctx context.Context, id string) ([]byte, 
 	return data, doc.Filename, nil
 }
 
-var documentProcessingStatuses = []string{"queued", "extracting", "indexing", "reading", "identifying_metadata", "reconciling", "cancelling"}
+var documentProcessingStatuses = []string{"queued", "extracting", "indexing", "analyzing_visuals", "reading", "identifying_metadata", "reconciling", "cancelling"}
 
 func documentIsProcessing(status string) bool {
 	return slices.Contains(documentProcessingStatuses, status)

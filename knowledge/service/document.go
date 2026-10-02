@@ -247,7 +247,7 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 		if err := tx.Where("document_id = ?", id).Order("number").Find(&result.Pages).Error; err != nil {
 			return err
 		}
-		if err := tx.Omit("evidence", "findings", "visual_findings").Where("document_id = ?", id).Order("number").Find(&result.Chunks).Error; err != nil {
+		if err := tx.Omit("evidence", "findings").Where("document_id = ?", id).Order("number").Find(&result.Chunks).Error; err != nil {
 			return err
 		}
 		var notes []model.DocumentNotesRevision

@@ -61,11 +61,17 @@ type DocumentStage struct {
 func (Document) TableName() string { return "knowledge_document" }
 
 type DocumentPage struct {
-	VisualSourceRecordID string `json:"visual_source_record_id" gorm:"index;not null;default:''"`
-	DocumentID           string `json:"document_id" gorm:"primaryKey"`
-	Number               int    `json:"page_number" gorm:"primaryKey"`
-	SourceRecordID       string `json:"source_record_id" gorm:"uniqueIndex;not null"`
-	CharacterCount       int    `json:"character_count" gorm:"not null"`
+	ImageSHA256          string         `json:"image_sha256" gorm:"not null;default:''"`
+	VisualAnalyzedAt     *time.Time     `json:"visual_analyzed_at"`
+	VisualAnalysis       datatypes.JSON `json:"-" gorm:"type:jsonb"`
+	VisualModel          string         `json:"visual_model" gorm:"not null;default:''"`
+	VisualInputTokens    uint64         `json:"-"`
+	VisualOutputTokens   uint64         `json:"-"`
+	VisualSourceRecordID string         `json:"visual_source_record_id" gorm:"index;not null;default:''"`
+	DocumentID           string         `json:"document_id" gorm:"primaryKey"`
+	Number               int            `json:"page_number" gorm:"primaryKey"`
+	SourceRecordID       string         `json:"source_record_id" gorm:"uniqueIndex;not null"`
+	CharacterCount       int            `json:"character_count" gorm:"not null"`
 }
 
 type DocumentPageImage struct {
@@ -88,7 +94,6 @@ func (DocumentPageImage) TableName() string { return "knowledge_document_page_im
 func (DocumentPage) TableName() string { return "knowledge_document_page" }
 
 type DocumentChunk struct {
-	VisualFindings  datatypes.JSON `json:"visual_findings" gorm:"type:jsonb;not null;default:'[]'"`
 	DocumentID      string         `json:"document_id" gorm:"primaryKey"`
 	Number          int            `json:"number" gorm:"primaryKey"`
 	FirstPage       int            `json:"first_page"`

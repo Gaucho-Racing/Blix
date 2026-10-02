@@ -366,24 +366,41 @@ class ApiRuntime:
             on_tool_result=checkpoint_tool,
             on_model_response=checkpoint_model,
         )
-        async def document_response(sequence: int, response: ModelResponse) -> None:
-            await flush_delta()
-            await lease.events([{
-                "type": "model.response_v1",
-                "entity_id": response.call_id,
-                "payload": {
-                    "sequence": sequence,
-                    "model": base_model.model,
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
-                    "response": response.model_dump(mode="json", exclude={"continuation"}),
-                },
-            }])
+        def document_response_for(model_name: str):
+            async def record(sequence: int, response: ModelResponse) -> None:
+                await flush_delta()
+                await lease.events([{
+                    "type": "model.response_v1",
+                    "entity_id": response.call_id,
+                    "payload": {
+                        "sequence": sequence, "model": model_name,
+                        "input_tokens": response.usage.input_tokens,
+                        "output_tokens": response.usage.output_tokens,
+                        "response": response.model_dump(mode="json", exclude={"continuation"}),
+                    },
+                }])
+            return record
+
+        document_response = document_response_for(base_model.model)
+        visual_extractor = None
+        if execution.session.profile_id == "document_ingest_v1" and "document_vision" in self.models:
+            visual_base = self.models["document_vision"]
+            visual_model = RuntimeModel(
+                RetryingModel(visual_base, visual_base.model, record_attempt, record_delta), lease, (),
+                knowledge=self.knowledge, run_id=execution.run.run_id,
+                session_id=execution.session.session_id,
+            )
+            visual_extractor = DocumentVisualExtractor(
+                client=self.knowledge, model=visual_model, model_name=visual_base.model,
+                concurrency=int(os.environ.get("DOCUMENT_VISION_CONCURRENCY", "4")),
+                on_response=document_response_for(visual_base.model),
+            )
 
         document_ingest = DocumentIngestV1Agent(
             client=self.knowledge,
             model=model,
             curator=curator,
+            visual_extractor=visual_extractor,
             execution={
                 "attempt_id": execution.attempt.attempt_id,
                 "worker_id": execution.attempt.worker_id,
@@ -624,7 +641,7 @@ async def run() -> None:
         runway = await stack.enter_async_context(RunwayClient(os.environ.get("RUNWAY_URL", "http://localhost:9999")))
         models = {
             profile: await stack.enter_async_context(OpenAIResponsesModel.from_environment(profile))
-            for profile in ("lead", "research", "curator", "document_qa")
+            for profile in ("lead", "research", "curator", "document_qa", "document_vision")
         }
         tavily = await stack.enter_async_context(TavilyClient())
         sentinel = await stack.enter_async_context(SentinelClient())
