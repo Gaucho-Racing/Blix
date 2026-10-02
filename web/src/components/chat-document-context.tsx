@@ -66,7 +66,7 @@ export function ChatDocumentContext({
       )}
       {onChange && documentIDs.length < 8 && (
         <ThemedSelect
-          label="Attach a document to this conversation"
+          label="Choose an existing document from Knowledge"
           value="choose"
           onValueChange={(id) => {
             if (
@@ -80,7 +80,7 @@ export function ChatDocumentContext({
               value: "choose",
               label: documents.isPending
                 ? "Loading documents…"
-                : "Attach a document…",
+                : "Choose from Knowledge…",
             },
             ...available.map((document) => ({
               value: document.document_id,
