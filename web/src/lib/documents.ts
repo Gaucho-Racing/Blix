@@ -85,9 +85,14 @@ export interface DocumentDetails {
 }
 export interface DocumentPage {
   source_record_id: string
+  source_id: string
+  record_type: string
+  evidence_type: string
+  capture_method: string
   content: string
   metadata: { page_number: number }
   occurred_at: string
+  ingested_at: string
 }
 export interface WikiHit {
   path: string
