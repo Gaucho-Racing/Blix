@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var documentStageNames = [...]string{"uploading", "extracting", "indexing", "analyzing_visuals", "identifying_metadata", "reading", "reconciling"}
+var documentStageNames = [...]string{"uploading", "extracting", "indexing", "analyzing_visuals", "identifying_metadata"}
 
 func initializeDocumentStages(doc *model.Document) {
 	for _, name := range documentStageNames {

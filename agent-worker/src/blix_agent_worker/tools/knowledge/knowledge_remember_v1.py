@@ -34,7 +34,7 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_remember_v1",
         description=(
-            "Capture an original user chat message verbatim as attributed evidence when asked to remember team "
+            "Capture an original user chat message verbatim as attributed evidence when remembering durable team "
             "knowledge. Supply message_id from the run message index to capture an earlier message, "
             "or omit it for the latest message. Call once per source message when remembering multiple messages. "
             "Text, caller, timestamp, run and execution IDs come from the runtime, not model-supplied content. "

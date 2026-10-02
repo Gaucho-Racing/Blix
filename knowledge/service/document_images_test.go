@@ -47,6 +47,8 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := model.Document{ID: id, SHA256: hash, Filename: "rules.pdf", Title: "Rules", Status: "queued", Generation: 1, SizeBytes: int64(len(data)), ReviewStatus: model.DocumentReviewPending, Tags: datatypes.NewJSONSlice([]string{}), RunID: runID}
+	setDocumentStage(&doc, "uploading", "running")
+	setDocumentStage(&doc, "uploading", "completed")
 	if err := db.Create(&doc).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +80,13 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err != nil || resumed[0] != page.Content || renderer.rendered != 2 {
 		t.Fatalf("image cache retry: %v", err)
 	}
-	reading := SaveDocumentChunk{DocumentExecution: execution, Findings: "Boundary per " + page.ID, Notes: "Rollover plane " + page.ID, SourceRecordIDs: []string{page.ID}}
-	if _, err := service.SaveChunk(ctx, id, 1, reading); !errors.Is(err, ErrConflict) {
-		t.Fatalf("reading was saved before visual extraction: %v", err)
+	if _, err := service.Finish(ctx, id, execution); !errors.Is(err, ErrConflict) {
+		t.Fatalf("document completed before visual analysis: %v", err)
+	}
+	metadata := ExtractedDocumentMetadata{Title: "Rules", SourceRecordIDs: []string{page.ID}}
+	identified, err := service.SaveExtractedMetadata(ctx, id, execution, metadata)
+	if err != nil || !documentStageComplete(identified.Document, "identifying_metadata") || identified.Document.ReviewStatus != model.DocumentReviewPending || identified.Document.Status != "analyzing_visuals" {
+		t.Fatalf("metadata did not complete independently of visual analysis: %+v %v", identified, err)
 	}
 	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}
 	wrongHash := visual
@@ -100,8 +106,8 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if _, err := service.SaveVisualAnalysis(ctx, id, 1, altered); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed replay accepted: %v", err)
 	}
-	if _, err := service.SaveChunk(ctx, id, 1, reading); !errors.Is(err, ErrConflict) {
-		t.Fatalf("reader started while another page still needed analysis: %v", err)
+	if _, err := service.Finish(ctx, id, execution); !errors.Is(err, ErrConflict) {
+		t.Fatalf("document completed while another page still needed analysis: %v", err)
 	}
 	textOnly, err := service.SaveVisualAnalysis(ctx, id, 2, SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision"})
 	if err != nil || textOnly.VisualAnalyzedAt == nil || textOnly.VisualSourceRecordID != "" {
@@ -125,8 +131,9 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err != nil || len(hits.Results) != 1 || hits.Results[0].SourceRecordID != visualID || hits.Results[0].PDFPage != 1 || hits.Results[0].EvidenceType != "agent_summary" {
 		t.Fatalf("visual search: %+v %v", hits, err)
 	}
-	if _, err := service.SaveChunk(ctx, id, 1, reading); err != nil {
-		t.Fatal(err)
+	finished, err := service.Finish(ctx, id, execution)
+	if err != nil || finished.Document.Status != "ready" || finished.Document.ReviewStatus != model.DocumentReviewInReview || len(finished.Changesets) != 0 || finished.Notes != nil {
+		t.Fatalf("completion without reading or curation: %+v %v", finished, err)
 	}
 	team := DocumentRetrievalScope{Team: true}
 	hits, err = service.SearchSources(ctx, DocumentSearchOptions{Query: "dashed", Limit: 8}, team)

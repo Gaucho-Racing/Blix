@@ -4,6 +4,8 @@ import { api } from "@/lib/api"
 import {
   controlDocument,
   documentProcessing,
+  documentIngestionProgress,
+  type DocumentDetails,
   documentStatusLabel,
   importDocument,
   updateDocumentMetadata,
@@ -95,7 +97,7 @@ describe("document upload handoff", () => {
   })
 
   it("polls only active processing stages and sends retries to the ingestion endpoint", async () => {
-    expect(documentProcessing("reading")).toBe(true)
+    expect(documentProcessing("analyzing_visuals")).toBe(true)
     expect(documentProcessing("indexing")).toBe(true)
     expect(documentProcessing("identifying_metadata")).toBe(true)
     expect(documentProcessing("ready")).toBe(false)
@@ -106,5 +108,37 @@ describe("document upload handoff", () => {
     expect(api.post).toHaveBeenCalledWith(
       "/knowledge/v1/documents/document_test/ingestion/retry",
     )
+  })
+})
+
+
+describe("document preparation progress", () => {
+  it("tracks concurrent visual analysis and metadata without waiting for reading chunks", () => {
+    const details = {
+      document: {
+        status: "analyzing_visuals",
+        stages: [
+          { name: "uploading", status: "completed" },
+          { name: "extracting", status: "completed" },
+          { name: "indexing", status: "completed" },
+          { name: "analyzing_visuals", status: "running" },
+          { name: "identifying_metadata", status: "running" },
+        ],
+      },
+      pages: [
+        { image_sha256: "one", visual_analyzed_at: "saved" },
+        { image_sha256: "two", visual_analyzed_at: null },
+      ],
+      chunks: [{ completed_at: null }],
+    } as DocumentDetails
+    expect(documentIngestionProgress(details)).toEqual({
+      value: 3.5, max: 5, label: "1 / 2 page images analyzed",
+    })
+    details.document.stages[4].status = "completed"
+    expect(documentIngestionProgress(details).value).toBe(4.5)
+    details.document.status = "ready"
+    expect(documentIngestionProgress(details)).toEqual({
+      value: 5, max: 5, label: "5 / 5 steps completed",
+    })
   })
 })

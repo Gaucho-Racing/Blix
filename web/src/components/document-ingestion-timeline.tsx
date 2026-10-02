@@ -5,17 +5,7 @@ import {
   CircleX,
   LoaderCircle,
 } from "lucide-react"
-import type { DocumentStage, TeamDocument } from "@/lib/documents"
-
-const steps: { name: DocumentStage["name"]; label: string }[] = [
-  { name: "uploading", label: "Upload document" },
-  { name: "extracting", label: "Extract document" },
-  { name: "indexing", label: "Make searchable" },
-  { name: "analyzing_visuals", label: "Extract visual evidence" },
-  { name: "identifying_metadata", label: "Identify document details" },
-  { name: "reading", label: "Read document" },
-  { name: "reconciling", label: "Draft wiki updates" },
-]
+import { documentIngestionSteps, type DocumentStage, type TeamDocument } from "@/lib/documents"
 
 const statusLabels: Record<DocumentStage["status"], string> = {
   waiting: "Waiting",
@@ -33,7 +23,7 @@ export function DocumentIngestionTimeline({
   const finished = ["ready", "partial", "no_changes"].includes(document.status)
   return (
     <ol className="ingestion-timeline" aria-label="Document processing steps">
-      {steps.map(({ name, label }) => {
+      {documentIngestionSteps.map(({ name, label }) => {
         const stage = document.stages?.find((item) => item.name === name)
         const status = stage?.status ?? (finished ? "completed" : "waiting")
         return (

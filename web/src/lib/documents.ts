@@ -11,9 +11,7 @@ export interface DocumentStage {
     | "extracting"
     | "indexing"
     | "analyzing_visuals"
-    | "reading"
     | "identifying_metadata"
-    | "reconciling"
   status: "waiting" | "running" | "completed" | "failed" | "cancelled"
   generation: number
   started_at: string | null
@@ -37,9 +35,7 @@ export interface TeamDocument {
     | "extracting"
     | "indexing"
     | "analyzing_visuals"
-    | "reading"
     | "identifying_metadata"
-    | "reconciling"
     | "ready"
     | "partial"
     | "no_changes"
@@ -220,9 +216,7 @@ export const documentProcessing = (status: TeamDocument["status"]) =>
     "extracting",
     "indexing",
     "analyzing_visuals",
-    "reading",
     "identifying_metadata",
-    "reconciling",
     "cancelling",
   ].includes(status)
 export const documentStatusLabel = (status: TeamDocument["status"]) =>
@@ -233,12 +227,10 @@ export const documentStatusLabel = (status: TeamDocument["status"]) =>
     extracting: "Extracting document",
     indexing: "Making document searchable",
     analyzing_visuals: "Extracting visual evidence",
-    reading: "Reading document",
     identifying_metadata: "Identifying document details",
-    reconciling: "Drafting wiki changes",
-    ready: "Reading complete",
-    partial: "Reading complete · coverage gaps",
-    no_changes: "Processed · no new changes",
+    ready: "Processing complete",
+    partial: "Processing complete · coverage gaps",
+    no_changes: "Processing complete",
     failed: "Processing failed",
     cancelling: "Cancelling",
     cancelled: "Cancelled",
@@ -326,4 +318,31 @@ export async function reviewDocument(
       { note },
     )
   ).data
+}
+
+export const documentIngestionSteps: { name: DocumentStage["name"]; label: string }[] = [
+  { name: "uploading", label: "Upload document" },
+  { name: "extracting", label: "Extract document" },
+  { name: "indexing", label: "Make searchable" },
+  { name: "analyzing_visuals", label: "Extract visual evidence" },
+  { name: "identifying_metadata", label: "Identify document details" },
+]
+
+export function documentIngestionProgress({ document, pages }: DocumentDetails) {
+  const finished = documentProcessingComplete(document.status)
+  const visualPages = pages.filter((page) => page.image_sha256)
+  const analyzed = visualPages.filter((page) => page.visual_analyzed_at).length
+  const value = documentIngestionSteps.reduce((total, { name }) => {
+    const stage = document.stages.find((stage) => stage.name === name)
+    if (finished || stage?.status === "completed") return total + 1
+    if (name === "analyzing_visuals" && visualPages.length) return total + analyzed / visualPages.length
+    return total
+  }, 0)
+  return {
+    value,
+    max: documentIngestionSteps.length,
+    label: document.status === "analyzing_visuals"
+      ? `${analyzed} / ${visualPages.length} page images analyzed`
+      : `${Math.floor(value)} / ${documentIngestionSteps.length} steps completed`,
+  }
 }

@@ -148,18 +148,23 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             ):
                 visual_originals.update({page["visual_source_record_id"]: page["source_record_id"]
                                          for page in result.output.get("pages", []) if page.get("visual_source_record_id")})
-                chunks = result.output.get("chunks", [])
-                inspected_document = bool(chunks) and all(chunk.get("completed_at") for chunk in chunks)
-                if {source for page in result.output.get("pages", []) for source in
-                    (page["source_record_id"], page.get("visual_source_record_id")) if source} != expected_sources:
-                    raise ValueError("document curation must identify all original page evidence")
+                inspected_document = True
+                document_sources = {source for page in result.output.get("pages", []) for source in
+                                    (page["source_record_id"], page.get("visual_source_record_id")) if source}
+                if not expected_sources.issubset(document_sources):
+                    raise ValueError("document curation must use evidence belonging to the supplied document")
             record_id = result.output.get("source_record_id")
             if request.callable_id == "knowledge_source_record_create_v1" and isinstance(record_id, str):
                 expected_sources.add(record_id)
                 material = SourceRecordCapture.model_validate(request.arguments)
                 pending_material.discard(material.model_dump_json())
             if request.callable_id == "knowledge_evidence_read_v1" and isinstance(record_id, str):
-                read_sources.add(result.output["source_record_id"])
+                read_sources.add(record_id)
+                if result.output.get("capture_method") == "document_vision":
+                    original_id = (result.output.get("metadata") or {}).get("original_source_record_id")
+                    if not isinstance(original_id, str):
+                        raise ValueError("visual evidence must identify its original page record")
+                    visual_originals[record_id] = original_id
             changeset = result.output.get("changeset")
             if isinstance(changeset, dict):
                 receipts[changeset.get("changeset_id")] = result.output
@@ -169,7 +174,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         if output.outcome in {"proposed", "committed"} and pending_material:
             raise ValueError("the curator must capture all supplied source material before reporting completion")
         if agent_input.document_id is not None and output.outcome != "blocked" and not inspected_document:
-            raise ValueError("the curator must inspect complete document coverage and notes")
+            raise ValueError("the curator must inspect the document metadata and page evidence manifest")
         for reported in output.changesets:
             cited_sources.update(receipts.get(reported.changeset_id, {}).get("source_record_ids", []))
         if agent_input.document_id is not None and not cited_sources.issubset(expected_sources):

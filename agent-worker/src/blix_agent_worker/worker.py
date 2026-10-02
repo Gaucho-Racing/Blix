@@ -400,7 +400,6 @@ class ApiRuntime:
         document_ingest = DocumentIngestV1Agent(
             client=self.knowledge,
             model=model,
-            curator=curator,
             visual_extractor=visual_extractor,
             execution={
                 "attempt_id": execution.attempt.attempt_id,

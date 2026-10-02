@@ -42,7 +42,7 @@ func (s *DocumentService) InitiateUpload(ctx context.Context, filename string, c
 	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != "USER" || !identifier.IsValid(caller.UserID, identifier.User) {
 		return DocumentUpload{}, ErrForbidden
 	}
-	objective := "Read this document, identify its title, publisher, edition, publication date, 2–3 useful document tags and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
+	objective := "Prepare searchable text and visual evidence with PDF page citations, and identify the document title, publisher, edition, publication date, 2–3 useful tags and official source URL. Keep original evidence and interpretations distinct."
 	title := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if title == "" {
 		title = filename
@@ -450,7 +450,7 @@ func (s *DocumentService) prepareSearch(ctx context.Context, id string, e Docume
 			}
 			setDocumentStage(&doc, "indexing", "completed")
 		}
-		return advanceDocumentReading(tx, &doc)
+		return advanceDocumentEnrichment(tx, &doc)
 	})
 	if err != nil {
 		return DocumentDetails{}, err
@@ -483,207 +483,37 @@ type VisualFinding struct {
 	SectionIDs  []string `json:"section_ids"`
 }
 
-type SaveDocumentChunk struct {
-	DocumentExecution
-	Revision        uint64   `json:"revision"`
-	Findings        string   `json:"findings"`
-	Notes           string   `json:"notes"`
-	SourceRecordIDs []string `json:"source_record_ids"`
-	InputTokens     uint64   `json:"input_tokens"`
-	OutputTokens    uint64   `json:"output_tokens"`
-}
-
-func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, r SaveDocumentChunk) (DocumentDetails, error) {
-	if strings.TrimSpace(r.Findings) == "" || len(r.Findings) > 16000 || strings.TrimSpace(r.Notes) == "" || len(r.Notes) > 32000 || !utf8.ValidString(r.Findings+r.Notes) || strings.ContainsRune(r.Findings+r.Notes, 0) {
-		return DocumentDetails{}, ErrInvalid
-	}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		doc, err := s.lockedExecution(ctx, tx, id, r.DocumentExecution)
-		if err != nil {
-			return err
-		}
-		if !documentStageComplete(doc, "analyzing_visuals") {
-			return ErrConflict
-		}
-		var chunk model.DocumentChunk
-		if err := tx.First(&chunk, "document_id = ? AND number = ?", id, number).Error; err != nil {
-			return mapDatabaseError(err)
-		}
-		if chunk.CompletedAt != nil {
-			var revision model.DocumentNotesRevision
-			if err := tx.First(&revision, "document_id = ? AND revision = ?", id, uint64(number)).Error; err != nil {
-				return mapDatabaseError(err)
-			}
-			var savedSources []string
-			if err := json.Unmarshal(chunk.SourceRecordIDs, &savedSources); err != nil {
-				return err
-			}
-			if r.Revision+1 == revision.Revision && chunk.Findings == r.Findings && revision.Notes == r.Notes && slices.Equal(savedSources, r.SourceRecordIDs) && revision.InputTokens == r.InputTokens && revision.OutputTokens == r.OutputTokens {
-				return nil
-			}
-			return ErrConflict
-		}
-		var completed int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NOT NULL", id).Count(&completed).Error; err != nil {
-			return err
-		}
-		if number != int(completed)+1 || r.Revision != uint64(completed) {
-			return ErrConflict
-		}
-		var evidence []DocumentEvidence
-		if err := json.Unmarshal(chunk.Evidence, &evidence); err != nil {
-			return err
-		}
-		allowed := map[string]bool{}
-		originals := map[string]bool{}
-		for _, p := range evidence {
-			allowed[p.SourceRecordID] = true
-			originals[p.SourceRecordID] = true
-		}
-		if err := addChunkVisualSources(tx, id, chunk.FirstPage, chunk.LastPage, allowed); err != nil {
-			return err
-		}
-		seen := map[string]bool{}
-		for _, sourceID := range r.SourceRecordIDs {
-			if seen[sourceID] || !originals[sourceID] || !strings.Contains(r.Findings, sourceID) {
-				return fmt.Errorf("%w: chunk findings must cite their original page evidence", ErrInvalid)
-			}
-			seen[sourceID] = true
-		}
-		if len(r.SourceRecordIDs) == 0 || len(r.SourceRecordIDs) > 4 {
-			return ErrInvalid
-		}
-		for _, sourceID := range sourceRecordReferencePattern.FindAllString(r.Findings, -1) {
-			if !allowed[sourceID] {
-				return ErrInvalid
-			}
-		}
-		var pages []model.DocumentPage
-		if err := tx.Where("document_id = ?", id).Find(&pages).Error; err != nil {
-			return err
-		}
-		documentSources := map[string]bool{}
-		for _, p := range pages {
-			documentSources[p.SourceRecordID] = true
-			if p.VisualSourceRecordID != "" {
-				documentSources[p.VisualSourceRecordID] = true
-			}
-		}
-		for _, sourceID := range sourceRecordReferencePattern.FindAllString(r.Notes, -1) {
-			if !documentSources[sourceID] {
-				return ErrInvalid
-			}
-		}
-		now := time.Now().UTC()
-		sourceData, _ := json.Marshal(r.SourceRecordIDs)
-		if err := tx.Model(&chunk).Updates(map[string]any{"findings": r.Findings, "source_record_ids": datatypes.JSON(sourceData), "completed_at": now}).Error; err != nil {
-			return err
-		}
-		revision := model.DocumentNotesRevision{DocumentID: id, Revision: r.Revision + 1, Notes: r.Notes, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens}
-		if err := tx.Create(&revision).Error; err != nil {
-			return err
-		}
-		var total int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ?", id).Count(&total).Error; err != nil {
-			return err
-		}
-		if completed+1 == total {
-			setDocumentStage(&doc, "reading", "completed")
-			if len(doc.ExtractedMetadata) == 0 {
-				return startDocumentStage(tx, &doc, "identifying_metadata")
-			}
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "reading", "error": ""})
-		}
-		return startDocumentStage(tx, &doc, "reading")
-	})
-	if err != nil {
-		return DocumentDetails{}, err
-	}
-	return s.Get(ctx, id)
-}
-func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecution, outcome string) (DocumentDetails, error) {
-	if outcome != "proposed" && outcome != "no_changes" && outcome != "blocked" {
-		return DocumentDetails{}, ErrInvalid
-	}
+func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecution) (DocumentDetails, error) {
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		doc, err := s.lockedExecution(ctx, tx, id, e)
 		if err != nil {
 			return err
 		}
-		if !documentStageComplete(doc, "analyzing_visuals") {
-			return ErrConflict
-		}
-		if outcome != "blocked" && len(doc.ExtractedMetadata) == 0 {
-			return ErrConflict
-		}
-		var remaining int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
-			return err
-		}
-		if remaining != 0 {
-			return ErrConflict
-		}
-		status := "no_changes"
-		message := ""
-		if outcome == "blocked" {
-			status = "failed"
-			message = "Wiki reconciliation needs attention. Review the saved notes and retry."
-		}
-		if outcome == "proposed" {
-			var count int64
-			if err := tx.Model(&model.Changeset{}).Where("session_id = ? AND status = ?", doc.SessionID, "proposed").Count(&count).Error; err != nil {
-				return err
-			}
-			if count == 0 {
+		for _, stage := range documentStageNames {
+			if !documentStageComplete(doc, stage) {
 				return ErrConflict
 			}
-			status = "ready"
-			var lowText int64
-			if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND character_count < 20 AND visual_source_record_id = ''", id).Count(&lowText).Error; err != nil {
-				return err
-			}
-			if lowText > 0 {
-				status = "partial"
-				message = fmt.Sprintf("%d pages have little or no readable text after extraction and OCR. See their saved visual findings for available evidence.", lowText)
-			}
 		}
-		updates := map[string]any{"status": status, "error": message}
-		if outcome != "blocked" {
-			updates["review_status"] = model.DocumentReviewInReview
-			setDocumentStage(&doc, "reconciling", "completed")
-		} else {
-			stopDocumentStage(&doc, "failed")
+		if len(doc.ExtractedMetadata) == 0 || doc.PageCount == 0 {
+			return ErrConflict
 		}
-		return saveDocumentProgress(tx, &doc, updates)
+		var lowText int64
+		if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND character_count < 20 AND visual_source_record_id = ''", id).Count(&lowText).Error; err != nil {
+			return err
+		}
+		status, message := "ready", ""
+		if lowText > 0 {
+			status = "partial"
+			message = fmt.Sprintf("%d pages have little or no readable text after extraction and OCR. See their saved visual findings for available evidence.", lowText)
+		}
+		return saveDocumentProgress(tx, &doc, map[string]any{"status": status, "error": message, "review_status": model.DocumentReviewInReview})
 	})
 	if err != nil {
 		return DocumentDetails{}, err
 	}
 	return s.Get(ctx, id)
 }
-func (s *DocumentService) Reconcile(ctx context.Context, id string, e DocumentExecution) (DocumentDetails, error) {
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		doc, err := s.lockedExecution(ctx, tx, id, e)
-		if err != nil {
-			return err
-		}
-		if len(doc.ExtractedMetadata) == 0 || !documentStageComplete(doc, "analyzing_visuals") {
-			return ErrConflict
-		}
-		var remaining int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
-			return err
-		}
-		if remaining > 0 {
-			return ErrConflict
-		}
-		return startDocumentStage(tx, &doc, "reconciling")
-	})
-	if err != nil {
-		return DocumentDetails{}, err
-	}
-	return s.Get(ctx, id)
-}
+
 func (s *DocumentService) ReadOriginal(ctx context.Context, id string) ([]byte, string, error) {
 	details, err := s.Get(ctx, id)
 	if err != nil {

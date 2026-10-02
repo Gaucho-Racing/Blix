@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -120,7 +119,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	}
 	automatic := ExtractedDocumentMetadata{Title: "Official braking rules", Publisher: "SAE International", Version: "1.0", Tags: []string{"formula sae", "braking"}, PublishedAt: "", SourceRecordIDs: []string{prepared.Pages[0].SourceRecordID}, Warnings: []string{"Publication date is not established."}}
 	if prepared.Document.ReviewStatus != model.DocumentReviewPending {
-		t.Fatal("reading document entered review")
+		t.Fatal("processing document entered review")
 	}
 	manualTitle := "Corrected document title"
 	manualTags := []string{"Team  Reference", "BRAKING", "braking"}
@@ -136,86 +135,28 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 	}
 	extractionCompleted := *prepared.Document.Stages[1].CompletedAt
-	if prepared.Document.Stages[5].Status != "running" || prepared.Document.Stages[4].Status != "running" {
-		t.Fatal("reading and metadata did not start concurrently")
+	if prepared.Document.Status != "identifying_metadata" || !documentStageComplete(prepared.Document, "analyzing_visuals") {
+		t.Fatalf("metadata did not start after text-only evidence preparation: %+v", prepared.Document)
 	}
-	invalidMetadata := automatic
-	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
-	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, invalidMetadata); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("invented metadata citation accepted: %v", err)
-	}
-	identifiedEarly, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
-	if err != nil || identifiedEarly.Document.Status != "reading" || !documentStageComplete(identifiedEarly.Document, "identifying_metadata") || identifiedEarly.Chunks[0].CompletedAt != nil || identifiedEarly.Document.ReviewStatus != model.DocumentReviewPending {
-		t.Fatalf("metadata did not complete independently of reading: %+v %v", identifiedEarly, err)
-	}
-	metadataCompleted := *identifiedEarly.Document.Stages[4].CompletedAt
-	editedEarly, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 1, Title: &manualTitle, Tags: &manualTags})
-	if err != nil || editedEarly.Document.Status != "reading" || editedEarly.Document.Title != manualTitle || editedEarly.Document.MetadataRevision != 2 {
-		t.Fatalf("identified details could not be edited during reading: %+v %v", editedEarly.Document, err)
-	}
-	if _, err := service.Reconcile(ctx, docID, execution); !errors.Is(err, ErrConflict) {
-		t.Fatalf("early metadata permitted premature reconciliation: %v", err)
-	}
-	first, err := service.ReadChunk(ctx, docID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sources := []string{}
-	for _, page := range first["evidence"].([]DocumentEvidence) {
-		sources = append(sources, page.SourceRecordID)
-	}
-	save := SaveDocumentChunk{DocumentExecution: execution, Revision: 0, Findings: "Verified requirement " + strings.Join(sources, " "), Notes: "Notebook with exact requirements " + sources[0], SourceRecordIDs: sources}
-	saved, err := service.SaveChunk(ctx, docID, 1, save)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if saved.Notes.Revision != 1 {
-		t.Fatal("notes were not persisted")
-	}
-	if _, err := service.SaveChunk(ctx, docID, 1, save); err != nil {
-		t.Fatalf("replayed chunk was not idempotent: %v", err)
-	}
-	changedReplay := save
-	changedReplay.Notes = "Different notebook"
-	if _, err := service.SaveChunk(ctx, docID, 1, changedReplay); !errors.Is(err, ErrConflict) {
-		t.Fatalf("changed replay must conflict: %v", err)
-	}
-	stale := save
-	stale.FencingToken = "old"
-	if _, err := service.SaveChunk(ctx, docID, 2, stale); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale attempt accepted: %v", err)
-	}
-	if _, err := service.Finish(ctx, docID, execution, "no_changes"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("partial reading marked complete: %v", err)
+	if _, err := service.Finish(ctx, docID, execution); !errors.Is(err, ErrConflict) {
+		t.Fatalf("document completed before metadata: %v", err)
 	}
 	if _, err := service.Control(ctx, docID, caller.EntityID, "cancel"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SaveChunk(ctx, docID, 2, save); !errors.Is(err, ErrConflict) {
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); !errors.Is(err, ErrConflict) {
 		t.Fatalf("cancelled write accepted: %v", err)
 	}
 	if err := service.dispatchDocuments(ctx); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, err := service.Get(ctx, docID)
-	if err != nil || cancelled.Document.Status != "cancelled" || cancelled.Document.ReviewStatus != model.DocumentReviewPending {
-		t.Fatalf("cancel status: %+v %v", cancelled, err)
-	}
-	if cancelled.Document.Stages[5].Status != "cancelled" || !documentStageComplete(cancelled.Document, "indexing") {
-		t.Fatal("cancellation lost the completed stages or stopped the wrong stage")
-	}
-	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("foreign metadata editor accepted: %v", err)
-	}
-	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale metadata revision accepted: %v", err)
+	if err != nil || cancelled.Document.Status != "cancelled" || cancelled.Document.ReviewStatus != model.DocumentReviewPending || cancelled.Document.Stages[4].Status != "cancelled" || !documentStageComplete(cancelled.Document, "indexing") {
+		t.Fatalf("cancel lost completed work: %+v %v", cancelled, err)
 	}
 	retry, err := service.Control(ctx, docID, caller.EntityID, "retry")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retry.Document.Generation != 2 || retry.Chunks[0].CompletedAt == nil || retry.Notes.Revision != 1 {
-		t.Fatal("retry lost durable work")
+	if err != nil || retry.Document.Generation != 2 || len(retry.Pages) != 3 || retry.Notes != nil {
+		t.Fatalf("retry lost durable evidence: %+v %v", retry, err)
 	}
 	generation = 2
 	taskID = identifier.New(identifier.Prefix("task"))
@@ -226,62 +167,44 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed, err := service.Prepare(ctx, docID, execution)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || extractor.calls != 1 || !resumed.Document.Stages[1].CompletedAt.Equal(extractionCompleted) || resumed.Document.Stages[4].Generation != 2 {
+		t.Fatalf("retry did not preserve extraction: %+v %v", resumed.Document, err)
 	}
-	if extractor.calls != 1 {
-		t.Fatal("retry repeated extraction")
+	invalidMetadata := automatic
+	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, invalidMetadata); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invented metadata citation accepted: %v", err)
 	}
-	if !resumed.Document.Stages[1].CompletedAt.Equal(extractionCompleted) || resumed.Document.Stages[5].Status != "running" || resumed.Document.Stages[5].Generation != 2 {
-		t.Fatal("retry did not preserve extraction and resume reading")
-	}
-	for _, chunk := range resumed.Chunks[1:] {
-		result, err := service.ReadChunk(ctx, docID, chunk.Number)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sources = nil
-		for _, page := range result["evidence"].([]DocumentEvidence) {
-			sources = append(sources, page.SourceRecordID)
-		}
-		save = SaveDocumentChunk{DocumentExecution: execution, Revision: uint64(chunk.Number - 1), Findings: "Requirements or extraction uncertainty " + strings.Join(sources, " "), Notes: fmt.Sprintf("Revision %d retains source %s", chunk.Number, sources[0]), SourceRecordIDs: sources}
-		invalid := save
-		invalid.Notes += " " + identifier.New(identifier.SourceRecord)
-		if _, err := service.SaveChunk(ctx, docID, chunk.Number, invalid); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("invented notebook citation accepted: %v", err)
-		}
-		if _, err := service.SaveChunk(ctx, docID, chunk.Number, save); err != nil {
-			t.Fatal(err)
-		}
-	}
-	readingComplete, err := service.Get(ctx, docID)
-	if err != nil || readingComplete.Document.Status != "reading" || !documentStageComplete(readingComplete.Document, "reading") || !readingComplete.Document.Stages[4].CompletedAt.Equal(metadataCompleted) {
-		t.Fatalf("metadata phase: %+v %v", readingComplete.Document, err)
+	stale := execution
+	stale.FencingToken = "old"
+	if _, err := service.SaveExtractedMetadata(ctx, docID, stale, automatic); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale attempt accepted: %v", err)
 	}
 	identified, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || identified.Document.ReviewStatus != model.DocumentReviewPending || !documentStageComplete(identified.Document, "identifying_metadata") {
+		t.Fatalf("metadata completion entered review early: %+v %v", identified, err)
 	}
-	if !slices.Equal(identified.Document.Tags, []string{"team reference", "braking"}) {
-		t.Fatalf("extraction overwrote the user's tags: %v", identified.Document.Tags)
+	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 1, Title: &manualTitle}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("foreign editor accepted: %v", err)
+	}
+	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale metadata revision accepted: %v", err)
+	}
+	edited, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 1, Title: &manualTitle, Tags: &manualTags})
+	if err != nil || edited.Document.Title != manualTitle || edited.Document.MetadataRevision != 2 {
+		t.Fatalf("details could not be edited before completion: %+v %v", edited.Document, err)
+	}
+	identified, err = service.SaveExtractedMetadata(ctx, docID, execution, automatic)
+	if err != nil || identified.Document.Title != manualTitle || !slices.Equal(identified.Document.Tags, []string{"team reference", "braking"}) || identified.Document.MetadataRevision != 2 {
+		t.Fatalf("metadata replay overwrote user corrections: %+v %v", identified.Document, err)
 	}
 	var originalMetadata ExtractedDocumentMetadata
 	if err := json.Unmarshal(identified.Document.ExtractedMetadata, &originalMetadata); err != nil || !slices.Equal(originalMetadata.Tags, automatic.Tags) {
 		t.Fatalf("original suggested tags were lost: %+v %v", originalMetadata, err)
 	}
-	if identified.Document.Title != manualTitle || identified.Document.Publisher != automatic.Publisher || identified.Document.PublishedAt != nil || identified.Document.MetadataRevision != 2 {
-		t.Fatalf("extraction must preserve user overrides and unknown dates: %+v", identified.Document)
-	}
-	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); err != nil {
-		t.Fatal(err)
-	}
-	reconciling, err := service.Reconcile(ctx, docID, execution)
-	if err != nil || reconciling.Document.ReviewStatus != model.DocumentReviewPending {
-		t.Fatalf("reconciliation entered review before completion: %+v %v", reconciling.Document, err)
-	}
-	final, err := service.Finish(ctx, docID, execution, "no_changes")
-	if err != nil || final.Document.Status != "no_changes" || final.Document.ReviewStatus != model.DocumentReviewInReview {
-		t.Fatalf("completion: %+v %v", final, err)
+	final, err := service.Finish(ctx, docID, execution)
+	if err != nil || final.Document.Status != "partial" || final.Document.ReviewStatus != model.DocumentReviewInReview || final.Notes != nil || len(final.Changesets) != 0 {
+		t.Fatalf("completion without notes or proposals: %+v %v", final, err)
 	}
 	for _, stage := range final.Document.Stages {
 		if stage.Status != "completed" || stage.StartedAt == nil || stage.CompletedAt == nil || stage.CompletedAt.Before(*stage.StartedAt) {
@@ -289,7 +212,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 	}
 	cleared := ""
-	edited, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 2, Publisher: &cleared})
+	edited, err = service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 2, Publisher: &cleared})
 	if err != nil || edited.Document.Publisher != "" || edited.Document.MetadataRevision != 3 {
 		t.Fatalf("manual clearing failed: %+v %v", edited, err)
 	}
@@ -305,7 +228,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatal("metadata corrections must not rewrite captured evidence")
 	}
 	var revisions int64
-	if err := db.Model(&model.DocumentNotesRevision{}).Where("document_id = ?", docID).Count(&revisions).Error; err != nil || int(revisions) != len(final.Chunks) {
+	if err := db.Model(&model.DocumentNotesRevision{}).Where("document_id = ?", docID).Count(&revisions).Error; err != nil || revisions != 0 {
 		t.Fatalf("notes history: %d %v", revisions, err)
 	}
 	original, _, err := service.ReadOriginal(ctx, docID)

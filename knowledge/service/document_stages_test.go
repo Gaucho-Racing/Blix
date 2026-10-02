@@ -95,7 +95,7 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 	generation.Store(2)
 	execution.Generation = 2
 	resumed, err := s.Prepare(ctx, doc.ID, execution)
-	if err != nil || resumed.Document.Status != "reading" || !documentStageComplete(resumed.Document, "indexing") || extractor.calls != 1 {
+	if err != nil || resumed.Document.Status != "identifying_metadata" || !documentStageComplete(resumed.Document, "indexing") || extractor.calls != 1 {
 		t.Fatalf("retry did not reuse extracted evidence: %+v %v", resumed.Document, err)
 	}
 	if !resumed.Document.Stages[1].CompletedAt.Equal(*failed.Document.Stages[1].CompletedAt) || resumed.Document.Stages[2].Generation != 2 {
@@ -113,15 +113,15 @@ func TestStoppingConcurrentDocumentStagesPreservesCompletedWork(t *testing.T) {
 		setDocumentStage(&doc, name, "running")
 		setDocumentStage(&doc, name, "completed")
 	}
-	setDocumentStage(&doc, "reading", "running")
+	setDocumentStage(&doc, "analyzing_visuals", "running")
 	setDocumentStage(&doc, "identifying_metadata", "running")
 	stopDocumentStage(&doc, "cancelled")
-	if doc.Stages[5].Status != "cancelled" || doc.Stages[4].Status != "cancelled" || !documentStageComplete(doc, "indexing") || doc.Stages[6].Status != "waiting" {
+	if doc.Stages[3].Status != "cancelled" || doc.Stages[4].Status != "cancelled" || !documentStageComplete(doc, "indexing") {
 		t.Fatalf("concurrent stages were not stopped correctly: %+v", doc.Stages)
 	}
 	doc.Generation++
 	resetUnfinishedDocumentStages(&doc)
-	if doc.Stages[5].Status != "waiting" || doc.Stages[4].Status != "waiting" || !documentStageComplete(doc, "indexing") {
+	if doc.Stages[3].Status != "waiting" || doc.Stages[4].Status != "waiting" || !documentStageComplete(doc, "indexing") {
 		t.Fatalf("retry lost completed work: %+v", doc.Stages)
 	}
 }

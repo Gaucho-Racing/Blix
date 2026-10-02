@@ -102,7 +102,6 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.POST("/documents/:documentID/metadata", handler.SaveExtractedDocumentMetadata)
 	internal.GET("/documents/:documentID/chunks/:number", handler.ReadAgentDocumentChunk)
 	internal.GET("/documents/:documentID/pages/:number", handler.ReadAgentDocumentPage)
-	internal.POST("/documents/:documentID/chunks/:number", handler.SaveDocumentChunk)
 	internal.POST("/documents/:documentID/pages/:number/visual-analysis", handler.SaveDocumentVisualAnalysis)
 	internal.POST("/documents/:documentID/ingestion/:operation", handler.ProcessDocument)
 	internal.POST("/documents/:documentID/extraction/pages/:number", handler.SaveExtractionPage)

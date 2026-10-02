@@ -65,13 +65,11 @@ func reviewCaller(admin bool) CallerContext {
 
 func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 	for _, tc := range []struct {
-		name, outcome, status, review string
-		lowText                       bool
+		name, status string
+		lowText      bool
 	}{
-		{"proposal", "proposed", "ready", model.DocumentReviewInReview, false},
-		{"coverage gaps", "proposed", "partial", model.DocumentReviewInReview, true},
-		{"no changes", "no_changes", "no_changes", model.DocumentReviewInReview, false},
-		{"blocked", "blocked", "failed", model.DocumentReviewPending, false},
+		{"ready without changesets", "ready", false},
+		{"coverage gaps", "partial", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, _, _, _ := indexFixture(t)
@@ -82,9 +80,11 @@ func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 				}
 			})
 			ctx := context.Background()
-			setDocumentStage(&doc.Document, "analyzing_visuals", "running")
-			setDocumentStage(&doc.Document, "analyzing_visuals", "completed")
-			if err := db.Model(&doc.Document).Updates(map[string]any{"status": "reconciling", "stages": doc.Document.Stages, "review_status": model.DocumentReviewPending, "extracted_metadata": datatypes.JSON([]byte("{}"))}).Error; err != nil {
+			for _, stage := range documentStageNames {
+				setDocumentStage(&doc.Document, stage, "running")
+				setDocumentStage(&doc.Document, stage, "completed")
+			}
+			if err := db.Model(&doc.Document).Updates(map[string]any{"status": "identifying_metadata", "stages": doc.Document.Stages, "review_status": model.DocumentReviewPending, "extracted_metadata": datatypes.JSON([]byte("{}"))}).Error; err != nil {
 				t.Fatal(err)
 			}
 			if tc.lowText {
@@ -105,23 +105,11 @@ func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 			if _, err := s.Review(ctx, doc.Document.ID, "approve", ReviewInput{Caller: reviewCaller(true)}); !errors.Is(err, ErrConflict) {
 				t.Fatalf("pending document accepted: %v", err)
 			}
-			if tc.outcome == "proposed" {
-				wiki := NewWikiService(db, &publishingRepository{})
-				changeset := documentChangesetFixture(t, wiki, doc)
-				if _, err := wiki.ReviewChangeset(ctx, changeset.Changeset.ID, "approve", ReviewInput{Caller: reviewCaller(true)}); !errors.Is(err, ErrConflict) {
-					t.Fatalf("pending source published before ingestion completed: %v", err)
-				}
-			}
-			finished, err := s.Finish(ctx, doc.Document.ID, DocumentExecution{Generation: doc.Document.Generation}, tc.outcome)
-			if err != nil || finished.Document.Status != tc.status || finished.Document.ReviewStatus != tc.review {
+			finished, err := s.Finish(ctx, doc.Document.ID, DocumentExecution{Generation: doc.Document.Generation})
+			if err != nil || finished.Document.Status != tc.status || finished.Document.ReviewStatus != model.DocumentReviewInReview || len(finished.Changesets) != 0 {
 				t.Fatalf("ingestion completion: %+v %v", finished.Document, err)
 			}
-			if tc.outcome == "blocked" {
-				retry, err := s.Control(ctx, doc.Document.ID, doc.Document.UploadedBy, "retry")
-				if err != nil || retry.Document.ReviewStatus != model.DocumentReviewPending || retry.Document.Status != "queued" {
-					t.Fatalf("retry entered review: %+v %v", retry.Document, err)
-				}
-			}
+
 		})
 	}
 }

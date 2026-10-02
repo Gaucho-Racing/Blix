@@ -79,7 +79,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
       </header>
       <p>
         {document.review_status === "rejected"
-          ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and reading evidence are retained for the review record."
+          ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and source evidence are retained for the review record."
           : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
       </p>
       {document.reviewed_by && (
@@ -150,7 +150,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
               </p>
               {decision === "reject" && (
                 <p>
-                  The original PDF and reading evidence will be retained for the
+                  The original PDF and source evidence will be retained for the
                   review record.
                 </p>
               )}

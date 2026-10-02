@@ -77,7 +77,7 @@ func (s *DocumentService) SaveVisualAnalysis(ctx context.Context, id string, num
 		if err := tx.Save(&page).Error; err != nil {
 			return err
 		}
-		return advanceDocumentReading(tx, &doc)
+		return advanceDocumentEnrichment(tx, &doc)
 	})
 	return page, err
 }
@@ -116,7 +116,7 @@ func saveVisualFinding(ctx context.Context, tx *gorm.DB, doc model.Document, pag
 	return nil
 }
 
-func advanceDocumentReading(tx *gorm.DB, doc *model.Document) error {
+func advanceDocumentEnrichment(tx *gorm.DB, doc *model.Document) error {
 	if len(doc.ExtractedMetadata) == 0 {
 		setDocumentStage(doc, "identifying_metadata", "running")
 	}
@@ -129,29 +129,10 @@ func advanceDocumentReading(tx *gorm.DB, doc *model.Document) error {
 		return startDocumentStage(tx, doc, "analyzing_visuals")
 	}
 	setDocumentStage(doc, "analyzing_visuals", "completed")
-	var remaining int64
-	if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", doc.ID).Count(&remaining).Error; err != nil {
-		return err
-	}
-	if remaining > 0 {
-		return startDocumentStage(tx, doc, "reading")
-	}
-	setDocumentStage(doc, "reading", "completed")
 	if len(doc.ExtractedMetadata) == 0 {
 		return startDocumentStage(tx, doc, "identifying_metadata")
 	}
 	return saveDocumentProgress(tx, doc, map[string]any{})
-}
-
-func addChunkVisualSources(tx *gorm.DB, id string, first, last int, allowed map[string]bool) error {
-	var ids []string
-	if err := tx.Model(&model.DocumentPage{}).Where("document_id = ? AND number BETWEEN ? AND ? AND visual_source_record_id <> ''", id, first, last).Pluck("visual_source_record_id", &ids).Error; err != nil {
-		return err
-	}
-	for _, id := range ids {
-		allowed[id] = true
-	}
-	return nil
 }
 
 func (s *DocumentService) chunkVisualEvidence(ctx context.Context, id string, first, last int) ([]model.SourceRecord, error) {

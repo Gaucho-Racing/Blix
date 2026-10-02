@@ -1,10 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
-  ArrowRight,
   Download,
   Eye,
-  GitPullRequest,
   LoaderCircle,
 } from "lucide-react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
@@ -12,6 +10,7 @@ import { useState } from "react"
 import {
   controlDocument,
   documentProcessing,
+  documentIngestionProgress,
   documentStatusLabel,
   downloadDocument,
   getDocument,
@@ -27,8 +26,6 @@ import { DocumentChangesets } from "@/components/document-changesets"
 import { DocumentSources } from "@/components/document-sources"
 import { ProgressBar } from "@/components/progress-bar"
 import { errorMessage } from "@/lib/runtime"
-import { formatTimestamp } from "@/lib/format"
-import { StatusBadge } from "@/components/status-badge"
 import { DocumentTags } from "@/components/document-tags"
 import { DocumentIngestionTimeline } from "@/components/document-ingestion-timeline"
 
@@ -139,19 +136,13 @@ export function DocumentDetailsPage() {
 }
 
 function DocumentIngestion({ details }: { details: DocumentDetails }) {
-  const { document, chunks, changesets } = details
+  const { document } = details
   const cache = useQueryClient()
   const auth = useAuth()
   const canControl =
     auth.user?.entity_id === document.uploaded_by &&
     document.review_status !== "rejected"
-  const completed = chunks.filter((chunk) => chunk.completed_at !== null)
-  const visual = document.status === "analyzing_visuals"
-  const visualPages = details.pages.filter((page) => page.image_sha256)
-  const visualCompleted = visualPages.filter((page) => page.visual_analyzed_at).length
-  const progressMax = visual ? visualPages.length : chunks.length
-  const progressValue = visual ? visualCompleted : completed.length
-  const progressLabel = visual ? "page images analyzed" : "reading chunks saved"
+  const progress = documentIngestionProgress(details)
   const active = documentProcessing(document.status)
   const control = useMutation({
     mutationFn: (operation: "cancel" | "retry" | "complete") =>
@@ -210,16 +201,16 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
           <p className="ingestion-stage" role="status">
             {ingestionStage(details)}
           </p>
-          {chunks.length > 0 && (
+          {document.page_count > 0 && (
             <div className="document-progress">
               <ProgressBar
-                max={progressMax}
-                value={progressValue}
-                label={visual ? "Visual extraction progress" : "Document reading progress"}
-                valueText={`${progressValue} of ${progressMax} ${progressLabel}`}
+                max={progress.max}
+                value={progress.value}
+                label="Document processing progress"
+                valueText={progress.label}
               />
               <span>
-                {progressValue} / {progressMax} {progressLabel} ·{" "}
+                {progress.label} ·{" "}
                 {document.page_count} PDF pages
               </span>
             </div>
@@ -237,80 +228,40 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
         </div>
         <DocumentIngestionTimeline document={document} />
       </div>
-      {changesets.length > 0 && (
-        <div className="ingestion-proposals">
-          {changesets.map((changeset) => (
-            <Link
-              className="knowledge-review-row ingestion-changeset"
-              key={changeset.changeset_id}
-              to={`/knowledge/proposals/${changeset.changeset_id}`}
-            >
-              <span className="knowledge-review-row-icon">
-                <GitPullRequest size={20} />
-              </span>
-              <div className="knowledge-review-row-copy">
-                <span className="workspace-kicker">KNOWLEDGE CHANGESET</span>
-                <strong>{changeset.summary}</strong>
-                <div className="ingestion-changeset-status">
-                  <StatusBadge status={changeset.status} />
-                </div>
-                <code>{changeset.changeset_id}</code>
-                <p>
-                  {changeset.season_slug || "Season-independent"}
-                  <span>·</span>
-                  {changeset.type}
-                  <span>·</span>
-                  {formatTimestamp(changeset.created_at)}
-                </p>
-              </div>
-              <ArrowRight size={18} />
-            </Link>
-          ))}
-        </div>
-      )}
     </section>
   )
 }
 
-function ingestionStage({ document, chunks }: DocumentDetails): string {
+function ingestionStage({ document }: DocumentDetails): string {
   if (document.review_status === "rejected")
-    return "This document was rejected. The saved reading work below is retained for the review record."
+    return "This document was rejected. Its saved evidence is retained for the review record."
   switch (document.status) {
     case "uploading":
       return "Your document is uploading."
     case "upload_failed":
       return "The upload didn’t finish. Import the PDF again to retry."
     case "queued":
-      return "Your document is queued for Blix to read."
+      return "Your document is queued for processing."
     case "extracting":
       return "Blix is extracting page text and images, using OCR where needed."
     case "indexing":
       return "Blix is saving page evidence and making the document searchable."
     case "analyzing_visuals":
       return "Blix is analyzing page images and saving searchable visual evidence."
-    case "reading":
-      return chunks.length > 0 &&
-        chunks.every((chunk) => chunk.completed_at !== null)
-        ? document.extracted_metadata
-          ? "Blix has finished reading and is preparing to draft wiki updates."
-          : "Blix is identifying the document details."
-        : "Blix is reading the document and saving what it learns."
     case "identifying_metadata":
       return "Blix is identifying the document details."
-    case "reconciling":
-      return "Blix is comparing its learnings with the wiki and preparing updates for review."
     case "ready":
-      return "Blix finished learning from this document. Its learnings and knowledge updates are ready for your review."
+      return "Text, visual evidence, and document details are ready for your review."
     case "partial":
-      return "Blix finished with some gaps. Review its saved learnings and proposed knowledge updates below."
+      return "Processing finished with some coverage gaps. Review the saved source evidence below."
     case "no_changes":
-      return "Blix finished learning from this document. No wiki updates were proposed."
+      return "Document evidence and details are ready for your review."
     case "failed":
-      return "Blix couldn’t finish this document. Retry to continue from its saved learnings."
+      return "Blix couldn’t finish this document. Retry to continue from its saved progress."
     case "cancelling":
-      return "Blix is stopping and keeping the learnings it has saved."
+      return "Blix is stopping and keeping the evidence it has saved."
     case "cancelled":
-      return "Reading stopped. Retry to continue from the saved learnings."
+      return "Processing stopped. Retry to continue from the saved progress."
     case "imported":
       return "Your document is available as source material."
   }

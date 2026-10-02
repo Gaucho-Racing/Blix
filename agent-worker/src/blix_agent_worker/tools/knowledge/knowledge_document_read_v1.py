@@ -17,9 +17,9 @@ class KnowledgeDocumentReadV1Tool(KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_document_read_v1",
         description=(
-            "Read an imported document's metadata, page IDs, coverage and current notes. Supply chunk to read "
-            "its immutable findings and original page text. Inspect saved findings across relevant chunks "
-            "before curating; reopen cited original evidence to verify claims."
+            "Read an imported document's metadata and page evidence manifest. Supply chunk to read "
+            "a bounded group of original page text and saved visual interpretations. Curate only the requested "
+            "topic; reopen cited original evidence to verify claims."
         ),
         input_schema=KnowledgeDocumentReadV1Input.model_json_schema(),
     )

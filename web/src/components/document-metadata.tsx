@@ -199,8 +199,7 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
               )}
             </div>
             <p className="document-help">
-              These edits update document details. To revise a wiki draft,
-              discuss it with Blix.
+              These edits update document details. Original source evidence stays unchanged.
             </p>
             {save.error && (
               <p className="runtime-error" role="alert">

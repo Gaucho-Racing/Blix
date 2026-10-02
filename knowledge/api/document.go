@@ -110,10 +110,7 @@ func (h *Handler) ReadDocumentChunk(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 func (h *Handler) ProcessDocument(c *gin.Context) {
-	var request struct {
-		service.DocumentExecution
-		Outcome string `json:"outcome"`
-	}
+	var request service.DocumentExecution
 	if c.ShouldBindJSON(&request) != nil {
 		respondError(c, service.ErrInvalid)
 		return
@@ -126,11 +123,9 @@ func (h *Handler) ProcessDocument(c *gin.Context) {
 			respondError(c, service.ErrUnavailable)
 			return
 		}
-		result, err = h.documents.Prepare(c.Request.Context(), c.Param("documentID"), request.DocumentExecution)
-	case "reconcile":
-		result, err = h.documents.Reconcile(c.Request.Context(), c.Param("documentID"), request.DocumentExecution)
+		result, err = h.documents.Prepare(c.Request.Context(), c.Param("documentID"), request)
 	case "finish":
-		result, err = h.documents.Finish(c.Request.Context(), c.Param("documentID"), request.DocumentExecution, request.Outcome)
+		result, err = h.documents.Finish(c.Request.Context(), c.Param("documentID"), request)
 	default:
 		err = service.ErrInvalid
 	}
@@ -140,21 +135,6 @@ func (h *Handler) ProcessDocument(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
-func (h *Handler) SaveDocumentChunk(c *gin.Context) {
-	var request service.SaveDocumentChunk
-	number, err := strconv.Atoi(c.Param("number"))
-	if err != nil || c.ShouldBindJSON(&request) != nil {
-		respondError(c, service.ErrInvalid)
-		return
-	}
-	result, err := h.documents.SaveChunk(c.Request.Context(), c.Param("documentID"), number, request)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
 func (h *Handler) UpdateDocumentMetadata(c *gin.Context) {
 	var request service.DocumentMetadataPatch
 	if c.ShouldBindJSON(&request) != nil {
