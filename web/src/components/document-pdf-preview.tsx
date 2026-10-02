@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { LoaderCircle, X } from "lucide-react"
-import { useEffect, useId, useRef } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { getDocumentFile, type TeamDocument } from "@/lib/documents"
 import { errorMessage } from "@/lib/runtime"
 
@@ -12,12 +12,27 @@ export function DocumentPDFPreview({
   onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const pointerStartedOutside = useRef(false)
+  const [closing, setClosing] = useState(false)
   const titleID = useId()
   useEffect(() => {
     const modal = dialog.current
     modal?.showModal()
     return () => modal?.close()
   }, [])
+  useEffect(() => {
+    if (!closing) return
+    let cancelled = false
+    const animations = dialog.current?.getAnimations() ?? []
+    void Promise.allSettled(
+      animations.map((animation) => animation.finished),
+    ).then(() => {
+      if (!cancelled) onClose()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [closing, onClose])
   const pdf = useQuery({
     queryKey: ["document-file", document.document_id],
     queryFn: ({ signal }) => getDocumentFile(document.document_id, signal),
@@ -29,11 +44,28 @@ export function DocumentPDFPreview({
   return (
     <dialog
       ref={dialog}
-      className="document-pdf-preview"
+      className={`document-pdf-preview${closing ? " is-closing" : ""}`}
       aria-labelledby={titleID}
+      onPointerDown={(event) => {
+        pointerStartedOutside.current = outsideDialog(
+          event.currentTarget,
+          event.clientX,
+          event.clientY,
+        )
+      }}
+      onPointerCancel={() => {
+        pointerStartedOutside.current = false
+      }}
+      onClick={(event) => {
+        const outside =
+          pointerStartedOutside.current &&
+          outsideDialog(event.currentTarget, event.clientX, event.clientY)
+        pointerStartedOutside.current = false
+        if (outside) setClosing(true)
+      }}
       onCancel={(event) => {
         event.preventDefault()
-        onClose()
+        setClosing(true)
       }}
     >
       <header>
@@ -41,7 +73,11 @@ export function DocumentPDFPreview({
           <h2 id={titleID}>Document preview</h2>
           <p>{document.title || document.filename}</p>
         </div>
-        <button className="secondary-button" type="button" onClick={onClose}>
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => setClosing(true)}
+        >
           <X size={15} /> Close
         </button>
       </header>
@@ -60,6 +96,13 @@ export function DocumentPDFPreview({
         <PDFFrame blob={pdf.data} title={document.title || document.filename} />
       )}
     </dialog>
+  )
+}
+
+function outsideDialog(dialog: HTMLDialogElement, x: number, y: number) {
+  const bounds = dialog.getBoundingClientRect()
+  return (
+    x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom
   )
 }
 

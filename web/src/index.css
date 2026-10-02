@@ -71,10 +71,10 @@ h1, h2, h3, p { margin-top: 0; }
 .workspace-switcher > svg { color: var(--dim); }
 .workspace-avatar { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; color: var(--pink-strong); background: var(--pink-soft); font: 700 11px "Geist Mono Variable"; }
 .workspace-avatar-image { object-fit: cover; }
-.workspace-copy { min-width: 0; flex: 1; }
+.workspace-copy { min-width: 0; flex: 1; display: grid; gap: 1px; line-height: 1.2; }
 .workspace-copy strong, .workspace-copy small { overflow: hidden; display: block; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-copy strong { font-size: 12px; }
-.workspace-copy small { margin-top: 2px; color: var(--dim); font-size: 10px; }
+.workspace-copy small { margin: 0; color: var(--dim); font-size: 10px; }
 
 .main-content { min-width: 0; background: radial-gradient(circle at 85% -5%, rgba(210, 10, 140, .045), transparent 30%), var(--surface); }
 .workspace-page { width: min(1420px, 100%); min-height: 100vh; margin: 0 auto; padding: 36px 44px 56px; }
@@ -902,8 +902,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-review-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .document-library-filters { margin-bottom: 20px; max-width: 100%; flex-wrap: wrap; }
 .document-pdf-preview { width: min(1200px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 17px; color: var(--text); background: var(--surface-raised); box-shadow: var(--shadow-md); }
-.document-pdf-preview[open] { display: flex; flex-direction: column; }
-.document-pdf-preview::backdrop { background: rgba(25, 15, 25, .4); backdrop-filter: blur(3px); }
+.document-pdf-preview[open] { display: flex; flex-direction: column; animation: document-preview-enter .24s cubic-bezier(.16, 1, .3, 1) both; }
+.document-pdf-preview::backdrop { background: rgba(25, 15, 25, .4); backdrop-filter: blur(3px); animation: document-preview-backdrop-enter .24s ease both; }
+.document-pdf-preview.is-closing { animation: document-preview-exit .18s ease-in both; }
+.document-pdf-preview.is-closing::backdrop { animation: document-preview-backdrop-exit .18s ease-in both; }
+@keyframes document-preview-enter { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes document-preview-exit { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(8px) scale(.98); } }
+@keyframes document-preview-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes document-preview-backdrop-exit { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .document-pdf-preview[open], .document-pdf-preview::backdrop, .document-pdf-preview.is-closing::backdrop { animation: none; } }
 .document-pdf-preview > header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 16px; padding: 24px; border-bottom: 1px solid var(--border); }
 .document-pdf-preview > header > div { min-width: 0; }
 .document-pdf-preview > header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
