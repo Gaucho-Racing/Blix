@@ -16,8 +16,8 @@ type Episode struct {
 	ReconstructionConfidence float64    `json:"reconstruction_confidence" gorm:"not null"`
 	StartedAt                *time.Time `json:"started_at,omitempty" gorm:"index"`
 	EndedAt                  *time.Time `json:"ended_at,omitempty" gorm:"index"`
-	CreatedByRunID           string     `json:"created_by_run_id" gorm:"index;not null"`
-	CreatedByExecutionID     string     `json:"created_by_execution_id" gorm:"index;not null"`
+	CreatedByConversationID  string     `json:"created_by_conversation_id" gorm:"index;not null"`
+	CreatedBySessionID       string     `json:"created_by_session_id" gorm:"index;not null"`
 	CreatedAt                time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt                time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
 }

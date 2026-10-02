@@ -20,6 +20,7 @@ class KnowledgeApplyV1Tool(KnowledgeTool):
         input_schema=KnowledgeApplyV1Input.model_json_schema(),
         impact=ToolImpact.DESTRUCTIVE,
         idempotent=True,
+        requires_approval=True,
     )
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeApplyV1Input, url: str) -> JsonObject:
@@ -30,7 +31,10 @@ class KnowledgeApplyV1Tool(KnowledgeTool):
             raise KnowledgeClientError(
                 "invalid_knowledge_response", "The knowledge service returned an invalid changeset."
             )
-        if changeset.get("run_id") != call.run_id or changeset.get("execution_id") != call.parent_execution_id:
+        if (
+            changeset.get("conversation_id") != call.conversation_id
+            or changeset.get("session_id") != call.parent_session_id
+        ):
             raise KnowledgeClientError(
                 "changeset_not_owned", "Only changesets from this run and execution may be applied."
             )

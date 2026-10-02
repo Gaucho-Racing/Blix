@@ -7,11 +7,11 @@ from blix_agent_worker.models.common import (
     CallID,
     ContractError,
     ContractModel,
-    ExecutionID,
+    ConversationID,
     JobID,
     JsonObject,
     NonEmptyText,
-    RunID,
+    SessionID,
     VersionedIdentifier,
 )
 
@@ -49,11 +49,12 @@ class ToolCall(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False)
 
     schema_version: Literal[1] = 1
-    run_id: RunID
+    conversation_id: ConversationID
     call_id: CallID
-    parent_execution_id: ExecutionID
+    parent_session_id: SessionID
     tool_id: VersionedIdentifier
     arguments: JsonObject
+    idempotency_key: str = ""
 
 
 class ToolResultStatus(StrEnum):
@@ -66,9 +67,9 @@ class ToolResult(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False)
 
     schema_version: Literal[1] = 1
-    run_id: RunID
+    conversation_id: ConversationID
     call_id: CallID
-    parent_execution_id: ExecutionID
+    parent_session_id: SessionID
     status: ToolResultStatus
     output: JsonValue = None
     error: ContractError | None = None

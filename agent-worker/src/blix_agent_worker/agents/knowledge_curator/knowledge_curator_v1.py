@@ -122,7 +122,11 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             if result.status is not ToolResultStatus.SUCCEEDED or not isinstance(result.output, dict):
                 continue
             request = calls.get(message.call_request_ref)
-            if request is None or result.run_id != task.run_id or result.parent_execution_id != task.execution_id:
+            if (
+                request is None
+                or result.conversation_id != task.conversation_id
+                or result.parent_session_id != task.session_id
+            ):
                 continue
             record_id = result.output.get("source_record_id")
             if request.callable_id == "knowledge_source_record_create_v1" and isinstance(record_id, str):
@@ -145,8 +149,8 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             actual = receipt.get("changeset", {})
             files = receipt.get("files", [])
             if (
-                actual.get("run_id") != task.run_id
-                or actual.get("execution_id") != task.execution_id
+                actual.get("conversation_id") != task.conversation_id
+                or actual.get("session_id") != task.session_id
                 or actual.get("status") != reported.status
                 or (actual.get("result_commit_sha") or "") != reported.commit_sha
                 or {file.get("path") for file in files} != set(reported.paths)

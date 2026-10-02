@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
@@ -64,7 +67,15 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	reviews.GET("/:changesetID", handler.GetWikiChangeset)
 	reviews.GET("/:changesetID/base", handler.GetWikiChangesetBase)
 	reviews.POST("/:changesetID/review/:decision", handler.ReviewWikiChangeset)
-	internal := router.Group("/internal/v1")
+	internal := router.Group("/internal/v1", func(c *gin.Context) {
+		token := os.Getenv("BLIX_INTERNAL_TOKEN")
+		provided := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+		if !strings.HasPrefix(c.GetHeader("Authorization"), "Bearer ") || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(provided)) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid service credentials"})
+			return
+		}
+		c.Next()
+	})
 	internal.GET("/repository", handler.GetRepository)
 	internal.POST("/repository/seed", handler.SeedWiki)
 	internal.GET("/pages", handler.ListWikiPages)

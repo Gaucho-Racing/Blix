@@ -43,19 +43,19 @@ type SourceIdentityInput struct {
 }
 
 type IngestSourceRecordInput struct {
-	ExternalID         string               `json:"external_id"`
-	ExternalVersion    string               `json:"external_version"`
-	RecordType         string               `json:"record_type"`
-	ParentExternalID   string               `json:"parent_external_id"`
-	ExternalURL        string               `json:"external_url"`
-	Content            string               `json:"content"`
-	Metadata           json.RawMessage      `json:"metadata"`
-	OccurredAt         time.Time            `json:"occurred_at"`
-	Author             *SourceIdentityInput `json:"author"`
-	EvidenceType       string               `json:"evidence_type"`
-	CaptureMethod      string               `json:"capture_method"`
-	CaptureRunID       string               `json:"capture_run_id"`
-	CaptureExecutionID string               `json:"capture_execution_id"`
+	ExternalID            string               `json:"external_id"`
+	ExternalVersion       string               `json:"external_version"`
+	RecordType            string               `json:"record_type"`
+	ParentExternalID      string               `json:"parent_external_id"`
+	ExternalURL           string               `json:"external_url"`
+	Content               string               `json:"content"`
+	Metadata              json.RawMessage      `json:"metadata"`
+	OccurredAt            time.Time            `json:"occurred_at"`
+	Author                *SourceIdentityInput `json:"author"`
+	EvidenceType          string               `json:"evidence_type"`
+	CaptureMethod         string               `json:"capture_method"`
+	CaptureConversationID string               `json:"capture_conversation_id"`
+	CaptureSessionID      string               `json:"capture_session_id"`
 }
 
 type IngestedSourceRecord struct {
@@ -185,8 +185,8 @@ func (s *SourceService) IngestSourceRecord(
 			Content:                input.Content,
 			EvidenceType:           input.EvidenceType,
 			CaptureMethod:          input.CaptureMethod,
-			CaptureRunID:           input.CaptureRunID,
-			CaptureExecutionID:     input.CaptureExecutionID,
+			CaptureConversationID:  input.CaptureConversationID,
+			CaptureSessionID:       input.CaptureSessionID,
 			ContentHash:            contentHash,
 			RecordHash:             recordHash,
 			Metadata:               metadata,

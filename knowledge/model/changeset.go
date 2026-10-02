@@ -16,8 +16,8 @@ const (
 type Changeset struct {
 	ID              string     `json:"changeset_id" gorm:"primaryKey"`
 	Origin          string     `json:"origin" gorm:"index;not null;default:'agent'"`
-	RunID           string     `json:"run_id" gorm:"index;not null"`
-	ExecutionID     string     `json:"execution_id" gorm:"index;not null"`
+	ConversationID  string     `json:"conversation_id" gorm:"index;not null"`
+	SessionID       string     `json:"session_id" gorm:"index;not null"`
 	SeasonSlug      string     `json:"season_slug" gorm:"index;not null"`
 	Type            string     `json:"type" gorm:"index;not null"`
 	Status          string     `json:"status" gorm:"index;not null"`

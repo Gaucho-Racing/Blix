@@ -61,8 +61,8 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
         if (
             message is None
             or message.role is not ConversationMessageRole.USER
-            or message.run_id != call.run_id
-            or message.parent_execution_id != call.parent_execution_id
+            or message.conversation_id != call.conversation_id
+            or message.session_id != call.parent_session_id
         ):
             raise KnowledgeClientError(
                 "chat_context_unavailable",
@@ -77,8 +77,8 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
             "POST",
             "chat-records",
             payload={
-                "run_id": call.run_id,
-                "execution_id": call.parent_execution_id,
+                "conversation_id": call.conversation_id,
+                "session_id": call.parent_session_id,
                 "message_id": message.message_id,
                 "entity_id": self._caller.entity_id,
                 "user_id": self._caller.user_id,

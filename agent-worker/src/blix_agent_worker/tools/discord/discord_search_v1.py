@@ -110,9 +110,9 @@ class DiscordSearchV1Tool:
         except ValidationError:
             return self._failure(call, "invalid_discord_response", "Discord returned an invalid search response.")
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )
@@ -144,9 +144,9 @@ class DiscordSearchV1Tool:
         retryable: bool = False,
     ) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=ContractError(code=code, message=message, retryable=retryable, details=details or {}),
         )

@@ -1,3 +1,4 @@
+import os
 from typing import Self
 
 import httpx
@@ -14,7 +15,12 @@ class KnowledgeClientError(Exception):
 
 class KnowledgeClient:
     def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._client = httpx.AsyncClient(transport=transport, timeout=None, follow_redirects=False)
+        self._client = httpx.AsyncClient(
+            transport=transport,
+            timeout=60,
+            follow_redirects=False,
+            headers={"Authorization": f"Bearer {os.environ.get('BLIX_INTERNAL_TOKEN', '')}"},
+        )
 
     async def __aenter__(self) -> Self:
         return self

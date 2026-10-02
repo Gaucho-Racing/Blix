@@ -7,7 +7,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, model_validator
 
-from blix_agent_worker.models.common import EntityID, ExecutionID, RunID, ServiceAccountID, UserID
+from blix_agent_worker.models.common import ConversationID, EntityID, ServiceAccountID, SessionID, UserID
 from blix_agent_worker.models.context import EntityType
 
 
@@ -140,8 +140,8 @@ class SentinelCredential:
     token_id: str
     user_id: str
     application_id: str
-    run_id: RunID
-    execution_id: ExecutionID
+    conversation_id: ConversationID
+    session_id: SessionID
     token_type: Literal["Bearer"]
     scope: str
     expires_at: datetime
@@ -314,8 +314,8 @@ class SentinelClient:
         service_account_token: str,
         user_id: str,
         application_id: str,
-        run_id: RunID,
-        execution_id: ExecutionID,
+        conversation_id: ConversationID,
+        session_id: SessionID,
     ) -> SentinelCredential:
         requested_at = datetime.now(UTC)
         try:
@@ -347,8 +347,8 @@ class SentinelClient:
             access_token=payload.access_token.get_secret_value(),
             user_id=user_id,
             application_id=application_id,
-            run_id=run_id,
-            execution_id=execution_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
             token_type=payload.token_type,
             scope=payload.scope,
             expires_at=requested_at + timedelta(seconds=payload.expires_in),
@@ -364,8 +364,8 @@ class SentinelClient:
         service_account_token: str,
         user_id: str,
         application_client_id: str,
-        run_id: RunID,
-        execution_id: ExecutionID,
+        conversation_id: ConversationID,
+        session_id: SessionID,
     ) -> SentinelCredential:
         application_id = await self._application_id_for_client(
             sentinel_url=sentinel_url,
@@ -379,8 +379,8 @@ class SentinelClient:
                 for candidate in self._credentials.values()
                 if candidate.user_id == user_id
                 and candidate.application_id == application_id
-                and candidate.run_id == run_id
-                and candidate.execution_id == execution_id
+                and candidate.conversation_id == conversation_id
+                and candidate.session_id == session_id
             ),
             None,
         )
@@ -391,8 +391,8 @@ class SentinelClient:
             service_account_token=service_account_token,
             user_id=user_id,
             application_id=application_id,
-            run_id=run_id,
-            execution_id=execution_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
         )
 
     async def get_api(
@@ -428,14 +428,16 @@ class SentinelClient:
                 "Sentinel returned a non-JSON API response.",
             ) from error
 
-    def get_credential(self, token_id: str, *, run_id: RunID, execution_id: ExecutionID) -> SentinelCredential:
+    def get_credential(
+        self, token_id: str, *, conversation_id: ConversationID, session_id: SessionID
+    ) -> SentinelCredential:
         credential = self._credentials.get(token_id)
         if credential is None:
             raise SentinelCredentialNotFoundError(token_id)
         if credential.expires_at <= datetime.now(UTC):
             self._credentials.pop(token_id, None)
             raise SentinelCredentialNotFoundError(token_id)
-        if credential.run_id != run_id or credential.execution_id != execution_id:
+        if credential.conversation_id != conversation_id or credential.session_id != session_id:
             raise SentinelCredentialNotFoundError(token_id)
         return credential
 

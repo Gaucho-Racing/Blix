@@ -61,8 +61,8 @@ type WikiSearchResult struct {
 }
 
 type CreateChangesetInput struct {
-	RunID           string            `json:"run_id"`
-	ExecutionID     string            `json:"execution_id"`
+	ConversationID  string            `json:"conversation_id"`
+	SessionID       string            `json:"session_id"`
 	SeasonSlug      string            `json:"season_slug"`
 	Type            string            `json:"type"`
 	Summary         string            `json:"summary"`
@@ -170,8 +170,8 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 }
 
 func (s *WikiService) CreateChangeset(ctx context.Context, input CreateChangesetInput) (ChangesetDetails, error) {
-	if !identifier.IsValid(input.RunID, identifier.Run) || !identifier.IsValid(input.ExecutionID, identifier.Execution) {
-		return ChangesetDetails{}, fmt.Errorf("%w: prefixed run_id and execution_id are required", ErrInvalid)
+	if !identifier.IsValid(input.ConversationID, identifier.Conversation) || !identifier.IsValid(input.SessionID, identifier.Session) {
+		return ChangesetDetails{}, fmt.Errorf("%w: prefixed conversation_id and session_id are required", ErrInvalid)
 	}
 	return s.create(ctx, input, "agent")
 }
@@ -221,7 +221,7 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 			return ChangesetDetails{}, fmt.Errorf("%w: every upserted page must cite a supplied source record", ErrInvalid)
 		}
 	}
-	changeset := model.Changeset{ID: identifier.New(identifier.Changeset), Origin: origin, RunID: input.RunID, ExecutionID: input.ExecutionID,
+	changeset := model.Changeset{ID: identifier.New(identifier.Changeset), Origin: origin, ConversationID: input.ConversationID, SessionID: input.SessionID,
 		SeasonSlug: input.SeasonSlug, Type: input.Type, Status: model.ChangesetStatusProposed, Summary: input.Summary, BaseCommitSHA: *input.BaseCommitSHA}
 	files := make([]model.ChangesetFile, 0, len(input.Files))
 	for _, edit := range input.Files {

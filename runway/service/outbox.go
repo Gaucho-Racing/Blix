@@ -14,10 +14,11 @@ type OutboxDispatcher struct {
 	database     *gorm.DB
 	publisher    *mqtt.Publisher
 	pollInterval time.Duration
+	wake         chan struct{}
 }
 
 func NewOutboxDispatcher(database *gorm.DB, publisher *mqtt.Publisher, pollInterval time.Duration) *OutboxDispatcher {
-	return &OutboxDispatcher{database: database, publisher: publisher, pollInterval: pollInterval}
+	return &OutboxDispatcher{database: database, publisher: publisher, pollInterval: pollInterval, wake: make(chan struct{}, 1)}
 }
 
 func (d *OutboxDispatcher) Run(ctx context.Context) {
@@ -29,6 +30,7 @@ func (d *OutboxDispatcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-d.wake:
 		}
 	}
 }
@@ -66,5 +68,12 @@ func (d *OutboxDispatcher) dispatch(ctx context.Context) {
 			Updates(updates).Error; err != nil {
 			logger.SugarLogger.Errorf("failed to update outbox message %s: %v", message.ID, err)
 		}
+	}
+}
+
+func (d *OutboxDispatcher) Notify() {
+	select {
+	case d.wake <- struct{}{}:
+	default:
 	}
 }

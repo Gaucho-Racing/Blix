@@ -131,9 +131,9 @@ class SentinelIdentityResolveV1Tool:
                 full_name=canonical.full_name if canonical else None,
             )
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )
@@ -141,9 +141,9 @@ class SentinelIdentityResolveV1Tool:
     @staticmethod
     def _failure(call: ToolCall, error: ContractError) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=error,
         )

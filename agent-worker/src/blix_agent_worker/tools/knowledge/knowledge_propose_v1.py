@@ -65,5 +65,5 @@ class KnowledgeProposeV1Tool(KnowledgeTool):
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeProposeV1Input, url: str) -> JsonObject:
         payload = arguments.model_dump(mode="json")
-        payload.update(run_id=call.run_id, execution_id=call.parent_execution_id)
+        payload.update(conversation_id=call.conversation_id, session_id=call.parent_session_id)
         return await self._client.request(url, "POST", "changesets", payload=payload)

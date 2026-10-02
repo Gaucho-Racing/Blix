@@ -101,18 +101,22 @@ class OpenAIResponsesModel:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key.strip()}",
             },
-            timeout=None,
+            timeout=httpx.Timeout(300, connect=15),
             follow_redirects=False,
             transport=transport,
         )
 
     @classmethod
-    def from_environment(cls) -> Self:
+    def from_environment(cls, profile: str = "lead") -> Self:
+        prefix = {"lead": "LEAD", "research": "RESEARCH", "curator": "CURATOR"}.get(profile, "LEAD")
         return cls(
             base_url=os.environ.get("LLM_GATEWAY_ENDPOINT", ""),
             api_key=os.environ.get("LLM_GATEWAY_API_KEY", ""),
-            model=os.environ.get("LLM_MODEL", "gpt-6-astra"),
-            reasoning_effort=os.environ.get("LLM_REASONING_EFFORT", "").strip() or None,
+            model=os.environ.get(f"LLM_{prefix}_MODEL") or os.environ.get("LLM_MODEL", "gpt-6-astra"),
+            reasoning_effort=(
+                os.environ.get(f"LLM_{prefix}_REASONING_EFFORT") or os.environ.get("LLM_REASONING_EFFORT", "")
+            ).strip()
+            or None,
         )
 
     @property

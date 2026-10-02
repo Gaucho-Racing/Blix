@@ -54,13 +54,25 @@ class KnowledgeReadV1Tool(KnowledgeTool):
     async def _execute(self, call: ToolCall, arguments: KnowledgeReadV1Input, url: str) -> JsonObject:
         match arguments.operation:
             case "search":
-                return await self._client.request(url, "GET", "search", params={
-                    "q": arguments.query or "", "limit": arguments.limit or 8,
-                })
+                return await self._client.request(
+                    url,
+                    "GET",
+                    "search",
+                    params={
+                        "q": arguments.query or "",
+                        "limit": arguments.limit or 8,
+                    },
+                )
             case "search_proposals":
-                return await self._client.request(url, "GET", "changesets/search", params={
-                    "q": arguments.query or "", "limit": arguments.limit or 8,
-                })
+                return await self._client.request(
+                    url,
+                    "GET",
+                    "changesets/search",
+                    params={
+                        "q": arguments.query or "",
+                        "limit": arguments.limit or 8,
+                    },
+                )
             case "list_pages":
                 return await self._client.request(url, "GET", "pages", params={"prefix": arguments.prefix or ""})
             case "read_page":

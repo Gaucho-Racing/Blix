@@ -83,7 +83,7 @@ class DiscordWebhookSendV1Tool:
                 content=request.content,
                 username=username,
                 avatar_url=avatar_url,
-                audit_reason=f"Blix caller={self._caller.entity_id} run={call.run_id} call={call.call_id}",
+                audit_reason=f"Blix caller={self._caller.entity_id} run={call.conversation_id} call={call.call_id}",
             )
             output = DiscordWebhookSendV1Output.model_validate(result)
         except DiscordClientError as error:
@@ -105,9 +105,9 @@ class DiscordWebhookSendV1Tool:
                 ),
             )
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
             output=output.model_dump(mode="json"),
         )
@@ -115,9 +115,9 @@ class DiscordWebhookSendV1Tool:
     @staticmethod
     def _failure(call: ToolCall, error: ContractError) -> ToolResult:
         return ToolResult(
-            run_id=call.run_id,
+            conversation_id=call.conversation_id,
             call_id=call.call_id,
-            parent_execution_id=call.parent_execution_id,
+            parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
             error=error,
         )

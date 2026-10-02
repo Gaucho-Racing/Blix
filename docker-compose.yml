@@ -62,6 +62,7 @@ services:
       nanomq:
         condition: service_started
     environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:-blix-development}
       ENV: DEV
       PORT: 9999
       DATABASE_HOST: db
@@ -71,8 +72,8 @@ services:
       DATABASE_NAME: blix
       MQTT_URL: mqtt://nanomq:1883
       MQTT_CLIENT_ID: blix-runway
-      MQTT_EXECUTION_READY_TOPIC: blix/v1/executions/ready
-      MQTT_RUN_EVENT_TOPIC_PREFIX: blix/v1/runs
+      MQTT_ATTEMPT_READY_TOPIC: blix/v1/attempts/ready
+      MQTT_CONVERSATION_EVENT_TOPIC_PREFIX: blix/v1/conversations
       EXECUTION_LEASE_DURATION: ${EXECUTION_LEASE_DURATION:-30s}
       EXECUTION_LEASE_SWEEP_INTERVAL: ${EXECUTION_LEASE_SWEEP_INTERVAL:-5s}
       WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-5s}
@@ -97,6 +98,7 @@ services:
       db:
         condition: service_healthy
     environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:-blix-development}
       ENV: DEV
       PORT: 9988
       DATABASE_HOST: db
@@ -132,12 +134,13 @@ services:
     env_file:
       - ./.env
     environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:-blix-development}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
       KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      MQTT_ATTEMPT_READY_TOPIC: blix/v1/attempts/ready
       SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
       SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
@@ -160,12 +163,13 @@ services:
     env_file:
       - ./.env
     environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:-blix-development}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
       KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      MQTT_ATTEMPT_READY_TOPIC: blix/v1/attempts/ready
       SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
       SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 
@@ -188,12 +192,13 @@ services:
     env_file:
       - ./.env
     environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:-blix-development}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-4}
       RUNWAY_URL: http://runway:9999
       KNOWLEDGE_URL: http://knowledge:9988
       MQTT_HOST: nanomq
       MQTT_PORT: 1883
-      MQTT_EXECUTION_READY_TOPIC: $$share/blix-agent-workers/blix/v1/executions/ready
+      MQTT_ATTEMPT_READY_TOPIC: blix/v1/attempts/ready
       SENTINEL_URL: ${SENTINEL_URL:-https://sso.gauchoracing.com}
       SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
 

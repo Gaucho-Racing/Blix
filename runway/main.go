@@ -64,6 +64,7 @@ func run(configuration config.Config) error {
 	identities := service.NewIdentityService(sentinelClient, configuration.SentinelServiceToken)
 	executions := service.NewExecutionService(db, workers, configuration)
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
+	executions.SetDispatchNotifier(outbox.Notify)
 	leaseReaper := service.NewExecutionLeaseReaper(executions, configuration.LeaseSweepInterval)
 	go outbox.Run(ctx)
 	go leaseReaper.Run(ctx)

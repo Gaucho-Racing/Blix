@@ -4,17 +4,17 @@ from typing import Annotated, Self
 
 from pydantic import Field, ValidationError, model_validator
 
+from blix_agent_worker.agents.blix.prompt import (
+    BLIX_V1_CONTEXT_SECTION,
+    BLIX_V1_MESSAGE_INDEX_SECTION,
+    BLIX_V1_SYSTEM_PROMPT,
+    BLIX_V1_USER_MESSAGE,
+)
 from blix_agent_worker.agents.callables import (
     CallableCatalog,
     CallableCatalogError,
     CallableNotFoundError,
     restrict_callable_ids,
-)
-from blix_agent_worker.agents.general_conversation.prompt import (
-    GENERAL_CONVERSATION_V1_CONTEXT_SECTION,
-    GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION,
-    GENERAL_CONVERSATION_V1_SYSTEM_PROMPT,
-    GENERAL_CONVERSATION_V1_USER_MESSAGE,
 )
 from blix_agent_worker.agents.registry import AgentRegistryError
 from blix_agent_worker.agents.runner import AgentRunner
@@ -54,7 +54,7 @@ from blix_agent_worker.tools import ToolRunner
 from blix_agent_worker.tools.registry import ToolRegistryError
 
 
-class GeneralConversationV1Input(ContractModel):
+class BlixV1Input(ContractModel):
     messages: Annotated[tuple[ConversationMessage, ...], Field(min_length=1)]
     notifications: tuple[JsonObject, ...] = ()
 
@@ -65,18 +65,18 @@ class GeneralConversationV1Input(ContractModel):
         return self
 
 
-class GeneralConversationV1Output(ContractModel):
+class BlixV1Output(ContractModel):
     message: NonEmptyText
 
 
-class GeneralConversationV1Agent:
+class BlixV1Agent:
     definition = AgentDefinition(
-        id="general_conversation_v1",
+        id="blix_v1",
         kind=AgentKind.ENTRYPOINT,
         description="Handle a general text conversation and use available tools when helpful.",
-        instructions=GENERAL_CONVERSATION_V1_SYSTEM_PROMPT,
-        input_schema=GeneralConversationV1Input.model_json_schema(mode="validation"),
-        output_schema=GeneralConversationV1Output.model_json_schema(mode="serialization"),
+        instructions=BLIX_V1_SYSTEM_PROMPT,
+        input_schema=BlixV1Input.model_json_schema(mode="validation"),
+        output_schema=BlixV1Output.model_json_schema(mode="serialization"),
         model_profile="general_reasoning",
         tool_ids=(
             "current_time_v1",
@@ -101,11 +101,13 @@ class GeneralConversationV1Agent:
         model: LanguageModel,
         tool_runner: ToolRunner,
         agent_runner: AgentRunner,
+        on_before_model: Callable[[ModelRequest], Awaitable[ModelRequest]] | None = None,
         on_tool_result: Callable[[ToolCall, ToolResult, AgentExecutionState], Awaitable[None]] | None = None,
         on_model_response: Callable[[int, ModelResponse, AgentExecutionState], Awaitable[None]] | None = None,
         on_background_agent: Callable[[AgentTask, str], Awaitable[str]] | None = None,
     ) -> None:
         self._model = model
+        self._on_before_model = on_before_model
         self._tool_runner = tool_runner
         self._agent_runner = agent_runner
         self._on_tool_result = on_tool_result
@@ -123,7 +125,7 @@ class GeneralConversationV1Agent:
             return self._failure(task, "agent_mismatch", "The task targets a different agent.")
 
         try:
-            agent_input = GeneralConversationV1Input.model_validate(task.input)
+            agent_input = BlixV1Input.model_validate(task.input)
         except ValidationError as error:
             return self._failure(
                 task,
@@ -131,9 +133,9 @@ class GeneralConversationV1Agent:
                 "The conversation agent input is invalid.",
                 details=validation_error_details(error),
             )
-        if any(message.run_id != task.run_id for message in agent_input.messages):
+        if any(message.conversation_id != task.conversation_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the task run.")
-        if any(message.parent_execution_id != task.execution_id for message in agent_input.messages):
+        if any(message.session_id != task.session_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the agent execution.")
 
         try:
@@ -150,7 +152,7 @@ class GeneralConversationV1Agent:
         allowed_subagent_ids = frozenset(definition.id for definition in subagent_definitions)
 
         system_prompt = self.definition.instructions
-        system_prompt += GENERAL_CONVERSATION_V1_MESSAGE_INDEX_SECTION.format(
+        system_prompt += BLIX_V1_MESSAGE_INDEX_SECTION.format(
             message_index=json.dumps(
                 [
                     {
@@ -165,7 +167,7 @@ class GeneralConversationV1Agent:
             )
         )
         if task.context:
-            system_prompt += GENERAL_CONVERSATION_V1_CONTEXT_SECTION.format(
+            system_prompt += BLIX_V1_CONTEXT_SECTION.format(
                 context=json.dumps(task.context, ensure_ascii=False, separators=(",", ":"))
             )
         if agent_input.notifications:
@@ -185,9 +187,7 @@ class GeneralConversationV1Agent:
                             else ModelMessageRole.ASSISTANT
                         ),
                         content=(
-                            GENERAL_CONVERSATION_V1_USER_MESSAGE.format(
-                                message_id=message.message_id, content=message.content
-                            )
+                            BLIX_V1_USER_MESSAGE.format(message_id=message.message_id, content=message.content)
                             if message.role is ConversationMessageRole.USER
                             else message.content
                         ),
@@ -220,7 +220,7 @@ class GeneralConversationV1Agent:
 
         if phase is AgentExecutionPhase.WAITING_FOR_AGENT:
             pending = state.pending_agent_call if state is not None else None
-            if pending is None or pending.task.parent_execution_id != task.execution_id:
+            if pending is None or pending.task.parent_session_id != task.session_id:
                 return self._failure(task, "invalid_execution_state", "The pending agent call is invalid.", usage=usage)
             if resume_result is None:
                 return self._failure(
@@ -256,11 +256,11 @@ class GeneralConversationV1Agent:
                         "The completed execution state has no final model message.",
                         usage=usage,
                     )
-                output = GeneralConversationV1Output(message=response_message.content)
+                output = BlixV1Output(message=response_message.content)
                 return AgentResult(
-                    run_id=task.run_id,
-                    execution_id=task.execution_id,
-                    parent_execution_id=task.parent_execution_id,
+                    conversation_id=task.conversation_id,
+                    session_id=task.session_id,
+                    parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
                     output=output.model_dump(mode="json"),
@@ -270,14 +270,17 @@ class GeneralConversationV1Agent:
             if phase is AgentExecutionPhase.READY_FOR_MODEL:
                 model_calls = usage.model_calls + 1
                 try:
-                    response = await self._model.complete(
-                        ModelRequest(
-                            sequence=model_calls,
-                            messages=tuple(messages),
-                            callables=catalog.definitions,
-                            continuation=continuation,
-                        )
+                    request = ModelRequest(
+                        sequence=model_calls,
+                        messages=tuple(messages),
+                        callables=catalog.definitions,
+                        continuation=continuation,
                     )
+                    if self._on_before_model is not None:
+                        request = await self._on_before_model(request)
+                    messages = list(request.messages)
+                    continuation = request.continuation
+                    response = await self._model.complete(request)
                 except ModelClientError as error:
                     return self._failure(
                         task,
@@ -356,7 +359,7 @@ class GeneralConversationV1Agent:
                             usage=usage,
                         )
                     try:
-                        child_execution_id = await self._on_background_agent(child_task, model_call_request.ref)
+                        child_session_id = await self._on_background_agent(child_task, model_call_request.ref)
                     except Exception as error:
                         return self._failure(
                             task,
@@ -371,7 +374,7 @@ class GeneralConversationV1Agent:
                             content=json.dumps(
                                 {
                                     "status": "started",
-                                    "execution_id": child_execution_id,
+                                    "task_id": child_session_id,
                                     "agent_id": child_task.agent_id,
                                     "background": True,
                                 },
@@ -404,17 +407,18 @@ class GeneralConversationV1Agent:
 
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(
-                run_id=task.run_id,
+                conversation_id=task.conversation_id,
                 call_id=new_ulid("call"),
-                parent_execution_id=task.execution_id,
+                parent_session_id=task.session_id,
                 tool_id=model_call_request.callable_id,
                 arguments=model_call_request.arguments,
+                idempotency_key=model_call_request.ref,
             )
             if model_call_request.callable_id not in allowed_tool_ids:
                 tool_result = ToolResult(
-                    run_id=call.run_id,
+                    conversation_id=call.conversation_id,
                     call_id=call.call_id,
-                    parent_execution_id=call.parent_execution_id,
+                    parent_session_id=call.parent_session_id,
                     status=ToolResultStatus.FAILED,
                     error=ContractError(
                         code="tool_not_allowed",
@@ -499,9 +503,9 @@ class GeneralConversationV1Agent:
         usage: AgentUsage | None = None,
     ) -> AgentResult:
         return AgentResult(
-            run_id=task.run_id,
-            execution_id=task.execution_id,
-            parent_execution_id=task.parent_execution_id,
+            conversation_id=task.conversation_id,
+            session_id=task.session_id,
+            parent_session_id=task.parent_session_id,
             agent_id=task.agent_id,
             status=AgentResultStatus.FAILED,
             usage=usage or AgentUsage(),

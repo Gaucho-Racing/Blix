@@ -47,7 +47,7 @@ not primary evidence. Prefer proposals for summaries and preserve their underlyi
 Attribute these statements and preserve uncertainty; neither
 a supplied URL nor repetition of a claim counts as inspected primary-source corroboration. Direct publication
 is available for well-supported, unambiguous primary-source updates or an explicit instruction to publish;
-there is no mandatory human-approval gate. In apply mode you may still stop at a proposal when the evidence
+the runtime requires human approval before publication. In apply mode you may still stop at a proposal when the evidence
 does not justify publication, explaining the reason in warnings. Never publish in propose mode.
 
 Use a single knowledge_propose_v1 changeset for related edits, with the base commit SHA from the page reads.
