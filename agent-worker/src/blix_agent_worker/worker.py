@@ -17,6 +17,7 @@ from blix_agent_worker.agents.blix import (
 )
 from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
 from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
+from blix_agent_worker.agents.document_ingest.visual_extraction import DocumentVisualExtractor
 from blix_agent_worker.agents.document_qa.document_qa_v1 import DocumentQAV1Agent, DocumentQAV1Output
 from blix_agent_worker.agents.knowledge_curator import KnowledgeCuratorV1Agent
 from blix_agent_worker.clients import (

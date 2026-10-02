@@ -400,6 +400,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_document_model_streams_keep_their_call_ids_and_text(self):
         from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
+        from blix_agent_worker.agents.document_ingest.visual_extraction import DocumentVisualExtractor
         from blix_agent_worker.clients.sentinel import SentinelUser
         from blix_agent_worker.models.llm import ModelRequest
         from blix_agent_worker.worker import ApiRuntime
@@ -443,24 +444,35 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(message=assistant("Saved"))
 
         async def run(agent, invocation, **kwargs):
-            async def complete(sequence):
+            self.assertIsInstance(agent.visual_extractor, DocumentVisualExtractor)
+
+            async def complete(model, on_response, sequence):
                 request = ModelRequest(sequence=sequence, messages=(assistant("Read"),))
-                response = await agent.model.complete(await agent.model.prepare(request))
-                await agent.on_response(sequence, response)
-            await asyncio.gather(complete(1), complete(2))
+                response = await model.complete(await model.prepare(request))
+                await on_response(sequence, response)
+            await asyncio.gather(
+                complete(agent.model, agent.on_response, 1),
+                complete(agent.model, agent.on_response, 2),
+                complete(agent.visual_extractor.model, agent.visual_extractor.on_response, 10003),
+            )
             return AgentResult(
                 run_id=invocation.run_id, session_id=invocation.session_id,
                 agent_id=invocation.agent_id, status=AgentResultStatus.SUCCEEDED, output={},
             )
 
+        vision = Model()
+        vision.model = "test-document-vision"
         with patch.object(DocumentIngestV1Agent, "run", run):
             await asyncio.wait_for(
-                Runtime({"research": Model()}, None, None, None, None, None).execute(execution, Lease()),
+                Runtime({"research": Model(), "document_vision": vision}, None, None, None, None, None).execute(execution, Lease()),
                 timeout=1,
             )
         calls = {event["entity_id"]: event["payload"]["sequence"]
                  for event in events if event["type"] == "model.call_v1"}
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
+        responses = {event["payload"]["sequence"]: event["payload"]["model"]
+                     for event in events if event["type"] == "model.response_v1"}
+        self.assertEqual(responses, {1: "test-document", 2: "test-document", 10003: "test-document-vision"})
         for call_id, sequence in calls.items():
             streamed = "".join(event["payload"]["delta"] for event in events
                                if event["type"] == "model.output.delta_v1" and event["entity_id"] == call_id)
