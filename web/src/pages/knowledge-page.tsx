@@ -301,7 +301,7 @@ export function KnowledgePage() {
           role="group"
           aria-label="Document review status"
         >
-          {(["pending", "in_review", "ingested", "rejected"] as const).map(
+          {(["ingested", "in_review", "rejected", "pending"] as const).map(
             (status) => (
               <button
                 key={status}
