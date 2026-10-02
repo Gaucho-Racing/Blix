@@ -11,7 +11,6 @@ import {
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { ChatMessage } from "@/components/chat-message"
-import { ChatDocumentContext } from "@/components/chat-document-context"
 import { useAuth } from "@/lib/auth"
 import {
   activeStatus,
@@ -159,8 +158,6 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
   const navigate = useNavigate()
   const cache = useQueryClient()
   const [draft, setDraft] = useState("")
-  const [documentIDs, setDocumentIDs] = useState<string[]>([])
-  const [scopeLocked, setScopeLocked] = useState(false)
   const pendingConversation = useRef("")
   const end = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -209,10 +206,7 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
   const send = useMutation({
     mutationFn: async (content: string) => {
       if (!conversationID && !pendingConversation.current) {
-        pendingConversation.current = (
-          await createConversation(documentIDs)
-        ).conversation_id
-        setScopeLocked(true)
+        pendingConversation.current = (await createConversation()).conversation_id
       }
       const id = conversationID || pendingConversation.current
       await appendMessage(id, content)
@@ -374,19 +368,6 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
                 send.mutate(draft.trim())
             }}
           >
-            <ChatDocumentContext
-              documentIDs={
-                conversationID
-                  ? (data?.conversation.document_ids ?? [])
-                  : documentIDs
-              }
-              onChange={
-                !conversationID && !scopeLocked && !send.isPending
-                  ? setDocumentIDs
-                  : undefined
-              }
-              disabled={!permitted}
-            />
             {(send.error || stop.error) && (
               <p role="alert" className="runtime-error">
                 {errorMessage(send.error || stop.error)}
@@ -413,7 +394,6 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
               }}
             />
             <div>
-              <Link to="/knowledge">Import PDF</Link>
               <span>Enter to send · Shift + Enter for a new line</span>
               {working && (
                 <button

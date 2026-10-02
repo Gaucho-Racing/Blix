@@ -96,9 +96,7 @@ func documentRetrievalQuery(db *gorm.DB, scope DocumentRetrievalScope, id string
 		return nil, ErrInvalid
 	}
 	query := db.Table("knowledge_document d").Joins("LEFT JOIN knowledge_source s ON s.id = d.source_id").Where("(d.source_id = '' OR s.status = ?)", model.SourceStatusActive).Where("d.review_status <> ?", model.DocumentReviewRejected)
-	if scope.Team {
-		query = query.Where("d.review_status = ?", model.DocumentReviewIngested)
-	} else {
+	if !scope.Team {
 		if id != "" && !slices.Contains(scope.DocumentIDs, id) {
 			return nil, ErrForbidden
 		}

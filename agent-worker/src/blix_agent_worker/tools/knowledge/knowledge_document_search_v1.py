@@ -9,7 +9,7 @@ from blix_agent_worker.tools.knowledge._shared import KnowledgeTool
 
 class KnowledgeDocumentSearchV1Input(ContractModel):
     operation: Literal["search", "read_page", "list_documents"]
-    scope: Literal["conversation", "team"] = "conversation"
+    scope: Literal["conversation", "team"] = "team"
     document_id: DocumentID | None = None
     query: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     page: Annotated[int, Field(ge=1, le=500)] | None = None
@@ -39,8 +39,10 @@ class KnowledgeDocumentSearchV1Tool(KnowledgeTool):
         id="knowledge_document_search_v1",
         description=(
             "Search original PDF evidence or read a cited page, without waiting for wiki ingestion. "
-            "Conversation scope searches only documents explicitly attached to this chat; team scope searches "
-            "only approved documents. list_documents returns document IDs, review status and search readiness. "
+            "Team scope is the default and searches all non-rejected documents in the Knowledge library, including "
+            "Pending and In Review documents as soon as extracted pages are available. No attachment is required. "
+            "Conversation scope is limited to document IDs in trusted context, such as an ingestion session. "
+            "list_documents returns document IDs, review status and search readiness. "
             "Search uses keywords: try alternate terms when needed and preserve exact rule identifiers. "
             "Hits include original source-record IDs, PDF page numbers, exact UTF-8 byte offsets and citation_url. "
             "Use read_page to verify surrounding requirements and exceptions, including adjacent pages; follow "

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -51,8 +52,9 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 		}
 		return doc
 	}
-	first := importDoc([]string{"T.3.2 Brake pressure requires two circuits.\nExceptions: inspect the next page.", "Testing qualifications and participation in 2027.", ""})
-	second := importDoc([]string{"T.3.20 Brake pressure is a different rule.", "Unrelated battery voltage."})
+	libraryTerm := strings.ReplaceAll(identifier.New(identifier.Document), "_", "")
+	first := importDoc([]string{"T.3.2 Brake pressure requires two circuits.\nExceptions: inspect the next page. " + libraryTerm, "Testing qualifications and participation in 2027.", ""})
+	second := importDoc([]string{"T.3.20 Brake pressure is a different rule. " + libraryTerm, "Unrelated battery voltage."})
 	if err := db.Model(&first.Document).Updates(map[string]any{"review_status": model.DocumentReviewPending, "status": "reading"}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +81,28 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 	if len(search("brake pressure", DocumentRetrievalScope{}, "").Results) != 0 {
 		t.Fatal("empty scope leaked pending evidence")
 	}
-	if len(search("brake pressure", DocumentRetrievalScope{Team: true}, first.Document.ID).Results) != 0 {
-		t.Fatal("pending evidence leaked into team search")
+	library := DocumentRetrievalScope{Team: true}
+	for _, status := range []string{model.DocumentReviewPending, model.DocumentReviewInReview} {
+		if err := db.Model(&first.Document).Update("review_status", status).Error; err != nil {
+			t.Fatal(err)
+		}
+		result := search(libraryTerm, library, "")
+		if len(result.Results) != 2 {
+			t.Fatalf("library search requires attachments for %s evidence: %+v", status, result)
+		}
+		for _, hit := range result.Results {
+			if hit.DocumentID == first.Document.ID && hit.ReviewStatus != status {
+				t.Fatal("library search did not preserve the document review status")
+			}
+		}
+		page, err := s.ReadEvidencePage(ctx, first.Document.ID, 1, 0, library)
+		if err != nil || page.ReviewStatus != status {
+			t.Fatalf("unapproved library page: %+v %v", page, err)
+		}
+	}
+	documents, err := s.ListRetrievableDocuments(ctx, library)
+	if err != nil || !slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == first.Document.ID }) || !slices.ContainsFunc(documents, func(document DocumentSearchContext) bool { return document.DocumentID == second.Document.ID }) {
+		t.Fatalf("library document discovery: %+v %v", documents, err)
 	}
 	if _, err := s.SearchSources(ctx, DocumentSearchOptions{Query: "brakes", Limit: 8, DocumentID: second.Document.ID}, scope); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("scope override accepted: %v", err)
@@ -103,13 +125,19 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(search("brake pressure", DocumentRetrievalScope{Team: true}, first.Document.ID).Results) != 1 {
-		t.Fatal("approved document did not become team-searchable")
+		t.Fatal("approved document did not remain team-searchable")
 	}
 	if err := db.Model(&first.Document).Update("review_status", model.DocumentReviewRejected).Error; err != nil {
 		t.Fatal(err)
 	}
 	if len(search("brake pressure", scope, "").Results) != 0 {
 		t.Fatal("rejected document remained searchable")
+	}
+	if len(search("brake pressure", library, first.Document.ID).Results) != 0 {
+		t.Fatal("rejected document remained in library search")
+	}
+	if _, err := s.ReadEvidencePage(ctx, first.Document.ID, 1, 0, library); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejected library page remained agent-readable: %v", err)
 	}
 	if _, err := s.ReadEvidencePage(ctx, first.Document.ID, 1, 0, scope); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rejected page remained agent-readable: %v", err)

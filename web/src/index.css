@@ -710,17 +710,8 @@ h1, h2, h3, p { margin-top: 0; }
 .runtime-composer { margin: 0 36px 24px; border: 1px solid #e3dce6; border-radius: 14px; padding: 14px; background: white; box-shadow: 0 3px 12px #32102a06; }
 .runtime-composer textarea { width: 100%; resize: vertical; min-height: 56px; max-height: 250px; border: 0; outline: 0; font-size: 13px; line-height: 1.6; background: transparent; }
 .runtime-composer > div { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
-.runtime-composer > div > a { color: #a32d80; font-size: 11px; }
 .runtime-composer > div > span { flex: 1; font-size: 10px; color: #99929e; }
 .runtime-composer .primary-button { padding: 8px; border-radius: 8px; }
-.chat-document-context { display: grid; gap: 10px; margin-bottom: 12px; }
-.chat-document-context > .themed-select-trigger { max-width: 360px; font-size: 13px; }
-.chat-document-context ul { display: flex; flex-wrap: wrap; gap: 8px; }
-.chat-document-context li { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
-.chat-document-context li > svg { flex-shrink: 0; color: var(--pink); }
-.chat-document-context li > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; }
-.chat-document-context li > span { flex-shrink: 0; color: var(--muted); font-size: 11px; }
-.chat-document-context li > button { display: grid; place-items: center; padding: 2px; color: var(--muted); cursor: pointer; }
 .runtime-working { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #928399; padding: 16px 0; }
 .runtime-error { color: #b13b51 !important; background: #fff2f4; border: 1px solid #f5dbe1; border-radius: 7px; padding: 10px 12px; font-size: 12px; line-height: 1.6; margin: 12px 0; overflow-wrap: anywhere; }
 .runtime-error button { color: #932b56; text-decoration: underline; cursor: pointer; }
@@ -745,16 +736,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
 .document-card { padding: 24px; display: block; transition: border-color .15s; }
 .document-card:hover { border-color: #d9a2c7; }
-.document-card > div { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; color: #bca3b8; }
+.document-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; color: #bca3b8; }
+.document-card-header > svg:first-child { color: #9a7592; }
+.document-card > .document-tags { margin-top: 16px; }
 .document-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .document-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 6px; color: var(--pink-strong); background: var(--pink-soft); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.document-card > div { gap: 12px; align-items: flex-start; }
-.document-card > div > svg { flex-shrink: 0; margin-left: auto; }
 .document-page > .workspace-toolbar .document-tags { margin-top: 12px; }
-.document-card > svg { color: #9a7592; }
 .document-card h3 { font-size: 15px; line-height: 1.5; margin: 12px 0 8px; }
 .document-card p { font-size: 12px; color: #88778a; }
-.document-card footer { display: flex; justify-content: space-between; border-top: 1px solid #f0e9ef; padding-top: 14px; margin-top: 24px; font-size: 11px; color: #9b8f9f; }
+.document-card footer { display: flex; justify-content: space-between; border-top: 1px solid #f0e9ef; padding-top: 14px; margin-top: 16px; font-size: 11px; color: #9b8f9f; }
 .document-empty { text-align: center; padding: 48px 24px; border: 1px dashed #e2d9e4; border-radius: 12px; color: #a08ca3; }
 .document-empty h3 { color: #67576e; font-size: 16px; margin: 12px 0 6px; }
 .document-empty p { font-size: 13px; margin: 0 0 18px; }

@@ -35,7 +35,7 @@ class DocumentSearchTests(unittest.IsolatedAsyncioTestCase):
         params = requests[0][2]["params"]
         self.assertEqual(params["conversation_id"], call.conversation_id)
         self.assertEqual(params["session_id"], call.parent_session_id)
-        self.assertEqual(params["scope"], "conversation")
+        self.assertEqual(params["scope"], "team")
         self.assertEqual(params["q"], "T.3.2 brakes")
 
     def test_invalid_operations_and_scope_overrides_are_rejected(self):

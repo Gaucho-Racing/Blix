@@ -17,7 +17,6 @@ import {
   importDocument,
   listDocuments,
   searchWiki,
-  documentStatusLabel,
   validateDocumentFile,
   documentReviewLabel,
   type DocumentReviewStatus,
@@ -348,11 +347,10 @@ export function KnowledgePage() {
                 key={document.document_id}
                 to={`/knowledge/documents/${document.document_id}`}
               >
-                <div>
-                  <DocumentTags tags={document.tags} />
+                <div className="document-card-header">
+                  <FileText size={24} />
                   <ArrowRight size={16} />
                 </div>
-                <FileText size={24} />
                 <StatusBadge
                   status={
                     document.review_status === "pending"
@@ -367,8 +365,8 @@ export function KnowledgePage() {
                     .join(" · ") ||
                     "Document details will be identified during ingestion"}
                 </p>
+                <DocumentTags tags={document.tags} />
                 <footer>
-                  {documentStatusLabel(document.status)} ·{" "}
                   {document.page_count || "—"} pages
                   <span>{document.published_at?.slice(0, 10)}</span>
                 </footer>
