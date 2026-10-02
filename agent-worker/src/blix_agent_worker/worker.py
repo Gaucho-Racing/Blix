@@ -16,6 +16,7 @@ from blix_agent_worker.agents.blix import (
     BlixV1Output,
 )
 from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
+from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
 from blix_agent_worker.agents.knowledge_curator import KnowledgeCuratorV1Agent
 from blix_agent_worker.clients import (
     ExecutionContext,
@@ -56,6 +57,7 @@ from blix_agent_worker.tools.knowledge import (
     KnowledgeSourceCreateV1Tool,
     KnowledgeSourceRecordCreateV1Tool,
 )
+from blix_agent_worker.tools.knowledge.knowledge_document_read_v1 import KnowledgeDocumentReadV1Tool
 from blix_agent_worker.tools.sentinel_api import SentinelApiV1Tool
 from blix_agent_worker.tools.sentinel_identity import SentinelIdentityResolveV1Tool
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
@@ -315,6 +317,7 @@ class ApiRuntime:
                     DiscordSearchV1Tool(self.discord, self.sentinel),
                     DiscordWebhookSendV1Tool(self.discord, caller),
                     KnowledgeReadV1Tool(self.knowledge),
+                    KnowledgeDocumentReadV1Tool(self.knowledge),
                     KnowledgeEvidenceReadV1Tool(self.knowledge),
                     KnowledgeSourceCreateV1Tool(self.knowledge),
                     KnowledgeSourceRecordCreateV1Tool(self.knowledge, self.sentinel),
@@ -345,7 +348,32 @@ class ApiRuntime:
             on_tool_result=checkpoint_tool,
             on_model_response=checkpoint_model,
         )
-        registry = AgentRegistry([research, curator])
+        async def document_response(sequence: int, response: ModelResponse) -> None:
+            await flush_delta()
+            await lease.events([{
+                "type": "model.response_v1",
+                "entity_id": response.call_id,
+                "payload": {
+                    "sequence": sequence,
+                    "model": base_model.model,
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "response": response.model_dump(mode="json", exclude={"continuation"}),
+                },
+            }])
+
+        document_ingest = DocumentIngestV1Agent(
+            client=self.knowledge,
+            model=model,
+            curator=curator,
+            execution={
+                "attempt_id": execution.attempt.attempt_id,
+                "worker_id": execution.attempt.worker_id,
+                "fencing_token": execution.attempt.fencing_token,
+            },
+            on_response=document_response,
+        )
+        registry = AgentRegistry([research, curator, document_ingest])
 
         async def background(task: AgentTask, ref: str) -> str:
             response = await lease.delegate(task, ref, background=True)
@@ -411,6 +439,13 @@ class ApiRuntime:
             await lease.delegate(
                 outcome.child_task, pending.request_ref, background=False, state=outcome.state.model_dump(mode="json")
             )
+        elif (
+            execution.task is not None
+            and outcome.agent_id == "document_ingest_v1"
+            and outcome.error is not None
+            and outcome.error.retryable
+        ):
+            await lease.post("fail", {"error": outcome.error.model_dump(mode="json"), "retryable": True})
         elif execution.task is not None:
             await lease.post(
                 "complete", {"result": outcome.model_dump(mode="json"), "usage": outcome.usage.model_dump(mode="json")}

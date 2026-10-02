@@ -108,6 +108,10 @@ services:
       DATABASE_PASSWORD: password
       DATABASE_NAME: blix
       DOCUMENT_STORAGE_PATH: /data/documents
+      DEPOT_URL: ${DEPOT_URL:-}
+      DEPOT_BUCKET: ${DEPOT_BUCKET:-blix-documents}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN:-}
+      RUNWAY_URL: http://runway:9999
       WIKI_REPOSITORY_URL: https://github.com/gaucho-racing/blixwiki.git
       WIKI_REPOSITORY_BRANCH: main
       WIKI_REPOSITORY_PATH: /data/wiki

@@ -29,7 +29,7 @@ class KnowledgeProposeV1Input(ContractModel):
     base_commit_sha: CommitSHA
     type: Literal["content", "structural"] = "content"
     season_slug: Annotated[str, Field(pattern=r"^([a-z0-9][a-z0-9_-]{0,63})?$")] = ""
-    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=100)]
+    source_record_ids: Annotated[tuple[SourceRecordID, ...], Field(min_length=1, max_length=500)]
     files: Annotated[tuple[KnowledgeFileEdit, ...], Field(min_length=1, max_length=100)]
 
     @model_validator(mode="after")

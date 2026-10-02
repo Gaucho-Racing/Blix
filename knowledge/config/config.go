@@ -9,22 +9,26 @@ import (
 )
 
 type Config struct {
-	Environment          string
-	Port                 string
-	DatabaseHost         string
-	DatabasePort         string
-	DatabaseUser         string
-	DatabasePassword     string
-	DatabaseName         string
-	WikiRepositoryURL    string
-	WikiRepositoryBranch string
-	WikiRepositoryPath   string
-	DocumentStoragePath  string
-	GitHubAppID          string
-	GitHubInstallationID string
-	GitHubPrivateKey     string
-	SentinelURL          string
-	SentinelClientID     string
+	DepotURL                    string
+	DepotBucket                 string
+	SentinelServiceAccountToken string
+	RunwayURL                   string
+	Environment                 string
+	Port                        string
+	DatabaseHost                string
+	DatabasePort                string
+	DatabaseUser                string
+	DatabasePassword            string
+	DatabaseName                string
+	WikiRepositoryURL           string
+	WikiRepositoryBranch        string
+	WikiRepositoryPath          string
+	DocumentStoragePath         string
+	GitHubAppID                 string
+	GitHubInstallationID        string
+	GitHubPrivateKey            string
+	SentinelURL                 string
+	SentinelClientID            string
 }
 
 func Load() (Config, error) {
@@ -37,22 +41,26 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("DATABASE_PORT must be a valid TCP port")
 	}
 	configuration := Config{
-		Environment:          value("ENV", "PROD"),
-		Port:                 port,
-		DatabaseHost:         value("DATABASE_HOST", "localhost"),
-		DatabasePort:         databasePort,
-		DatabaseUser:         value("DATABASE_USER", "postgres"),
-		DatabasePassword:     value("DATABASE_PASSWORD", "password"),
-		DatabaseName:         value("DATABASE_NAME", "blix"),
-		WikiRepositoryURL:    value("WIKI_REPOSITORY_URL", "https://github.com/gaucho-racing/blixwiki.git"),
-		WikiRepositoryBranch: value("WIKI_REPOSITORY_BRANCH", "main"),
-		WikiRepositoryPath:   value("WIKI_REPOSITORY_PATH", ".data/wiki"),
-		DocumentStoragePath:  value("DOCUMENT_STORAGE_PATH", ".data/documents"),
-		GitHubAppID:          value("GITHUB_APP_ID", ""),
-		GitHubInstallationID: value("GITHUB_APP_INSTALLATION_ID", ""),
-		GitHubPrivateKey:     value("GITHUB_APP_PRIVATE_KEY", ""),
-		SentinelURL:          strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
-		SentinelClientID:     value("SENTINEL_CLIENT_ID", ""),
+		DepotURL:                    strings.TrimRight(value("DEPOT_URL", ""), "/"),
+		DepotBucket:                 value("DEPOT_BUCKET", "blix-documents"),
+		SentinelServiceAccountToken: value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
+		RunwayURL:                   strings.TrimRight(value("RUNWAY_URL", "http://runway:9999"), "/"),
+		Environment:                 value("ENV", "PROD"),
+		Port:                        port,
+		DatabaseHost:                value("DATABASE_HOST", "localhost"),
+		DatabasePort:                databasePort,
+		DatabaseUser:                value("DATABASE_USER", "postgres"),
+		DatabasePassword:            value("DATABASE_PASSWORD", "password"),
+		DatabaseName:                value("DATABASE_NAME", "blix"),
+		WikiRepositoryURL:           value("WIKI_REPOSITORY_URL", "https://github.com/gaucho-racing/blixwiki.git"),
+		WikiRepositoryBranch:        value("WIKI_REPOSITORY_BRANCH", "main"),
+		WikiRepositoryPath:          value("WIKI_REPOSITORY_PATH", ".data/wiki"),
+		DocumentStoragePath:         value("DOCUMENT_STORAGE_PATH", ".data/documents"),
+		GitHubAppID:                 value("GITHUB_APP_ID", ""),
+		GitHubInstallationID:        value("GITHUB_APP_INSTALLATION_ID", ""),
+		GitHubPrivateKey:            value("GITHUB_APP_PRIVATE_KEY", ""),
+		SentinelURL:                 strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
+		SentinelClientID:            value("SENTINEL_CLIENT_ID", ""),
 	}
 	parsedRepositoryURL, err := url.ParseRequestURI(configuration.WikiRepositoryURL)
 	if err != nil || parsedRepositoryURL.Scheme != "https" || parsedRepositoryURL.Host != "github.com" ||
@@ -69,6 +77,15 @@ func Load() (Config, error) {
 	if err != nil || sentinelURL.Host == "" || (sentinelURL.Scheme != "http" && sentinelURL.Scheme != "https") ||
 		sentinelURL.User != nil || sentinelURL.RawQuery != "" || sentinelURL.Fragment != "" {
 		return Config{}, fmt.Errorf("SENTINEL_URL must be an HTTP or HTTPS URL without credentials, query, or fragment")
+	}
+	for name, raw := range map[string]string{"DEPOT_URL": configuration.DepotURL, "RUNWAY_URL": configuration.RunwayURL} {
+		if raw == "" {
+			continue
+		}
+		parsed, err := url.ParseRequestURI(raw)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return Config{}, fmt.Errorf("%s must be an HTTP or HTTPS URL without credentials, query, or fragment", name)
+		}
 	}
 	return configuration, nil
 }

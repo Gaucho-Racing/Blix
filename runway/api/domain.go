@@ -176,6 +176,54 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.Status(http.StatusNoContent)
 	})
 	internal := router.Group("/internal/v1", internalAuthentication)
+	internal.POST("/document-attempts/validate", func(c *gin.Context) {
+		var request service.DocumentAttemptAccess
+		if c.ShouldBindJSON(&request) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		result, err := h.executions.ValidateDocumentAttempt(c.Request.Context(), request)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
+	internal.POST("/document-ingestions", func(c *gin.Context) {
+		var request service.DocumentIngestionRequest
+		if c.ShouldBindJSON(&request) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		result, err := h.executions.StartDocumentIngestion(c.Request.Context(), request)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusAccepted, result)
+	})
+	internal.GET("/tasks/:taskID", func(c *gin.Context) {
+		result, err := h.executions.GetTask(c.Request.Context(), c.Param("taskID"))
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
+	internal.POST("/tasks/:taskID/:operation", func(c *gin.Context) {
+		var request struct {
+			Owner string `json:"owner"`
+		}
+		if c.ShouldBindJSON(&request) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		if err := h.executions.ControlTask(c.Request.Context(), c.Param("taskID"), request.Owner, c.Param("operation"), ""); err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{})
+	})
 	internal.POST("/workers/register", h.RegisterWorker)
 	internal.POST("/workers/:workerID/heartbeat", h.HeartbeatWorker)
 	internal.POST("/attempts/:attemptID/claim", func(c *gin.Context) {

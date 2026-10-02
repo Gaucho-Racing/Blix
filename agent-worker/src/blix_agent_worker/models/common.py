@@ -23,6 +23,7 @@ IdentifierPrefix = Literal[
     "ent",
     "usr",
     "sa",
+    "document",
     "source",
     "sourcerecord",
     "changeset",
@@ -53,6 +54,7 @@ def _prefixed_ulid(prefix: IdentifierPrefix) -> object:
     ]
 
 
+DocumentID = _prefixed_ulid("document")
 ConversationID = _prefixed_ulid("conversation")
 SessionID = _prefixed_ulid("session")
 TurnID = _prefixed_ulid("turn")

@@ -56,7 +56,7 @@ from blix_agent_worker.tools.registry import ToolRegistryError
 
 
 class BlixV1Input(ContractModel):
-    messages: Annotated[tuple[ConversationMessage, ...], Field(min_length=1)]
+    messages: Annotated[tuple[ConversationMessage, ...], Field(min_length=0)]
     notifications: tuple[JsonObject, ...] = ()
     reply_to_message_id: MessageID | None = None
 
@@ -69,6 +69,8 @@ class BlixV1Input(ContractModel):
             ):
                 raise ValueError("reply_to_message_id must identify a user message in this conversation")
             return self
+        if not self.messages and not self.notifications:
+            raise ValueError("a lead turn requires conversation messages or completion notifications")
         if not self.notifications and self.messages[-1].role is not ConversationMessageRole.USER:
             raise ValueError("the latest conversation message must be from the user")
         return self
@@ -95,6 +97,7 @@ class BlixV1Agent:
             "discord_webhook_send_v1",
             "knowledge_remember_v1",
             "knowledge_read_v1",
+            "knowledge_document_read_v1",
             "sentinel_api_v1",
             "sentinel_identity_resolve_v1",
             "sentinel_impersonate_v1",

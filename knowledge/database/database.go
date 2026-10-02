@@ -42,6 +42,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.WikiSection{},
 		&model.Document{},
 		&model.DocumentPage{},
+		&model.DocumentChunk{}, &model.DocumentNotesRevision{},
 		&model.Source{},
 		&model.SourceIdentity{},
 		&model.SourceRecord{},

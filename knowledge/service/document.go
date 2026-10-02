@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
+	"github.com/gaucho-racing/blix/knowledge/pkg/depot"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 	"gorm.io/gorm"
 )
@@ -35,8 +37,11 @@ type DocumentMetadata struct {
 }
 
 type DocumentDetails struct {
-	Document model.Document       `json:"document"`
-	Pages    []model.DocumentPage `json:"pages"`
+	Document   model.Document               `json:"document"`
+	Pages      []model.DocumentPage         `json:"pages"`
+	Chunks     []model.DocumentChunk        `json:"chunks"`
+	Notes      *model.DocumentNotesRevision `json:"notes"`
+	Changesets []model.Changeset            `json:"changesets"`
 }
 
 type PDFExtractor interface {
@@ -48,6 +53,8 @@ type DocumentService struct {
 	directory string
 	extractor PDFExtractor
 	slots     chan struct{}
+	depot     *depot.Client
+	runtime   *DocumentRuntimeClient
 }
 
 func NewDocumentService(db *gorm.DB, directory string, extractor PDFExtractor) *DocumentService {
@@ -233,11 +240,30 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 	if !identifier.IsValid(id, identifier.Document) {
 		return DocumentDetails{}, ErrInvalid
 	}
-	result := DocumentDetails{Pages: []model.DocumentPage{}}
-	if err := s.db.WithContext(ctx).First(&result.Document, "id = ?", id).Error; err != nil {
-		return result, mapDatabaseError(err)
-	}
-	err := s.db.WithContext(ctx).Where("document_id = ?", id).Order("number").Find(&result.Pages).Error
+	result := DocumentDetails{Pages: []model.DocumentPage{}, Chunks: []model.DocumentChunk{}, Changesets: []model.Changeset{}}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&result.Document, "id = ?", id).Error; err != nil {
+			return mapDatabaseError(err)
+		}
+		if err := tx.Where("document_id = ?", id).Order("number").Find(&result.Pages).Error; err != nil {
+			return err
+		}
+		if err := tx.Omit("evidence", "findings").Where("document_id = ?", id).Order("number").Find(&result.Chunks).Error; err != nil {
+			return err
+		}
+		var notes []model.DocumentNotesRevision
+		if err := tx.Where("document_id = ?", id).Order("revision DESC").Limit(1).Find(&notes).Error; err != nil {
+			return err
+		}
+		if len(notes) > 0 {
+			result.Notes = &notes[0]
+		}
+		changesets := tx.Where("id IN (SELECT changeset_id FROM knowledge_changeset_source_record JOIN knowledge_document_page ON knowledge_document_page.source_record_id = knowledge_changeset_source_record.source_record_id WHERE document_id = ?)", id)
+		if result.Document.SessionID != "" {
+			changesets = changesets.Or("session_id = ?", result.Document.SessionID)
+		}
+		return changesets.Order("created_at").Find(&result.Changesets).Error
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err
 }
 func (s *DocumentService) List(ctx context.Context) ([]model.Document, error) {

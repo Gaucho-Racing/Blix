@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/gaucho-racing/blix/knowledge/api"
 	"github.com/gaucho-racing/blix/knowledge/config"
 	"github.com/gaucho-racing/blix/knowledge/database"
+	"github.com/gaucho-racing/blix/knowledge/pkg/depot"
 	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
 	"github.com/gaucho-racing/blix/knowledge/pkg/sentinel"
 	"github.com/gaucho-racing/blix/knowledge/repository"
@@ -56,5 +58,12 @@ func run(configuration config.Config) error {
 	}
 	auth := service.NewAuthService(sentinelClient)
 	documents := service.NewDocumentService(db, configuration.DocumentStoragePath, service.PopplerExtractor{})
+	documents.SetIntegration(depot.NewClient(configuration.DepotURL, configuration.DepotBucket, configuration.SentinelServiceAccountToken), service.NewDocumentRuntimeClient(configuration.RunwayURL, os.Getenv("BLIX_INTERNAL_TOKEN")))
+	documentsDone := make(chan struct{})
+	go func() {
+		defer close(documentsDone)
+		documents.Run(ctx, func(err error) { logger.SugarLogger.Warnf("document processing: %v", err) })
+	}()
+	defer func() { stop(); <-documentsDone }()
 	return api.Run(ctx, configuration.Port, configuration.IsProduction(), sources, wiki, pages, documents, auth)
 }

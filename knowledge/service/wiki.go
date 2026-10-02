@@ -173,8 +173,8 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 	if err := repository.ValidateEdits(input.Files); err != nil {
 		return ChangesetDetails{}, err
 	}
-	if origin == "agent" && (len(input.SourceRecordIDs) == 0 || len(input.SourceRecordIDs) > 100) {
-		return ChangesetDetails{}, fmt.Errorf("%w: provide between 1 and 100 source_record_ids", ErrInvalid)
+	if origin == "agent" && (len(input.SourceRecordIDs) == 0 || len(input.SourceRecordIDs) > 500) {
+		return ChangesetDetails{}, fmt.Errorf("%w: provide between 1 and 500 source_record_ids", ErrInvalid)
 	}
 	seenSources := make(map[string]struct{}, len(input.SourceRecordIDs))
 	for _, sourceRecordID := range input.SourceRecordIDs {
