@@ -817,10 +817,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-import-target strong { margin-bottom: 5px; font-size: 15px; }
 .document-import-target small { color: var(--muted); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .document-import-target { transition: none; } .document-import-target.is-dragging { transform: none; } }
-.document-upload-status { display: flex; gap: 1rem; align-items: center; padding: 1.5rem; }
-.document-upload-status > div { flex: 1; min-width: 0; }
-.document-upload-status strong { overflow-wrap: anywhere; }
-.document-upload-status .progress-bar { width: 100%; }
+.document-upload-status { display: grid; gap: 18px; padding: 24px; margin-bottom: 24px; }
+.document-upload-status h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.025em; }
+.document-upload-status h2 svg { flex-shrink: 0; color: var(--pink); }
+.document-upload-filename { min-width: 0; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.document-upload-status .document-progress { min-width: 0; margin: 0; }
 .document-metadata-panel { padding: 1.5rem; }
 .document-metadata-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
 .document-metadata-heading h2, .document-pdf-preview h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.025em; }

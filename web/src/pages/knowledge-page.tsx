@@ -199,16 +199,27 @@ export function KnowledgePage() {
         </p>
       )}
       {upload.isPending && (
-        <section className="panel document-upload-status" aria-live="polite">
-          <LoaderCircle className="spin" size={20} />
-          <div>
-            <strong>{uploadName}</strong>
-            <p>
-              {progress < 100
-                ? `Uploading ${progress}%`
-                : "Starting background ingestion…"}
-            </p>
-            <ProgressBar value={progress} label="PDF upload progress" />
+        <section
+          className="panel document-upload-status"
+          aria-labelledby="document-upload-heading"
+        >
+          <header>
+            <span className="workspace-kicker">DOCUMENT UPLOAD</span>
+            <h2 id="document-upload-heading" role="status">
+              <LoaderCircle className="spin" size={15} aria-hidden="true" />
+              {progress < 100 ? "Uploading document" : "Starting ingestion"}
+            </h2>
+          </header>
+          <p className="document-upload-filename">{uploadName}</p>
+          <div className="document-progress">
+            <ProgressBar
+              value={progress}
+              label="PDF upload progress"
+              valueText={`${progress}% uploaded`}
+            />
+            <span>
+              {progress < 100 ? `${progress}% uploaded` : "Upload complete"}
+            </span>
           </div>
         </section>
       )}
