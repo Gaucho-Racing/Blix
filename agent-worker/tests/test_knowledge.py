@@ -48,3 +48,26 @@ class KnowledgeReadTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(arguments=arguments), self.assertRaises(ValidationError):
                 KnowledgeReadV1Input(**arguments)
+
+    async def test_batched_queries_use_one_request(self):
+        requests = []
+
+        class Client:
+            async def request(self, url, method, path, **kwargs):
+                requests.append((method, path, kwargs))
+                return {"results": []}
+
+        tool = KnowledgeReadV1Tool(Client())
+        call = ToolCall(
+            conversation_id=new_ulid("conversation"),
+            parent_session_id=new_ulid("session"),
+            call_id=new_ulid("call"),
+            tool_id=tool.definition.id,
+            arguments={"operation": "search_batch", "queries": ["GR26 brakes", "GR27 brakes"]},
+        )
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await tool.execute(call)
+        self.assertEqual(result.status, ToolResultStatus.SUCCEEDED)
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0][0:2], ("POST", "search"))
+        self.assertEqual(requests[0][2]["payload"]["queries"], ["GR26 brakes", "GR27 brakes"])

@@ -41,13 +41,13 @@ func parseWikiPage(page repository.Page) (string, string, []model.WikiSection) {
 				heading := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(trimmed[level:]), "#"))
 				if heading != "" {
 					if level == 1 && title == strings.TrimSuffix(page.Path, ".md") {
-						title = heading
+						title = boundedWikiText(heading, 300)
 					}
 					if level <= len(headings) {
 						headings = headings[:level-1]
 					}
 					headings = append(headings, heading)
-					label := strings.Join(headings, " / ")
+					label := boundedWikiText(strings.Join(headings, " / "), 500)
 					if offset == 0 {
 						boundaries[0].heading = label
 					} else {
@@ -83,4 +83,14 @@ func parseWikiPage(page repository.Page) (string, string, []model.WikiSection) {
 		}
 	}
 	return title, season, sections
+}
+
+func boundedWikiText(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	for !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit]
 }

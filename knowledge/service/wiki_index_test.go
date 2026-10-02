@@ -7,10 +7,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gaucho-racing/blix/knowledge/config"
 	"github.com/gaucho-racing/blix/knowledge/database"
 	"github.com/gaucho-racing/blix/knowledge/model"
+	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 	"github.com/gaucho-racing/blix/knowledge/repository"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -234,5 +236,70 @@ func TestMissingEvidenceIsExplicit(t *testing.T) {
 	var state model.WikiIndexState
 	if err := index.db.First(&state).Error; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBatchesKeepOrderAndIsolateMissingPages(t *testing.T) {
+	_, _, service, _ := indexFixture(t)
+	search, err := service.SearchBatch(context.Background(), WikiSearchBatch{Queries: []string{"GR26", "", "GR27"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(search.Results) != 3 || search.Results[0].Result == nil || search.Results[1].Error != "invalid_knowledge_query" || search.Results[2].Result == nil {
+		t.Fatalf("batch=%+v", search)
+	}
+	if search.Results[0].Result.Results[0].Path != "seasons/gr26/brakes.md" || search.Results[2].Result.Results[0].Path != "seasons/gr27/brakes.md" {
+		t.Fatal("query order changed")
+	}
+	total := 0
+	for _, item := range search.Results {
+		if item.Result != nil {
+			for _, hit := range item.Result.Results {
+				total += len(hit.Content)
+			}
+		}
+	}
+	if total > wikiSearchBudget {
+		t.Fatal("batch exceeded budget")
+	}
+	pages, err := service.ReadPageBatch(context.Background(), WikiPageBatch{Paths: []string{"missing.md", "seasons/gr26/brakes.md"}})
+	if err != nil || len(pages.Results) != 2 || pages.Results[0].Error != "knowledge_not_found" || pages.Results[1].Result == nil {
+		t.Fatalf("pages=%+v %v", pages, err)
+	}
+	if pages.Results[1].Result.CommitSHA != pages.CommitSHA {
+		t.Fatal("batch revision changed")
+	}
+	if _, err := service.SearchBatch(context.Background(), WikiSearchBatch{Queries: make([]string, 7)}); !errors.Is(err, ErrInvalid) {
+		t.Fatal("oversized batch accepted")
+	}
+}
+
+func TestSectionRetrievalRetainsPageProvenance(t *testing.T) {
+	db, index, service, source := indexFixture(t)
+	captured, err := NewSourceService(db).IngestChatRecord(context.Background(), IngestChatRecordInput{
+		ConversationID: identifier.New(identifier.Conversation), SessionID: identifier.New(identifier.Session),
+		MessageID: identifier.New(identifier.Message), EntityID: identifier.New(identifier.Entity), UserID: identifier.New(identifier.User),
+		Content: "Pedal pressure was validated.", OccurredAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := captured.Record.ID
+	source.snapshot.CommitSHA = strings.Repeat("b", 40)
+	source.snapshot.Pages = []repository.Page{{Path: "brakes.md", BlobSHA: strings.Repeat("3", 40), Content: "# Evidence\n## Brakes\nPedal pressure was validated.\n## References\n[source](" + id + ")"}}
+	if err := index.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.SearchIndexed(context.Background(), WikiSearchOptions{Query: "pedal pressure", Limit: 3})
+	if err != nil || len(result.Results) != 1 {
+		t.Fatalf("search=%+v %v", result, err)
+	}
+	hit := result.Results[0]
+	if len(hit.SourceRecordIDs) != 0 || len(hit.PageSourceRecordIDs) != 1 || hit.PageSourceRecordIDs[0] != id {
+		t.Fatal("page provenance lost or presented as a claim citation")
+	}
+	citation := result.Citations[id]
+	if citation.EvidenceType != "human_statement" || citation.CaptureMethod != "runtime_chat" || len(result.MissingCitations) != 0 {
+		t.Fatalf("citation=%+v", citation)
 	}
 }

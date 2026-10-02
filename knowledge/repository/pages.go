@@ -434,9 +434,15 @@ func (w *Wiki) Snapshot(ctx context.Context) (Snapshot, error) {
 	if w.repository == nil {
 		return Snapshot{}, ErrUnavailable
 	}
+	if err := w.verifyOrigin(); err != nil {
+		w.lastError = err
+		return Snapshot{}, err
+	}
 	if err := w.syncToRemote(ctx); err != nil {
+		w.lastError = err
 		return Snapshot{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
+	w.lastError = nil
 	head, err := w.headSHA()
 	if err != nil {
 		return Snapshot{}, err

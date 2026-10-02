@@ -3,6 +3,7 @@ package model
 import "time"
 
 type WikiIndexState struct {
+	Version   int    `gorm:"not null;default:0"`
 	ID        string `gorm:"primaryKey"`
 	CommitSHA string `gorm:"not null"`
 	IndexedAt time.Time
@@ -13,11 +14,13 @@ type WikiIndexState struct {
 func (WikiIndexState) TableName() string { return "knowledge_wiki_index_state" }
 
 type WikiPage struct {
-	Path    string `gorm:"primaryKey"`
-	BlobSHA string `gorm:"not null"`
-	Title   string `gorm:"not null"`
-	Content string `gorm:"type:text;not null"`
-	Season  string `gorm:"index;not null"`
+	SourceRecordIDs    []string `gorm:"serializer:json;type:jsonb;not null;default:'[]'"`
+	CitationsTruncated bool     `gorm:"not null;default:false"`
+	Path               string   `gorm:"primaryKey"`
+	BlobSHA            string   `gorm:"not null"`
+	Title              string   `gorm:"not null"`
+	Content            string   `gorm:"type:text;not null"`
+	Season             string   `gorm:"index;not null"`
 }
 
 func (WikiPage) TableName() string { return "knowledge_wiki_page" }

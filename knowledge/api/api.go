@@ -81,6 +81,8 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	internal.GET("/pages", handler.ListWikiPages)
 	internal.GET("/page", handler.ReadWikiPage)
 	internal.GET("/search", handler.SearchWiki)
+	internal.POST("/search", handler.SearchWikiBatch)
+	internal.POST("/pages/read", handler.ReadWikiPageBatch)
 	internal.POST("/changesets", handler.CreateWikiChangeset)
 	internal.GET("/changesets", handler.ListWikiChangesets)
 	internal.GET("/changesets/search", handler.SearchPendingWikiChangesets)

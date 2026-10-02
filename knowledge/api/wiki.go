@@ -178,3 +178,32 @@ func (h *Handler) SeedWiki(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) SearchWikiBatch(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	var input service.WikiSearchBatch
+	if err := c.ShouldBindJSON(&input); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.pages.SearchBatch(c.Request.Context(), input)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+func (h *Handler) ReadWikiPageBatch(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	var input service.WikiPageBatch
+	if err := c.ShouldBindJSON(&input); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.pages.ReadPageBatch(c.Request.Context(), input)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

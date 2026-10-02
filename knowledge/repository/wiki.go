@@ -60,9 +60,19 @@ func OpenWiki(ctx context.Context, configuration config.Config) (*Wiki, error) {
 		return wiki, wiki.lastError
 	}
 	wiki.installation = installation
-	if err := wiki.openOrClone(ctx); err != nil {
-		wiki.lastError = fmt.Errorf("open wiki repository: %w", err)
+	local, err := git.PlainOpen(wiki.path)
+	if errors.Is(err, git.ErrRepositoryNotExists) {
+		return wiki, nil
+	}
+	if err != nil {
+		wiki.lastError = fmt.Errorf("open local wiki repository: %w", err)
 		return wiki, wiki.lastError
+	}
+	wiki.repository = local
+	if err := wiki.verifyOrigin(); err != nil {
+		wiki.repository = nil
+		wiki.lastError = err
+		return wiki, err
 	}
 	return wiki, nil
 }

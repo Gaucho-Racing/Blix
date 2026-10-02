@@ -11,11 +11,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
+	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
 	"github.com/gaucho-racing/blix/knowledge/repository"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
+const wikiIndexVersion = 1
 const wikiRefreshInterval = 30 * time.Second
 const wikiReadLimit = 8000
 const wikiSearchBudget = 16000
@@ -53,10 +55,14 @@ type WikiReadOptions struct {
 }
 
 type WikiIndexedPage struct {
+	PageSourceRecordIDs    []string `json:"page_source_record_ids"`
+	PageCitationsTruncated bool     `json:"page_citations_truncated"`
 	WikiFreshness
 	Page             repository.Page     `json:"page"`
 	Title            string              `json:"title"`
 	Season           string              `json:"season,omitempty"`
+	OutlineTruncated bool                `json:"outline_truncated"`
+	TotalSections    int                 `json:"total_sections"`
 	Outline          []WikiOutline       `json:"outline"`
 	Cursor           int                 `json:"cursor"`
 	NextCursor       *int                `json:"next_cursor,omitempty"`
@@ -67,6 +73,7 @@ type WikiIndexedPage struct {
 }
 
 type WikiSearchOptions struct {
+	budget int
 	Query  string `json:"query"`
 	Limit  int    `json:"limit"`
 	Season string `json:"season,omitempty"`
@@ -74,16 +81,19 @@ type WikiSearchOptions struct {
 }
 
 type WikiSectionHit struct {
-	Path            string   `json:"path"`
-	BlobSHA         string   `json:"blob_sha"`
-	Title           string   `json:"title"`
-	Heading         string   `json:"heading"`
-	Section         int      `json:"section"`
-	Season          string   `json:"season,omitempty"`
-	Content         string   `json:"content"`
-	Score           float64  `json:"score"`
-	Truncated       bool     `json:"truncated"`
-	SourceRecordIDs []string `json:"source_record_ids"`
+	MatchedAllTerms        bool     `json:"matched_all_terms"`
+	PageSourceRecordIDs    []string `json:"page_source_record_ids" gorm:"serializer:json"`
+	PageCitationsTruncated bool     `json:"page_citations_truncated"`
+	Path                   string   `json:"path"`
+	BlobSHA                string   `json:"blob_sha"`
+	Title                  string   `json:"title"`
+	Heading                string   `json:"heading"`
+	Section                int      `json:"section"`
+	Season                 string   `json:"season,omitempty"`
+	Content                string   `json:"content"`
+	Score                  float64  `json:"score"`
+	Truncated              bool     `json:"truncated"`
+	SourceRecordIDs        []string `json:"source_record_ids"`
 }
 
 type WikiIndexedSearch struct {
@@ -146,7 +156,7 @@ func (i *WikiIndex) install(ctx context.Context, snapshot repository.Snapshot) e
 			return err
 		}
 		now := time.Now().UTC()
-		if err == nil && state.CommitSHA == snapshot.CommitSHA {
+		if err == nil && state.CommitSHA == snapshot.CommitSHA && state.Version == wikiIndexVersion {
 			return tx.Model(&state).Updates(map[string]any{"checked_at": now, "last_error": ""}).Error
 		}
 		previous := []model.WikiPage{}
@@ -163,11 +173,12 @@ func (i *WikiIndex) install(ctx context.Context, snapshot repository.Snapshot) e
 				return ErrInvalid
 			}
 			seen[page.Path] = true
-			if previous, ok := oldPages[page.Path]; ok && previous.BlobSHA == page.BlobSHA {
+			if previous, ok := oldPages[page.Path]; ok && previous.BlobSHA == page.BlobSHA && state.Version == wikiIndexVersion {
 				continue
 			}
 			title, season, sections := parseWikiPage(page)
-			stored := model.WikiPage{Path: page.Path, BlobSHA: page.BlobSHA, Title: title, Content: page.Content, Season: season}
+			ids := citationIDs([]string{page.Content})
+			stored := model.WikiPage{Path: page.Path, BlobSHA: page.BlobSHA, Title: title, Content: page.Content, Season: season, SourceRecordIDs: ids[:min(len(ids), 16)], CitationsTruncated: len(ids) > 16}
 			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&stored).Error; err != nil {
 				return err
 			}
@@ -196,7 +207,7 @@ func (i *WikiIndex) install(ctx context.Context, snapshot repository.Snapshot) e
 				}
 			}
 		}
-		state = model.WikiIndexState{ID: "wiki", CommitSHA: snapshot.CommitSHA, IndexedAt: now, CheckedAt: now}
+		state = model.WikiIndexState{Version: wikiIndexVersion, ID: "wiki", CommitSHA: snapshot.CommitSHA, IndexedAt: now, CheckedAt: now}
 		return tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&state).Error
 	})
 }
@@ -236,7 +247,9 @@ func (s *WikiService) ReadIndexedPage(ctx context.Context, path string, options 
 			return err
 		}
 		content := page.Content
-		for _, section := range sections {
+		result.TotalSections = len(sections)
+		result.OutlineTruncated = len(sections) > 100
+		for _, section := range sections[:min(len(sections), 100)] {
 			result.Outline = append(result.Outline, WikiOutline{Position: section.Position, Heading: section.Heading, Bytes: section.End - section.Start})
 		}
 		if options.Section != nil {
@@ -268,19 +281,38 @@ func (s *WikiService) ReadIndexedPage(ctx context.Context, path string, options 
 			result.NextCursor = &end
 		}
 		resolver := NewWikiService(tx, s.wiki)
-		result.Citations, err = resolver.resolveCitations(ctx, []string{result.Page.Content})
-		result.MissingCitations = missingCitations([]string{result.Page.Content}, result.Citations)
+		result.PageSourceRecordIDs = page.SourceRecordIDs
+		result.PageCitationsTruncated = page.CitationsTruncated
+		references := []string{result.Page.Content, strings.Join(page.SourceRecordIDs, " ")}
+		result.Citations, err = resolver.resolveCitations(ctx, references)
+		result.MissingCitations = missingCitations(references, result.Citations)
 		return err
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err
 }
 
 func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptions) (WikiIndexedSearch, error) {
+	started := time.Now()
 	options.Query = strings.TrimSpace(options.Query)
 	if options.Query == "" || len(options.Query) > 256 || strings.ContainsRune(options.Query, 0) || options.Limit < 1 || options.Limit > 20 || len(options.Prefix) > 512 || options.Season != "" && !seasonPattern.MatchString(options.Season) {
 		return WikiIndexedSearch{}, ErrInvalid
 	}
 	result := WikiIndexedSearch{Results: []WikiSectionHit{}, MissingCitations: []string{}, Retrieval: "lexical_v1"}
+	defer func() {
+		if logger.SugarLogger != nil {
+			bytes, allTerms := 0, 0
+			for _, hit := range result.Results {
+				bytes += len(hit.Content)
+				if hit.MatchedAllTerms {
+					allTerms++
+				}
+			}
+			logger.SugarLogger.Infow("wiki retrieval", "query_hash", hashBytes([]byte(options.Query)),
+				"duration_ms", time.Since(started).Milliseconds(), "revision", result.CommitSHA, "stale", result.Stale,
+				"hits", len(result.Results), "all_term_hits", allTerms, "content_bytes", bytes,
+				"missing_citations", len(result.MissingCitations), "retrieval", result.Retrieval)
+		}
+	}()
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		freshness, err := indexFreshness(tx)
 		if err != nil {
@@ -291,7 +323,9 @@ func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptio
 		err = tx.Raw(`WITH query AS (
       SELECT plainto_tsquery('english', ?) AS all_terms,
       replace(plainto_tsquery('english', ?)::text, ' & ', ' | ')::tsquery AS any_terms
-    ) SELECT section.path, page.blob_sha, page.title, section.heading, section.position AS section, section.season,
+    ) SELECT section.path, page.blob_sha, page.title, page.source_record_ids AS page_source_record_ids,
+ page.citations_truncated AS page_citations_truncated, section.search_vector @@ query.all_terms AS matched_all_terms,
+ section.heading, section.position AS section, section.season,
       section.content, ts_rank_cd(section.search_vector, query.any_terms, 32) +
       CASE WHEN section.search_vector @@ query.all_terms THEN 1 ELSE 0 END AS score
       FROM knowledge_wiki_section section JOIN knowledge_wiki_page page USING(path) CROSS JOIN query
@@ -302,6 +336,9 @@ func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptio
 			return err
 		}
 		budget := wikiSearchBudget
+		if options.budget > 0 {
+			budget = min(budget, options.budget)
+		}
 		contents := []string{}
 		for _, hit := range hits {
 			if budget <= 0 {
@@ -315,7 +352,7 @@ func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptio
 			hit.Content, hit.Truncated = original[:limit], limit < len(original)
 			budget -= limit
 			hit.SourceRecordIDs = citationIDs([]string{hit.Content})
-			contents = append(contents, hit.Content)
+			contents = append(contents, hit.Content, strings.Join(hit.PageSourceRecordIDs, " "))
 			result.Results = append(result.Results, hit)
 		}
 		resolver := NewWikiService(tx, s.wiki)
