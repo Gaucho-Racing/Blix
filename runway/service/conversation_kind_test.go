@@ -55,6 +55,15 @@ func TestConversationHistoryExcludesInternalDocumentRuns(t *testing.T) {
 		if err := f.db.Model(&model.Conversation{}).Where("id IN ?", []string{ingestion.ConversationID, question.Conversation.ID}).Update("status", status).Error; err != nil {
 			t.Fatal(err)
 		}
+		all, err := f.s.ListAllConversations(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{f.conversation.Conversation.ID, otherChat.Conversation.ID, ingestion.ConversationID, question.Conversation.ID, internal.Conversation.ID} {
+			if !slices.ContainsFunc(all, func(c model.Conversation) bool { return c.ID == id }) {
+				t.Fatalf("admin history omitted %s with document status %s", id, status)
+			}
+		}
 		for _, admin := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/admin=%t", status, admin), func(t *testing.T) {
 				conversations, err := f.s.ListConversations(f.ctx, f.owner.EntityID, admin)

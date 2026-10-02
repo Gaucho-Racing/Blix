@@ -2,14 +2,14 @@ import { useQuery } from "@tanstack/react-query"
 import { Search } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router-dom"
-import { listConversations, errorMessage } from "@/lib/runtime"
+import { listAdminConversations, errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
 
 export function RunsPage() {
   const [search, setSearch] = useState("")
   const query = useQuery({
-    queryKey: ["conversations"],
-    queryFn: listConversations,
+    queryKey: ["admin", "conversations"],
+    queryFn: listAdminConversations,
     refetchInterval: 5000,
   })
   const filtered = query.data?.filter((conversation) =>

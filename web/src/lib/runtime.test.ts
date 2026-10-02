@@ -1,9 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/lib/api"
-import { liveOutputs, loadEvents, streamedMessage } from "@/lib/runtime"
+import {
+  listAdminConversations,
+  listConversations,
+  liveOutputs,
+  loadEvents,
+  streamedMessage,
+} from "@/lib/runtime"
 import type { ConversationDetails, RuntimeEvent } from "@/lib/runtime"
 
 vi.mock("@/lib/api", () => ({ api: { get: vi.fn() } }))
+
+describe("conversation listings", () => {
+  beforeEach(() => vi.mocked(api.get).mockReset())
+  it("uses the normal history endpoint for chat", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { conversations: [] } })
+    expect(await listConversations()).toEqual([])
+    expect(api.get).toHaveBeenCalledWith("/v1/conversations")
+  })
+  it("uses the admin endpoint and preserves internal conversations", async () => {
+    const internal = { conversation_id: "ingestion", kind: "internal" }
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: { conversations: [internal] },
+    })
+    expect(await listAdminConversations()).toEqual([internal])
+    expect(api.get).toHaveBeenCalledWith("/v1/admin/conversations")
+  })
+})
 const event = (
   position: number,
   type: string,

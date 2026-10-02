@@ -38,6 +38,7 @@ func callerHasGroup(caller service.CallerContext, group string) bool {
 }
 func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthService) {
 	public := router.Group("/v1", RequireAuthentication(auth))
+	public.GET("/admin/conversations", RequireGroup(adminGroup), h.ListAdminConversations)
 	public.GET("/document-chats/:documentID", RequireGroup("BlixUsers", "BlixAdmins"), func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil || caller.EntityType != "USER" {
@@ -449,6 +450,15 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.JSON(http.StatusOK, gin.H{})
 	})
 
+}
+
+func (h *Handler) ListAdminConversations(c *gin.Context) {
+	result, err := h.executions.ListAllConversations(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"conversations": result})
 }
 
 func (h *Handler) ListConversationEvents(c *gin.Context) {

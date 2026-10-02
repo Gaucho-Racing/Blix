@@ -66,6 +66,11 @@ export async function listConversations() {
   return (await api.get<{ conversations: Conversation[] }>("/v1/conversations"))
     .data.conversations
 }
+export async function listAdminConversations() {
+  return (
+    await api.get<{ conversations: Conversation[] }>("/v1/admin/conversations")
+  ).data.conversations
+}
 export async function createConversation(documentIDs: string[] = []) {
   return (
     await api.post<{ conversation: Conversation }>("/v1/conversations", {

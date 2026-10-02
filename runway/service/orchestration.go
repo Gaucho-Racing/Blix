@@ -596,6 +596,11 @@ func (s *ExecutionService) ListConversations(ctx context.Context, owner string, 
 	err := q.Order("updated_at DESC").Limit(100).Find(&rows).Error
 	return rows, err
 }
+func (s *ExecutionService) ListAllConversations(ctx context.Context) ([]model.Conversation, error) {
+	rows := []model.Conversation{}
+	err := s.database.WithContext(ctx).Order("updated_at DESC").Limit(100).Find(&rows).Error
+	return rows, err
+}
 func (s *ExecutionService) GetConversation(ctx context.Context, id string) (map[string]any, error) {
 	var c model.Conversation
 	if err := s.database.WithContext(ctx).First(&c, "id = ?", id).Error; err != nil {
