@@ -11,6 +11,8 @@ import { RequireAdmin } from "@/components/require-admin"
 import { AdminOverviewPage } from "@/pages/admin-overview-page"
 import { AutomationsPage } from "@/pages/automations-page"
 import { ChatPage } from "@/pages/chat-page"
+import { DocumentDetailsPage } from "@/pages/document-details-page"
+import { WikiPage, KnowledgeProposalPage } from "@/pages/wiki-page"
 import { KnowledgePage } from "@/pages/knowledge-page"
 import { KnowledgeReviewsPage, KnowledgeReviewDetailsPage } from "@/pages/knowledge-reviews-page"
 import { LegacyRunRedirect } from "@/pages/legacy-run-redirect"
@@ -38,6 +40,9 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate replace to="/chat" /> },
       { path: "chat/:runID?", element: <ChatPage /> },
       { path: "knowledge", element: <KnowledgePage /> },
+      { path: "knowledge/documents/:documentID", element: <DocumentDetailsPage /> },
+      { path: "knowledge/proposals/:changesetID", element: <KnowledgeProposalPage /> },
+      { path: "knowledge/page", element: <WikiPage /> },
       { path: "automations", element: <AutomationsPage /> },
       {
         path: "admin",

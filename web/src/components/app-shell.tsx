@@ -59,7 +59,7 @@ export function AppShell() {
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/runs">
                 <Workflow size={17} />
-                Runs
+                Conversations
                 {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/workers">
@@ -88,7 +88,7 @@ export function AppShell() {
 
         <div className="sidebar-spacer" />
         <div className="runtime-status">
-          <span className="healthy-dot" /> Runway connected
+          {auth.isAuthenticated && <span className="healthy-dot" />} {auth.isAuthenticated ? "Signed in to Runway" : auth.isLoading ? "Connecting…" : "Sign in to Runway"}
         </div>
         <button className="workspace-switcher" onClick={accountAction} type="button">
           {auth.user?.avatar_url ? <img alt="" className="workspace-avatar workspace-avatar-image" src={auth.user.avatar_url} /> : <span className="workspace-avatar">{initials.toUpperCase()}</span>}

@@ -1,125 +1,83 @@
 import { useQuery } from "@tanstack/react-query"
-import { Activity, Clock3, Layers3, LoaderCircle, Search, TriangleAlert } from "lucide-react"
-import { useMemo, useState } from "react"
+import { Search } from "lucide-react"
+import { useState } from "react"
 import { Link } from "react-router-dom"
-
-import { StatusBadge } from "@/components/status-badge"
-import { IdentityDisplay } from "@/components/identity-display"
-import { RunListEventStream } from "@/components/event-stream"
-import { listRuns } from "@/lib/api"
-import { formatRelative, formatTimestamp, runDisplayStatus } from "@/lib/format"
-import { useIdentities } from "@/lib/identity"
-import type { RunSummary } from "@/lib/types"
-import { useNow } from "@/lib/use-now"
-
-const noRuns: RunSummary[] = []
+import { listConversations, errorMessage } from "@/lib/runtime"
+import { formatTimestamp } from "@/lib/format"
 
 export function RunsPage() {
   const [search, setSearch] = useState("")
-  const now = useNow()
   const query = useQuery({
-    queryKey: ["runs"],
-    queryFn: listRuns,
+    queryKey: ["conversations"],
+    queryFn: listConversations,
+    refetchInterval: 5000,
   })
-  const runs = query.data ?? noRuns
-  const identityQuery = useIdentities(runs.map((run) => run.caller_entity_id))
-  const identitiesByID = useMemo(
-    () => new Map(identityQuery.identities.map((identity) => [identity.id, identity])),
-    [identityQuery.identities],
+  const filtered = query.data?.filter((conversation) =>
+    `${conversation.name} ${conversation.conversation_id}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   )
-  const filteredRuns = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    if (!needle) return runs
-    return runs.filter((run) => {
-      const identity = identitiesByID.get(run.caller_entity_id)
-      return [
-        run.run_id,
-        run.caller_entity_id,
-        run.caller_context?.entity_type,
-        run.caller_context?.user_id,
-        run.caller_context?.service_account_id,
-        run.agent_id,
-        run.kind,
-        runDisplayStatus(run, now),
-        identity?.name,
-        identity?.username,
-        identity?.type,
-      ]
-        .filter((value): value is string => Boolean(value))
-        .some((value) => value.toLowerCase().includes(needle))
-    })
-  }, [identitiesByID, now, runs, search])
-
-  const active = runs.filter((run) => ["queued", "running", "waiting"].includes(run.execution_status)).length
-  const failures = runs.filter((run) => run.execution_status === "failed").length
-  const eventCount = runs.reduce((total, run) => total + run.event_count, 0)
-  const streamCursor = runs.reduce((latest, run) => Math.max(latest, run.last_event_position), 0)
-
   return (
     <div className="page">
       <header className="page-header">
         <div>
-          <div className="eyebrow">ADMIN · OBSERVABILITY</div>
-          <h1>Execution runs</h1>
-          <p>Trace agent work from intake through every model, tool, and delegation checkpoint.</p>
+          <div className="eyebrow">ADMIN · RUNTIME</div>
+          <h1>Conversations</h1>
+          <p>
+            Inspect durable conversations, turns, delegated tasks, and activity.
+          </p>
         </div>
-        {query.data && <RunListEventStream initialCursor={streamCursor} />}
       </header>
-
-      <section className="stat-grid" aria-label="Run summary">
-        <article className="stat-card"><Layers3 size={17} /><div><span>Total runs</span><strong>{runs.length}</strong></div></article>
-        <article className="stat-card"><Activity size={17} /><div><span>In flight</span><strong>{active}</strong></div></article>
-        <article className="stat-card"><Clock3 size={17} /><div><span>Events loaded</span><strong>{eventCount.toLocaleString()}</strong></div></article>
-        <article className={`stat-card${failures ? " danger" : ""}`}><TriangleAlert size={17} /><div><span>Failed</span><strong>{failures}</strong></div></article>
-      </section>
-
-      <section className="panel runs-panel">
+      <section className="panel">
         <div className="panel-toolbar">
-          <div>
-            <h2>Recent activity</h2>
-            <span>{filteredRuns.length} of {runs.length} runs</span>
-          </div>
+          <h2>Recent conversations</h2>
           <label className="search-box">
             <Search size={15} />
-            <input onChange={(event) => setSearch(event.target.value)} placeholder="Search run, agent, or caller" value={search} />
+            <input
+              aria-label="Search conversations"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name or ID"
+            />
           </label>
         </div>
-
-        {query.isPending ? (
-          <div className="loading-state"><LoaderCircle className="spin" size={18} /> Loading runs</div>
-        ) : query.isError ? (
-          <div className="error-state">Runway is unavailable. The dashboard will retry automatically.</div>
-        ) : filteredRuns.length === 0 ? (
-          <div className="empty-state">No matching runs.</div>
-        ) : (
-          <div className="run-table-wrap">
-            <table className="run-table">
-              <thead><tr><th>Run</th><th>Caller</th><th>Status</th><th>Executions</th><th>Events</th><th>Last activity</th></tr></thead>
-              <tbody>
-                {filteredRuns.map((run) => (
-                  <tr key={run.run_id}>
-                    <td>
-                      <Link className="run-link" to={`/admin/runs/${run.run_id}`}>
-                        <strong>{run.agent_id}</strong>
-                        <code>{run.run_id}</code>
-                      </Link>
-                    </td>
-                    <td>
-                      <IdentityDisplay
-                        entityID={run.caller_entity_id}
-                        identity={identitiesByID.get(run.caller_entity_id)}
-                      />
-                    </td>
-                    <td><StatusBadge status={runDisplayStatus(run, now)} /></td>
-                    <td>{run.execution_count}</td>
-                    <td>{run.event_count}</td>
-                    <td title={formatTimestamp(run.last_activity_at)}>{formatRelative(run.last_activity_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {query.isPending && <p className="loading-state">Loading…</p>}
+        {query.error && (
+          <p className="runtime-error" role="alert">
+            {errorMessage(query.error)}
+          </p>
         )}
+        {filtered?.length === 0 && (
+          <p className="empty-state">No matching conversations.</p>
+        )}
+        <div className="run-table-wrap">
+          <table className="run-table">
+            <thead>
+              <tr>
+                <th>Conversation</th>
+                <th>Status</th>
+                <th>Last activity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered?.map((conversation) => (
+                <tr key={conversation.conversation_id}>
+                  <td>
+                    <Link
+                      className="run-link"
+                      to={`/admin/runs/${conversation.conversation_id}`}
+                    >
+                      <strong>{conversation.name || "New conversation"}</strong>
+                      <code>{conversation.conversation_id}</code>
+                    </Link>
+                  </td>
+                  <td>{conversation.status}</td>
+                  <td>{formatTimestamp(conversation.updated_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   )

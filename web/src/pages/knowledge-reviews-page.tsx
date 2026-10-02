@@ -105,7 +105,7 @@ function ChangesetReview({ changeset, files, onRefresh, refreshing }: { changese
       <div><span>Change type</span><strong>{changeset.type} · {files.length} {files.length === 1 ? "file" : "files"}</strong></div>
       <div><span>Created</span><strong>{formatTimestamp(changeset.created_at)}</strong></div>
       <div><span>Origin</span><strong>{changeset.origin}</strong></div>
-      {changeset.run_id && <div className="knowledge-review-provenance"><span>Source run / execution</span><Link to={`/admin/runs/${changeset.run_id}`}>{changeset.run_id}</Link><code>{changeset.execution_id}</code></div>}
+      {changeset.conversation_id && <div className="knowledge-review-provenance"><span>Source conversation / session</span><Link to={`/chat/${changeset.conversation_id}`}>{changeset.conversation_id}</Link><code>{changeset.session_id}</code></div>}
       <div className="knowledge-review-provenance"><span>Base revision</span><code>{changeset.base_commit_sha || "Empty repository"}</code></div>
     </section>
     {changeset.error && <div className="knowledge-review-warning" role="alert"><strong>Publication did not complete</strong><p>{changeset.error}</p><small>Revision conflicts require a fresh proposal from Blix. No force-publish is performed.</small></div>}

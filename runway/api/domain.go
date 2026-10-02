@@ -79,7 +79,8 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 	})
 	public.POST("/conversations/:conversationID/messages", func(c *gin.Context) {
 		var r struct {
-			Content string `json:"content"`
+			Content        string `json:"content"`
+			DisplayContent string `json:"display_content"`
 		}
 		if c.ShouldBindJSON(&r) != nil {
 			respondError(c, service.ErrInvalid)
@@ -90,7 +91,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.AppendUserMessage(c.Request.Context(), c.Param("conversationID"), caller.EntityID, r.Content)
+		result, err := h.executions.AppendUserMessageWithDisplay(c.Request.Context(), c.Param("conversationID"), caller.EntityID, r.Content, r.DisplayContent)
 		if err != nil {
 			respondError(c, err)
 			return

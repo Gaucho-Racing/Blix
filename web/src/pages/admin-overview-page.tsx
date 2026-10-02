@@ -10,10 +10,10 @@ const destinations = [
     status: "Live",
   },
   {
-    description: "Trace messages, model calls, tools, and delegated executions.",
+    description: "Trace messages, turns, model calls, tools, and delegated tasks.",
     href: "/admin/runs",
     icon: Workflow,
-    label: "Runs",
+    label: "Conversations",
     status: "Live",
   },
   {

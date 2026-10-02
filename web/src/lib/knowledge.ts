@@ -1,3 +1,4 @@
+import type { DocumentCitation } from "@/lib/documents"
 import { api } from "@/lib/api"
 
 export type ChangesetStatus = "proposed" | "prepared" | "committed" | "failed" | "rejected"
@@ -5,8 +6,8 @@ export type ChangesetStatus = "proposed" | "prepared" | "committed" | "failed" |
 export interface WikiChangeset {
   changeset_id: string
   origin: string
-  run_id: string
-  execution_id: string
+  conversation_id: string
+  session_id: string
   season_slug: string
   type: string
   status: ChangesetStatus
@@ -32,6 +33,7 @@ export interface WikiChangesetFile {
 export interface WikiChangesetDetails {
   changeset: WikiChangeset
   files: WikiChangesetFile[]
+  citations?: Record<string, DocumentCitation>
 }
 
 interface ChangesetPage {

@@ -151,6 +151,7 @@ type Message struct {
 	EventPosition  uint64    `json:"event_position" gorm:"uniqueIndex;not null"`
 	Role           string    `json:"role" gorm:"not null"`
 	Content        string    `json:"content" gorm:"type:text;not null"`
+	DisplayContent string    `json:"display_content,omitempty" gorm:"type:text;not null;default:''"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 

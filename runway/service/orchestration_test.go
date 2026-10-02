@@ -193,6 +193,14 @@ func TestApprovalBeforeSuspensionAndActionReplay(t *testing.T) {
 	if response.Approval == nil {
 		t.Fatal("no approval")
 	}
+	detail, err := f.s.GetConversation(f.ctx, f.conversation.Conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := detail["approval_actions"].([]model.Action)
+	if len(actions) != 1 || actions[0].ToolID != "discord_webhook_send_v1" || !jsonEqual(actions[0].Arguments, response.Action.Arguments) {
+		t.Fatalf("approval details=%+v", actions)
+	}
 	if err := f.s.DecideApproval(f.ctx, response.Approval.ID, f.owner.EntityID, "approve", "yes"); err != nil {
 		t.Fatal(err)
 	}
@@ -478,5 +486,34 @@ func TestRuntimeCannotOverrideNonIdempotentActionPolicy(t *testing.T) {
 	request.Ownership = own(lead)
 	if _, err := f.s.BeginAction(f.ctx, lead.Attempt.ID, request); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unsafe replay allowed: %v", err)
+	}
+}
+
+func TestDocumentRequestDisplayPreservesAgentInput(t *testing.T) {
+	f := setup(t)
+	original := "Curate source records in propose mode with complete original provenance."
+	display := "Summarize the brake rules from PDF pages 65–66."
+	appended, err := f.s.AppendUserMessageWithDisplay(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID, original, display)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := f.s.GetConversation(f.ctx, f.conversation.Conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := detail["messages"].([]model.Message)
+	if len(messages) != 1 || messages[0].Content != original || messages[0].DisplayContent != display {
+		t.Fatalf("message=%+v", messages)
+	}
+	if detail["conversation"].(model.Conversation).Name != display {
+		t.Fatal("conversation title used internal instructions")
+	}
+	var attempt model.ExecutionAttempt
+	if err := f.db.First(&attempt, "turn_id = ?", appended.Turn.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	claimed := f.claim(t, attempt.ID)
+	if len(claimed.Messages) != 1 || claimed.Messages[0].Content != original {
+		t.Fatalf("agent input=%+v", claimed.Messages)
 	}
 }

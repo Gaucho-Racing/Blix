@@ -1,57 +1,325 @@
-import { BookOpen, ChevronRight, Database, FileText, Hash, MessageSquareText, Plus, RefreshCw, Search } from "lucide-react"
-
-const sources = [
-  { detail: "642 pages", icon: BookOpen, name: "Engineering wiki", status: "Synced 8 min ago" },
-  { detail: "18,420 messages", icon: MessageSquareText, name: "Discord archive", status: "Live" },
-  { detail: "318 files", icon: FileText, name: "Team drive", status: "Synced 22 min ago" },
-  { detail: "12 repositories", icon: Database, name: "Code repositories", status: "Synced 4 min ago" },
-]
-
-const recentItems = [
-  { area: "Powertrain", source: "Wiki", title: "Accumulator architecture", updated: "12 min ago" },
-  { area: "#electrical", source: "Discord", title: "CAN termination debugging thread", updated: "48 min ago" },
-  { area: "Rules", source: "Research", title: "2026 EV rules comparison", updated: "Yesterday" },
-  { area: "Chassis", source: "Drive", title: "Monocoque manufacturing plan", updated: "Sep 6" },
-]
+import { useMutation, useQuery } from "@tanstack/react-query"
+import {
+  ArrowRight,
+  BookOpen,
+  FileText,
+  LoaderCircle,
+  Search,
+  Upload,
+} from "lucide-react"
+import { useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { useAuth } from "@/lib/auth"
+import { importDocument, listDocuments, searchWiki } from "@/lib/documents"
+import { errorMessage } from "@/lib/runtime"
 
 export function KnowledgePage() {
+  const auth = useAuth()
+  const navigate = useNavigate()
+  const [query, setQuery] = useState("")
+  const [search, setSearch] = useState("")
+  const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [fileError, setFileError] = useState("")
+  const allowed =
+    auth.isAuthenticated && (auth.user?.groups.includes("BlixUsers") ?? false)
+  const documents = useQuery({
+    queryKey: ["documents"],
+    queryFn: listDocuments,
+    enabled: allowed,
+  })
+  const results = useQuery({
+    queryKey: ["wiki-search", search],
+    queryFn: ({ signal }) => searchWiki(search, signal),
+    enabled: allowed && !!search,
+  })
+  const upload = useMutation({
+    mutationFn: (form: FormData) => importDocument(form, setProgress),
+    onSuccess: (data) =>
+      navigate(`/knowledge/documents/${data.document.document_id}`),
+  })
   return (
     <div className="workspace-page knowledge-page">
       <header className="workspace-toolbar">
-        <div><span className="workspace-kicker">KNOWLEDGE</span><h1>Everything the team knows</h1><p>Search across docs, conversations, files, and code.</p></div>
-        <button className="primary-button" type="button"><Plus size={16} /> Add source</button>
-      </header>
-
-      <label className="knowledge-search">
-        <Search size={20} />
-        <input placeholder="Search Blix knowledge…" type="search" />
-        <kbd>⌘ K</kbd>
-      </label>
-
-      <section className="knowledge-section">
-        <div className="content-heading"><div><h2>Sources</h2><span>4 connected</span></div><button type="button"><RefreshCw size={14} /> Sync all</button></div>
-        <div className="source-grid">
-          {sources.map(({ detail, icon: Icon, name, status }) => (
-            <article className="source-card" key={name}>
-              <div className="source-icon"><Icon size={19} /></div>
-              <div><h3>{name}</h3><p>{detail}</p><span><i /> {status}</span></div>
-              <ChevronRight size={16} />
-            </article>
-          ))}
+        <div>
+          <span className="workspace-kicker">TEAM KNOWLEDGE</span>
+          <h1>Evidence into understanding.</h1>
+          <p>
+            Search the published wiki. Import documents and let Blix draft
+            grounded updates.
+          </p>
         </div>
+        <button
+          className="primary-button"
+          disabled={!allowed}
+          type="button"
+          onClick={() => setUploading(!uploading)}
+        >
+          <Upload size={16} /> Import PDF
+        </button>
+      </header>
+      {!allowed && !auth.isLoading && (
+        <div className="knowledge-review-notice">
+          <BookOpen size={20} />
+          <p>
+            {auth.isAuthenticated ? (
+              "BlixUsers membership is required to access team knowledge."
+            ) : (
+              <Link to="/auth/login">Sign in to access team knowledge.</Link>
+            )}
+          </p>
+        </div>
+      )}
+      {uploading && (
+        <section className="panel document-import">
+          <div className="content-heading">
+            <div>
+              <h2>Import a document</h2>
+              <span>
+                The original PDF and its page-level evidence are shared with the
+                team.
+              </span>
+            </div>
+          </div>
+          <form
+            className="document-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const form = new FormData(event.currentTarget)
+              const file = form.get("file")
+              if (
+                !(file instanceof File) ||
+                !file.size ||
+                file.size > 20 * 1024 * 1024
+              ) {
+                setFileError("Choose a PDF up to 20 MiB.")
+                return
+              }
+              setFileError("")
+              setProgress(0)
+              upload.mutate(form)
+            }}
+          >
+            <fieldset disabled={upload.isPending}>
+              <label className="document-file">
+                PDF file
+                <input
+                  accept="application/pdf,.pdf"
+                  name="file"
+                  required
+                  type="file"
+                />
+                <small>
+                  Selectable text required · up to 20 MiB · up to 500 pages
+                </small>
+              </label>
+              <div className="document-form-grid">
+                <label>
+                  Document title
+                  <input
+                    maxLength={512}
+                    name="title"
+                    placeholder="Formula SAE Rules 2027"
+                    required
+                  />
+                </label>
+                <label>
+                  Publisher
+                  <input
+                    maxLength={512}
+                    name="publisher"
+                    placeholder="SAE International"
+                    required
+                  />
+                </label>
+                <label>
+                  Version
+                  <input
+                    maxLength={512}
+                    name="version"
+                    placeholder="1.0"
+                    required
+                  />
+                </label>
+                <label>
+                  Publication / revision date
+                  <input name="published_at" required type="date" />
+                </label>
+                <label>
+                  Document type
+                  <select defaultValue="reference" name="kind">
+                    <option value="rules">Rules / requirements</option>
+                    <option value="roadmap">Roadmap / future guidance</option>
+                    <option value="reference">Reference material</option>
+                  </select>
+                </label>
+                <label>
+                  Official source URL (optional)
+                  <input
+                    name="external_url"
+                    placeholder="https://…"
+                    type="url"
+                  />
+                </label>
+              </div>
+              <p className="document-help">
+                Use the date and version printed in the document. Import
+                preserves evidence; wiki updates are drafted separately for
+                review.
+              </p>
+              {(upload.error || fileError) && (
+                <p className="runtime-error" role="alert">
+                  {fileError || errorMessage(upload.error)}
+                </p>
+              )}
+              {upload.isPending && (
+                <div className="document-progress">
+                  <progress max={100} value={progress} />
+                  <span>
+                    {progress < 100
+                      ? `Uploading ${progress}%`
+                      : "Extracting page evidence…"}
+                  </span>
+                </div>
+              )}
+              <button className="primary-button" type="submit">
+                {upload.isPending ? (
+                  <LoaderCircle className="spin" size={16} />
+                ) : (
+                  <Upload size={16} />
+                )}
+                {upload.isPending ? "Importing…" : "Import & preview"}
+              </button>
+            </fieldset>
+          </form>
+        </section>
+      )}
+      <section className="knowledge-section">
+        <div className="content-heading">
+          <div>
+            <h2>Published wiki</h2>
+            <span>Search the indexed team knowledge.</span>
+          </div>
+        </div>
+        <form
+          className="knowledge-search"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setSearch(query.trim())
+          }}
+        >
+          <Search size={20} />
+          <input
+            aria-label="Search wiki"
+            disabled={!allowed}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Brake requirements, accumulator, GR26…"
+            value={query}
+            type="search"
+          />
+          <button type="submit" disabled={!query.trim() || !allowed}>
+            Search
+          </button>
+        </form>
+        {!!search && (
+          <div className="wiki-results">
+            {results.isPending && (
+              <p className="loading-state">
+                <LoaderCircle className="spin" size={16} /> Searching…
+              </p>
+            )}
+            {results.error && (
+              <p role="alert" className="runtime-error">
+                {errorMessage(results.error)}
+              </p>
+            )}
+            {results.data?.stale && (
+              <p className="document-help">
+                Showing the last indexed snapshot. Refresh is pending.
+              </p>
+            )}
+            {results.data && !results.data.results.length && (
+              <p className="document-help">
+                No matching wiki sections. Try different terms or ask Blix to
+                research this.
+              </p>
+            )}
+            {results.data?.results.map((hit) => (
+              <Link
+                key={`${hit.path}:${hit.section}`}
+                className="wiki-result"
+                to={`/knowledge/page?path=${encodeURIComponent(hit.path)}`}
+              >
+                <div>
+                  <BookOpen size={17} />
+                  <strong>{hit.title || hit.path}</strong>
+                  <span>{hit.season}</span>
+                </div>
+                <small>{hit.heading || hit.path}</small>
+                <p>{hit.content.slice(0, 400)}</p>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
-
-      <section className="knowledge-section recent-knowledge">
-        <div className="content-heading"><div><h2>Recently updated</h2><span>Across all sources</span></div><button type="button">View all</button></div>
-        <div className="knowledge-list">
-          {recentItems.map((item) => (
-            <button className="knowledge-row" key={item.title} type="button">
-              <span className="knowledge-type"><Hash size={15} /></span>
-              <span className="knowledge-title"><strong>{item.title}</strong><small>{item.area}</small></span>
-              <span className="source-pill">{item.source}</span>
-              <time>{item.updated}</time>
-              <ChevronRight size={15} />
+      <section className="knowledge-section">
+        <div className="content-heading">
+          <div>
+            <h2>Document library</h2>
+            <span>
+              Original evidence · choose a focused page range to curate.
+            </span>
+          </div>
+        </div>
+        {documents.isLoading && (
+          <p className="loading-state">Loading documents…</p>
+        )}
+        {documents.error && (
+          <p role="alert" className="runtime-error">
+            {errorMessage(documents.error)}{" "}
+            <button onClick={() => void documents.refetch()} type="button">
+              Retry
             </button>
+          </p>
+        )}
+        {allowed && documents.data?.length === 0 && (
+          <div className="document-empty">
+            <FileText size={30} />
+            <h3>Your first source starts here.</h3>
+            <p>
+              Import official rules, design references, or team reports to build
+              a wiki grounded in evidence.
+            </p>
+            <button
+              className="secondary-button"
+              onClick={() => setUploading(true)}
+              type="button"
+            >
+              Import a PDF
+            </button>
+          </div>
+        )}
+        <div className="document-grid">
+          {documents.data?.map((document) => (
+            <Link
+              className="document-card panel"
+              key={document.document_id}
+              to={`/knowledge/documents/${document.document_id}`}
+            >
+              <div>
+                <span className="document-type">{document.kind}</span>
+                <ArrowRight size={16} />
+              </div>
+              <FileText size={24} />
+              <h3>{document.title}</h3>
+              <p>
+                {document.publisher} · {document.version}
+              </p>
+              <footer>
+                {document.page_count} pages
+                <span>{document.published_at.slice(0, 10)}</span>
+              </footer>
+            </Link>
           ))}
         </div>
       </section>

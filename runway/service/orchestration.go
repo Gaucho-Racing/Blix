@@ -169,8 +169,16 @@ type AppendedMessage struct {
 }
 
 func (s *ExecutionService) AppendUserMessage(ctx context.Context, cid, owner, content string) (AppendedMessage, error) {
+	return s.AppendUserMessageWithDisplay(ctx, cid, owner, content, "")
+}
+
+func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid, owner, content, displayContent string) (AppendedMessage, error) {
 	content = strings.TrimSpace(content)
 	if !identifier.IsValid(cid, identifier.Conversation) || content == "" || !utf8.ValidString(content) || strings.ContainsRune(content, 0) || len(content) > 1024*1024 {
+		return AppendedMessage{}, ErrInvalid
+	}
+	displayContent = strings.TrimSpace(displayContent)
+	if len(displayContent) > 16000 || !utf8.ValidString(displayContent) || strings.ContainsRune(displayContent, 0) {
 		return AppendedMessage{}, ErrInvalid
 	}
 	var result AppendedMessage
@@ -191,8 +199,8 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, cid, owner, co
 		}
 		policy := profiles["blix_v1"].Policy
 		turn := model.Turn{ID: identifier.New(identifier.Turn), ConversationID: c.ID, SessionID: c.LeadSessionID, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{})}
-		msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: cid, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content}
-		e, err := s.event(tx, model.ExecutionAttempt{ConversationID: cid, SessionID: c.LeadSessionID, TurnID: &turn.ID}, "message.user_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": content})
+		msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: cid, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content, DisplayContent: displayContent}
+		e, err := s.event(tx, model.ExecutionAttempt{ConversationID: cid, SessionID: c.LeadSessionID, TurnID: &turn.ID}, "message.user_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": content, "display_content": displayContent})
 		if err != nil {
 			return err
 		}
@@ -206,7 +214,11 @@ func (s *ExecutionService) AppendUserMessage(ctx context.Context, cid, owner, co
 			return err
 		}
 		if c.Name == "" {
-			runes := []rune(content)
+			name := content
+			if displayContent != "" {
+				name = displayContent
+			}
+			runes := []rune(name)
 			if len(runes) > 80 {
 				runes = runes[:80]
 			}
@@ -568,7 +580,17 @@ func (s *ExecutionService) GetConversation(ctx context.Context, id string) (map[
 	if err := s.database.WithContext(ctx).Where("conversation_id = ? AND status = ?", id, "pending").Order("created_at ASC").Find(&approvals).Error; err != nil {
 		return nil, err
 	}
-	return map[string]any{"conversation": c, "messages": messages, "tasks": tasks, "turns": turns, "pending_approvals": approvals}, nil
+	actions := []model.Action{}
+	ids := []string{}
+	for _, approval := range approvals {
+		ids = append(ids, approval.ActionID)
+	}
+	if len(ids) > 0 {
+		if err := s.database.WithContext(ctx).Where("id IN ?", ids).Find(&actions).Error; err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"conversation": c, "messages": messages, "tasks": tasks, "turns": turns, "pending_approvals": approvals, "approval_actions": actions}, nil
 }
 func (s *ExecutionService) GetTask(ctx context.Context, id string) (model.Task, error) {
 	var task model.Task
