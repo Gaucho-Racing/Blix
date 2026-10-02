@@ -28,7 +28,7 @@ export function KnowledgePage() {
   const auth = useAuth()
   const navigate = useNavigate()
   const [documentFilter, setDocumentFilter] =
-    useState<DocumentReviewStatus>("in_review")
+    useState<DocumentReviewStatus>("ingested")
   const [query, setQuery] = useState("")
   const [search, setSearch] = useState("")
   const picker = useRef<HTMLInputElement>(null)
