@@ -1,7 +1,8 @@
 import type { DocumentCitation } from "@/lib/documents"
 import { api } from "@/lib/api"
 
-export type ChangesetStatus = "proposed" | "prepared" | "committed" | "failed" | "rejected"
+export type ChangesetStatus =
+  "proposed" | "prepared" | "committed" | "failed" | "rejected"
 
 export interface WikiChangeset {
   changeset_id: string
@@ -19,6 +20,7 @@ export interface WikiChangeset {
   reviewed_by: string
   review_note: string
   reviewed_at?: string
+  publication_lease_until?: string
   committed_at?: string
   created_at: string
 }
@@ -49,24 +51,50 @@ export interface PageRevision {
 
 const path = "/knowledge/v1/changesets"
 
-export async function listChangesets(status: string, before: string): Promise<ChangesetPage> {
-  const { data } = await api.get<ChangesetPage>(path, { params: { status, before, limit: 30 } })
-  return data
-}
-
-export async function getChangeset(id: string): Promise<WikiChangesetDetails> {
-  const { data } = await api.get<WikiChangesetDetails>(`${path}/${encodeURIComponent(id)}`)
-  return data
-}
-
-export async function getChangesetBase(id: string, filePath: string): Promise<PageRevision> {
-  const { data } = await api.get<PageRevision>(`${path}/${encodeURIComponent(id)}/base`, {
-    params: { path: filePath }, timeout: 30_000,
+export async function listChangesets(
+  status: string,
+  before: string,
+): Promise<ChangesetPage> {
+  const { data } = await api.get<ChangesetPage>(path, {
+    params: { status, before, limit: 30 },
   })
   return data
 }
 
-export async function reviewChangeset(id: string, decision: "approve" | "reject", note: string): Promise<WikiChangesetDetails> {
-  const { data } = await api.post<WikiChangesetDetails>(`${path}/${encodeURIComponent(id)}/review/${decision}`, { note }, { timeout: 30_000 })
+export async function getChangeset(
+  id: string,
+  signal?: AbortSignal,
+): Promise<WikiChangesetDetails> {
+  const { data } = await api.get<WikiChangesetDetails>(
+    `${path}/${encodeURIComponent(id)}`,
+    { signal },
+  )
+  return data
+}
+
+export async function getChangesetBase(
+  id: string,
+  filePath: string,
+): Promise<PageRevision> {
+  const { data } = await api.get<PageRevision>(
+    `${path}/${encodeURIComponent(id)}/base`,
+    {
+      params: { path: filePath },
+      timeout: 30_000,
+    },
+  )
+  return data
+}
+
+export async function reviewChangeset(
+  id: string,
+  decision: "approve" | "reject",
+  note: string,
+): Promise<WikiChangesetDetails> {
+  const { data } = await api.post<WikiChangesetDetails>(
+    `${path}/${encodeURIComponent(id)}/review/${decision}`,
+    { note },
+    { timeout: 30_000 },
+  )
   return data
 }

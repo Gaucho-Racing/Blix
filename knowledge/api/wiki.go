@@ -151,8 +151,8 @@ func (h *Handler) ReviewWikiChangeset(c *gin.Context) {
 		return
 	}
 	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), service.ReviewChangesetInput{
-		ReviewerEntityID: caller.EntityID,
-		Note:             request.Note,
+		Caller: caller,
+		Note:   request.Note,
 	})
 	if err != nil {
 		respondError(c, err)

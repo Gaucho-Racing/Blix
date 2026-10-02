@@ -12,9 +12,13 @@ import { AdminOverviewPage } from "@/pages/admin-overview-page"
 import { AutomationsPage } from "@/pages/automations-page"
 import { ChatPage } from "@/pages/chat-page"
 import { DocumentDetailsPage } from "@/pages/document-details-page"
-import { WikiPage, KnowledgeProposalPage } from "@/pages/wiki-page"
+import { WikiPage } from "@/pages/wiki-page"
 import { KnowledgePage } from "@/pages/knowledge-page"
-import { KnowledgeReviewsPage, KnowledgeReviewDetailsPage } from "@/pages/knowledge-reviews-page"
+import {
+  KnowledgeProposalPage,
+  KnowledgeReviewDetailsPage,
+} from "@/pages/knowledge-changeset-page"
+import { KnowledgeReviewsPage } from "@/pages/knowledge-reviews-page"
 import { LegacyRunRedirect } from "@/pages/legacy-run-redirect"
 import { LoginPage } from "@/pages/login-page"
 import { PlaceholderPage } from "@/pages/placeholder-page"
@@ -40,8 +44,14 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate replace to="/chat" /> },
       { path: "chat/:runID?", element: <ChatPage /> },
       { path: "knowledge", element: <KnowledgePage /> },
-      { path: "knowledge/documents/:documentID", element: <DocumentDetailsPage /> },
-      { path: "knowledge/proposals/:changesetID", element: <KnowledgeProposalPage /> },
+      {
+        path: "knowledge/documents/:documentID",
+        element: <DocumentDetailsPage />,
+      },
+      {
+        path: "knowledge/proposals/:changesetID",
+        element: <KnowledgeProposalPage />,
+      },
       { path: "knowledge/page", element: <WikiPage /> },
       { path: "automations", element: <AutomationsPage /> },
       {
@@ -53,7 +63,10 @@ const router = createBrowserRouter([
           { path: "runs/:runID", element: <RunDetailsPage /> },
           { path: "workers", element: <WorkersPage /> },
           { path: "knowledge", element: <KnowledgeReviewsPage /> },
-          { path: "knowledge/changesets/:changesetID", element: <KnowledgeReviewDetailsPage /> },
+          {
+            path: "knowledge/changesets/:changesetID",
+            element: <KnowledgeReviewDetailsPage />,
+          },
           {
             path: "agents",
             element: (

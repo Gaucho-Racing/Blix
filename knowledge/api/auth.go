@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/gaucho-racing/blix/knowledge/service"
@@ -29,7 +30,7 @@ func RequireAuthentication(auth *service.AuthService) gin.HandlerFunc {
 	}
 }
 
-func RequireGroup(group string) gin.HandlerFunc {
+func RequireGroup(groups ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil {
@@ -38,7 +39,7 @@ func RequireGroup(group string) gin.HandlerFunc {
 			return
 		}
 		for _, callerGroup := range caller.Groups {
-			if callerGroup == group {
+			if slices.Contains(groups, callerGroup) {
 				c.Next()
 				return
 			}

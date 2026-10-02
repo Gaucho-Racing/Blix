@@ -90,7 +90,7 @@ func TestPublicationLeaseReleasesDatabaseLocks(t *testing.T) {
 		close(repo.release)
 		t.Fatal("competing publisher bypassed lease")
 	}
-	if _, err := competing.ReviewChangeset(context.Background(), id, "reject", ReviewChangesetInput{ReviewerEntityID: identifier.New(identifier.Entity), Note: "Reject"}); !errors.Is(err, ErrConflict) {
+	if _, err := competing.ReviewChangeset(context.Background(), id, "reject", ReviewChangesetInput{Caller: CallerContext{EntityID: identifier.New(identifier.Entity), EntityType: "USER", Groups: []string{"BlixAdmins"}}, Note: "Reject"}); !errors.Is(err, ErrConflict) {
 		close(repo.release)
 		t.Fatal("in-flight publication could be rejected")
 	}

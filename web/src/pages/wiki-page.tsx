@@ -1,11 +1,10 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { ArrowLeft, LoaderCircle } from "lucide-react"
-import { Link, useParams, useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { DocumentCitation } from "@/lib/documents"
-import { useAuth } from "@/lib/auth"
-import { readProposal, readWiki } from "@/lib/documents"
+import { readWiki } from "@/lib/documents"
 import { wikiLink } from "@/lib/wiki-links"
 import { errorMessage } from "@/lib/runtime"
 
@@ -142,86 +141,6 @@ export function WikiPage() {
           </button>
         )}
       </section>
-    </div>
-  )
-}
-export function KnowledgeProposalPage() {
-  const { changesetID = "" } = useParams()
-  const auth = useAuth()
-  const query = useQuery({
-    queryKey: ["knowledge-proposal", changesetID],
-    queryFn: ({ signal }) => readProposal(changesetID, signal),
-    refetchInterval: 5000,
-  })
-  return (
-    <div className="workspace-page document-page">
-      <Link className="knowledge-review-back" to="/knowledge">
-        <ArrowLeft size={15} /> Team knowledge
-      </Link>
-      {query.isPending && (
-        <p className="loading-state">
-          <LoaderCircle className="spin" size={18} /> Loading proposal…
-        </p>
-      )}
-      {query.error && (
-        <p className="runtime-error" role="alert">
-          {errorMessage(query.error)}{" "}
-          <button onClick={() => void query.refetch()} type="button">
-            Retry
-          </button>
-        </p>
-      )}
-      {query.data && (
-        <>
-          <header className="workspace-toolbar">
-            <div>
-              <span className="workspace-kicker">
-                WIKI PROPOSAL · {query.data.changeset.status.toUpperCase()}
-              </span>
-              <h1>{query.data.changeset.summary}</h1>
-              <p>Inspect the proposed files before publication.</p>
-            </div>
-            {auth.isAdmin && (
-              <Link
-                className="primary-button"
-                to={`/admin/knowledge/changesets/${changesetID}`}
-              >
-                Review & publish
-              </Link>
-            )}
-          </header>
-          {query.data.changeset.conversation_id && (
-            <Link
-              className="runtime-proposal-link"
-              to={`/chat/${query.data.changeset.conversation_id}`}
-            >
-              Return to source conversation
-            </Link>
-          )}
-          <EvidenceLinks citations={query.data.citations ?? {}} />
-          {query.data.files.map((file, index) => (
-            <section
-              className="panel wiki-reader"
-              id={`file-${index}`}
-              key={file.path}
-            >
-              <div className="content-heading">
-                <h2>{file.path}</h2>
-                <span>{file.operation}</span>
-              </div>
-              {file.operation === "delete" ? (
-                <p>This proposal removes the file.</p>
-              ) : (
-                <Markdown
-                  content={file.content}
-                  path={file.path}
-                  proposedPaths={query.data.files.map((file) => file.path)}
-                />
-              )}
-            </section>
-          ))}
-        </>
-      )}
     </div>
   )
 }

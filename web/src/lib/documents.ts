@@ -1,6 +1,6 @@
 import axios from "axios"
 import { api } from "@/lib/api"
-import type { WikiChangeset, WikiChangesetDetails } from "@/lib/knowledge"
+import type { WikiChangeset } from "@/lib/knowledge"
 
 export interface TeamDocument {
   document_id: string
@@ -241,13 +241,6 @@ export async function readWiki(
   return (
     await api.get<WikiPage>(`${root}/wiki/page`, {
       params: { path, cursor, commit_sha: commit, max_bytes: 32_000 },
-      signal,
-    })
-  ).data
-}
-export async function readProposal(id: string, signal?: AbortSignal) {
-  return (
-    await api.get<WikiChangesetDetails>(`${root}/wiki/changesets/${id}`, {
       signal,
     })
   ).data

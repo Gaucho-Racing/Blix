@@ -854,3 +854,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-tag-add button { flex-shrink: 0; }
 .document-tag button { display: inline-flex; align-items: center; padding: 2px; border: 0; border-radius: 4px; color: inherit; background: transparent; cursor: pointer; }
 .document-tag button:hover { color: var(--text); background: rgba(210, 10, 140, .08); }
+
+.knowledge-review-heading-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; flex-shrink: 0; }
+.knowledge-review-heading-actions .status-badge { margin-top: 0; }
+.knowledge-review-sources { padding: 20px 23px; }
+.knowledge-review-sources summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 650; }
+.knowledge-review-sources > div { display: grid; gap: 12px; max-height: 260px; overflow-y: auto; margin-top: 16px; font-size: 12px; }
+.knowledge-review-sources a { color: var(--pink-strong); text-decoration: none; }
+.knowledge-review-sources a:hover { text-decoration: underline; }
+.knowledge-review-sources code { display: block; margin-top: 4px; color: var(--dim); font-size: 10px; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .knowledge-review-heading-actions { flex-direction: row; align-items: center; flex-wrap: wrap; } }
