@@ -183,3 +183,25 @@ func (h *Handler) SaveExtractedDocumentMetadata(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) ReviewDocument(c *gin.Context) {
+	caller, err := getCaller(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
+	var request struct {
+		Note string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.documents.Review(c.Request.Context(), c.Param("documentID"), c.Param("decision"), service.ReviewInput{Caller: caller, Note: request.Note})
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

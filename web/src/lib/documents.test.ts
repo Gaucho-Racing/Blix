@@ -98,7 +98,7 @@ describe("document upload handoff", () => {
     expect(documentProcessing("reading")).toBe(true)
     expect(documentProcessing("ready")).toBe(false)
     expect(documentProcessing("failed")).toBe(false)
-    expect(documentStatusLabel("partial")).toContain("coverage warnings")
+    expect(documentStatusLabel("partial")).toContain("coverage gaps")
     vi.mocked(api.post).mockResolvedValueOnce({ data: {} })
     await controlDocument("document_test", "retry")
     expect(api.post).toHaveBeenCalledWith(

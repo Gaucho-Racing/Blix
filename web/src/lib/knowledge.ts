@@ -1,4 +1,4 @@
-import type { DocumentCitation } from "@/lib/documents"
+import type { DocumentCitation, TeamDocument } from "@/lib/documents"
 import { api } from "@/lib/api"
 
 export type ChangesetStatus =
@@ -16,6 +16,7 @@ export interface WikiChangeset {
   base_commit_sha: string
   result_commit_sha: string
   error: string
+  rejected_document_id?: string
   review_decision: string
   reviewed_by: string
   review_note: string
@@ -33,6 +34,7 @@ export interface WikiChangesetFile {
 }
 
 export interface WikiChangesetDetails {
+  documents: TeamDocument[]
   changeset: WikiChangeset
   files: WikiChangesetFile[]
   citations?: Record<string, DocumentCitation>

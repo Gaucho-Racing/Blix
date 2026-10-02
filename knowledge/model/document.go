@@ -6,7 +6,17 @@ import (
 	"gorm.io/datatypes"
 )
 
+const (
+	DocumentReviewInReview = "in_review"
+	DocumentReviewIngested = "ingested"
+	DocumentReviewRejected = "rejected"
+)
+
 type Document struct {
+	ReviewStatus      string                      `json:"review_status" gorm:"index;not null;default:in_review;check:chk_knowledge_document_review_status,review_status IN ('in_review','ingested','rejected')"`
+	ReviewedBy        string                      `json:"reviewed_by" gorm:"not null;default:''"`
+	ReviewNote        string                      `json:"review_note" gorm:"type:text;not null;default:''"`
+	ReviewedAt        *time.Time                  `json:"reviewed_at,omitempty"`
 	ExtractedMetadata datatypes.JSON              `json:"extracted_metadata" gorm:"type:jsonb"`
 	MetadataOverrides datatypes.JSON              `json:"metadata_overrides" gorm:"type:jsonb"`
 	MetadataRevision  uint64                      `json:"metadata_revision" gorm:"not null;default:0"`
@@ -15,15 +25,15 @@ type Document struct {
 	Objective         string                      `json:"objective" gorm:"type:text"`
 	Caller            datatypes.JSON              `json:"-" gorm:"type:jsonb"`
 	Generation        uint64                      `json:"generation" gorm:"not null;default:0"`
-	ConversationID    string                      `json:"conversation_id"`
+	ConversationID    string                      `json:"conversation_id" gorm:"index:idx_knowledge_document_session,priority:2"`
 	TaskID            string                      `json:"task_id"`
-	SessionID         string                      `json:"-"`
+	SessionID         string                      `json:"-" gorm:"index:idx_knowledge_document_session,priority:1"`
 	AttemptNumber     uint64                      `json:"-"`
 	Error             string                      `json:"error"`
 	UpdatedAt         time.Time                   `json:"updated_at"`
 	ID                string                      `json:"document_id" gorm:"primaryKey"`
 	SHA256            string                      `json:"sha256" gorm:"index;not null"`
-	SourceID          string                      `json:"source_id" gorm:"not null"`
+	SourceID          string                      `json:"source_id" gorm:"index;not null"`
 	Title             string                      `json:"title" gorm:"not null"`
 	Filename          string                      `json:"filename" gorm:"not null"`
 	Publisher         string                      `json:"publisher" gorm:"not null"`

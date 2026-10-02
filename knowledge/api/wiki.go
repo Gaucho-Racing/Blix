@@ -150,7 +150,7 @@ func (h *Handler) ReviewWikiChangeset(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), service.ReviewChangesetInput{
+	result, err := h.pages.ReviewChangeset(c.Request.Context(), c.Param("changesetID"), c.Param("decision"), service.ReviewInput{
 		Caller: caller,
 		Note:   request.Note,
 	})

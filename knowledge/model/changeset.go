@@ -14,6 +14,7 @@ const (
 )
 
 type Changeset struct {
+	RejectedDocumentID    string     `json:"rejected_document_id,omitempty" gorm:"not null;default:''"`
 	PublicationOwner      string     `json:"-" gorm:"not null;default:''"`
 	PublicationLeaseUntil *time.Time `json:"publication_lease_until,omitempty"`
 	ID                    string     `json:"changeset_id" gorm:"primaryKey"`
@@ -64,3 +65,10 @@ type ChangesetSourceRecord struct {
 func (ChangesetSourceRecord) TableName() string {
 	return "knowledge_changeset_source_record"
 }
+
+type ChangesetDocument struct {
+	ChangesetID string `json:"changeset_id" gorm:"primaryKey"`
+	DocumentID  string `json:"document_id" gorm:"primaryKey;index"`
+}
+
+func (ChangesetDocument) TableName() string { return "knowledge_changeset_document" }

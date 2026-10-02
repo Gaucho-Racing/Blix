@@ -42,7 +42,7 @@ func (s *DocumentService) InitiateUpload(ctx context.Context, filename string, c
 	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != "USER" || !identifier.IsValid(caller.UserID, identifier.User) {
 		return DocumentUpload{}, ErrForbidden
 	}
-	objective := "Read this document, identify its title, publisher, edition, publication date, useful document tags and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
+	objective := "Read this document, identify its title, publisher, edition, publication date, 2–3 useful document tags and official source URL from evidence, preserve its requirements and qualifications with page citations, and propose useful updates to the internal wiki. Distinguish source requirements, future guidance, and actual team decisions."
 	title := strings.TrimSuffix(filename, filepath.Ext(filename))
 	if title == "" {
 		title = filename
@@ -69,6 +69,9 @@ func (s *DocumentService) CompleteUpload(ctx context.Context, id, owner string) 
 		return details, err
 	}
 	doc := details.Document
+	if doc.ReviewStatus == model.DocumentReviewRejected {
+		return DocumentDetails{}, ErrConflict
+	}
 	if doc.UploadedBy != owner {
 		return DocumentDetails{}, ErrForbidden
 	}
@@ -82,7 +85,7 @@ func (s *DocumentService) CompleteUpload(ctx context.Context, id, owner string) 
 	if file.ID != doc.DepotFileID || file.Status != "ACTIVE" || file.SizeBytes < 5 || file.SizeBytes > MaxDocumentBytes {
 		return details, fmt.Errorf("%w: upload a PDF up to 20 MiB", ErrInvalid)
 	}
-	err = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND status = ?", id, "uploading").Updates(map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""}).Error
+	err = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND status = ? AND review_status = ? AND generation = ?", id, "uploading", model.DocumentReviewInReview, doc.Generation).Updates(map[string]any{"status": "queued", "size_bytes": file.SizeBytes, "error": ""}).Error
 	if err != nil {
 		return details, err
 	}
@@ -127,8 +130,25 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				_ = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status = ?", doc.ID, doc.Generation, "queued").Update("error", "Waiting for runtime scheduling").Error
 				continue
 			}
-			if err := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = ''", doc.ID, doc.Generation).Updates(map[string]any{"task_id": run.TaskID, "conversation_id": run.ConversationID, "error": ""}).Error; err != nil {
-				return err
+			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewInReview).Updates(map[string]any{"task_id": run.TaskID, "conversation_id": run.ConversationID, "error": ""})
+			if saved.Error != nil {
+				return saved.Error
+			}
+			if saved.RowsAffected == 0 {
+				var current model.Document
+				if err := s.db.WithContext(ctx).First(&current, "id = ?", doc.ID).Error; err != nil {
+					return err
+				}
+				if current.TaskID != run.TaskID {
+					if current.ReviewStatus == model.DocumentReviewRejected && current.TaskID == "" {
+						if err := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", current.ID, current.Generation, model.DocumentReviewRejected).Updates(map[string]any{"task_id": run.TaskID, "status": "cancelling"}).Error; err != nil {
+							return err
+						}
+					}
+					if err := s.runtime.control(ctx, run.TaskID, doc.UploadedBy, "cancel"); err != nil && !errors.Is(err, ErrConflict) {
+						return err
+					}
+				}
 			}
 		} else {
 			var task struct {
@@ -175,6 +195,9 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 		var doc model.Document
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&doc, "id = ?", id).Error; err != nil {
 			return mapDatabaseError(err)
+		}
+		if doc.ReviewStatus == model.DocumentReviewRejected {
+			return ErrConflict
 		}
 		if doc.UploadedBy != owner {
 			return ErrForbidden
@@ -252,7 +275,7 @@ func (s *DocumentService) lockedExecution(ctx context.Context, tx *gorm.DB, id s
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&doc, "id = ?", id).Error; err != nil {
 		return doc, mapDatabaseError(err)
 	}
-	if doc.Generation != e.Generation || !documentIsProcessing(doc.Status) || doc.Status == "cancelling" {
+	if doc.ReviewStatus == model.DocumentReviewRejected || doc.Generation != e.Generation || !documentIsProcessing(doc.Status) || doc.Status == "cancelling" {
 		return doc, ErrConflict
 	}
 	access, err := s.runtime.validate(ctx, id, e)

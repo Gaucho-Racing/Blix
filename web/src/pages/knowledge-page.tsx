@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
 import { ProgressBar } from "@/components/progress-bar"
+import { StatusBadge } from "@/components/status-badge"
 import { DocumentTags } from "@/components/document-tags"
 import {
   importDocument,
@@ -18,12 +19,16 @@ import {
   searchWiki,
   documentStatusLabel,
   validateDocumentFile,
+  documentReviewLabel,
+  type DocumentReviewStatus,
 } from "@/lib/documents"
 import { errorMessage } from "@/lib/runtime"
 
 export function KnowledgePage() {
   const auth = useAuth()
   const navigate = useNavigate()
+  const [documentFilter, setDocumentFilter] =
+    useState<DocumentReviewStatus>("in_review")
   const [query, setQuery] = useState("")
   const [search, setSearch] = useState("")
   const picker = useRef<HTMLInputElement>(null)
@@ -33,7 +38,8 @@ export function KnowledgePage() {
   const [progress, setProgress] = useState(0)
   const [fileError, setFileError] = useState("")
   const allowed =
-    auth.isAuthenticated && (auth.user?.groups.includes("BlixUsers") ?? false)
+    auth.isAuthenticated &&
+    (auth.isAdmin || (auth.user?.groups.includes("BlixUsers") ?? false))
   const documents = useQuery({
     queryKey: ["documents"],
     queryFn: listDocuments,
@@ -130,10 +136,6 @@ export function KnowledgePage() {
         <div>
           <span className="workspace-kicker">TEAM KNOWLEDGE</span>
           <h1>Evidence into understanding.</h1>
-          <p>
-            Search the published wiki. Import documents and let Blix draft
-            grounded updates.
-          </p>
         </div>
         <button
           className="primary-button"
@@ -149,7 +151,7 @@ export function KnowledgePage() {
           <BookOpen size={20} />
           <p>
             {auth.isAuthenticated ? (
-              "BlixUsers membership is required to access team knowledge."
+              "Blix access is required to view team knowledge."
             ) : (
               <Link to="/auth/login">Sign in to access team knowledge.</Link>
             )}
@@ -214,7 +216,6 @@ export function KnowledgePage() {
         <div className="content-heading">
           <div>
             <h2>Published wiki</h2>
-            <span>Search the indexed team knowledge.</span>
           </div>
         </div>
         <form
@@ -282,10 +283,26 @@ export function KnowledgePage() {
         <div className="content-heading">
           <div>
             <h2>Document library</h2>
-            <span>
-              Original evidence, ingestion progress, and wiki proposals.
-            </span>
           </div>
+        </div>
+        <div
+          className="knowledge-comparison-toggle document-library-filters"
+          role="group"
+          aria-label="Document review status"
+        >
+          {(["in_review", "ingested", "rejected"] as const).map((status) => (
+            <button
+              key={status}
+              type="button"
+              aria-pressed={documentFilter === status}
+              onClick={() => setDocumentFilter(status)}
+            >
+              {documentReviewLabel(status)} ·{" "}
+              {documents.data?.filter(
+                (document) => document.review_status === status,
+              ).length ?? 0}
+            </button>
+          ))}
         </div>
         {documents.isLoading && (
           <p className="loading-state">Loading documents…</p>
@@ -298,37 +315,45 @@ export function KnowledgePage() {
             </button>
           </p>
         )}
-        {allowed && documents.data?.length === 0 && (
-          <p className="document-help">
-            Your imported documents and wiki drafts will appear here.
-          </p>
-        )}
+        {allowed &&
+          documents.data &&
+          !documents.data.some(
+            (document) => document.review_status === documentFilter,
+          ) && (
+            <p className="document-help">
+              No documents {documentReviewLabel(documentFilter).toLowerCase()}{" "}
+              yet.
+            </p>
+          )}
         <div className="document-grid">
-          {documents.data?.map((document) => (
-            <Link
-              className="document-card panel"
-              key={document.document_id}
-              to={`/knowledge/documents/${document.document_id}`}
-            >
-              <div>
-                <DocumentTags tags={document.tags} />
-                <ArrowRight size={16} />
-              </div>
-              <FileText size={24} />
-              <h3>{document.title}</h3>
-              <p>
-                {[document.publisher, document.version]
-                  .filter(Boolean)
-                  .join(" · ") ||
-                  "Document details will be identified during ingestion"}
-              </p>
-              <footer>
-                {documentStatusLabel(document.status)} ·{" "}
-                {document.page_count || "—"} pages
-                <span>{document.published_at?.slice(0, 10)}</span>
-              </footer>
-            </Link>
-          ))}
+          {documents.data
+            ?.filter((document) => document.review_status === documentFilter)
+            .map((document) => (
+              <Link
+                className="document-card panel"
+                key={document.document_id}
+                to={`/knowledge/documents/${document.document_id}`}
+              >
+                <div>
+                  <DocumentTags tags={document.tags} />
+                  <ArrowRight size={16} />
+                </div>
+                <FileText size={24} />
+                <StatusBadge status={document.review_status} />
+                <h3>{document.title}</h3>
+                <p>
+                  {[document.publisher, document.version]
+                    .filter(Boolean)
+                    .join(" · ") ||
+                    "Document details will be identified during ingestion"}
+                </p>
+                <footer>
+                  {documentStatusLabel(document.status)} ·{" "}
+                  {document.page_count || "—"} pages
+                  <span>{document.published_at?.slice(0, 10)}</span>
+                </footer>
+              </Link>
+            ))}
         </div>
       </section>
     </div>

@@ -9,8 +9,9 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react"
-import { useEffect, useRef, useState, type FormEvent } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { ReviewConfirmationDialog } from "@/components/review-confirmation-dialog"
 import { WikiMarkdown } from "@/components/wiki-markdown"
 import { StatusBadge } from "@/components/status-badge"
 import { formatTimestamp } from "@/lib/format"
@@ -22,7 +23,8 @@ import {
 } from "@/lib/knowledge"
 import { useAuth } from "@/lib/auth"
 import { errorMessage } from "@/lib/runtime"
-import type { DocumentCitation } from "@/lib/documents"
+import { documentProcessingComplete } from "@/lib/documents"
+import type { DocumentCitation, TeamDocument } from "@/lib/documents"
 
 export function ChangesetReview({
   changeset,
@@ -31,7 +33,9 @@ export function ChangesetReview({
   refreshing,
   admin,
   citations,
+  documents,
 }: {
+  documents: TeamDocument[]
   admin: boolean
   citations: Record<string, DocumentCitation>
   changeset: WikiChangeset
@@ -91,7 +95,13 @@ export function ChangesetReview({
     canReview &&
     auth.isAdmin &&
     !publicationInProgress &&
-    ["proposed", "failed", "prepared"].includes(changeset.status)
+    ["proposed", "failed", "prepared"].includes(changeset.status) &&
+    documents.every(
+      (document) =>
+        document.review_status !== "rejected" &&
+        (document.review_status === "ingested" ||
+          documentProcessingComplete(document.status)),
+    )
   const canReject =
     canReview &&
     !publicationInProgress &&
@@ -118,14 +128,6 @@ export function ChangesetReview({
         </div>
         <div className="knowledge-review-heading-actions">
           <StatusBadge status={changeset.status} />
-          {changeset.conversation_id && (
-            <Link
-              className="secondary-button"
-              to={`/chat/${changeset.conversation_id}`}
-            >
-              Discuss with Blix <ArrowRight size={14} />
-            </Link>
-          )}
         </div>
       </header>
       <section className="panel knowledge-review-context">
@@ -177,9 +179,11 @@ export function ChangesetReview({
           <ShieldCheck size={19} />
           <div>
             <strong>
-              {changeset.review_decision === "rejected"
-                ? "Rejected"
-                : "Approved for publication"}
+              {changeset.rejected_document_id
+                ? "Rejected with its source document"
+                : changeset.review_decision === "rejected"
+                  ? "Rejected"
+                  : "Approved for publication"}
               {changeset.reviewed_at &&
                 ` · ${formatTimestamp(changeset.reviewed_at)}`}
             </strong>
@@ -200,6 +204,21 @@ export function ChangesetReview({
             <code>{changeset.result_commit_sha}</code>
           </div>
         </div>
+      )}
+      {documents.length > 0 && (
+        <section className="panel changeset-document-sources">
+          <span className="workspace-kicker">SOURCE DOCUMENTS</span>
+          {documents.map((document) => (
+            <Link
+              key={document.document_id}
+              to={`/knowledge/documents/${document.document_id}`}
+            >
+              <span>{document.title}</span>
+              <StatusBadge status={document.review_status} />
+              <ArrowRight size={15} />
+            </Link>
+          ))}
+        </section>
       )}
       {Object.keys(citations).length > 0 && (
         <details className="panel knowledge-review-sources">
@@ -342,14 +361,51 @@ export function ChangesetReview({
         </section>
       )}
       {decision && (
-        <ReviewDialog
-          decision={decision}
+        <ReviewConfirmationDialog
+          title={
+            decision === "reject"
+              ? "Reject this changeset?"
+              : "Publish these changes?"
+          }
+          confirmLabel={
+            decision === "reject" ? "Reject changeset" : "Approve & publish"
+          }
+          reject={decision === "reject"}
+          description={
+            <>
+              <p>
+                {decision === "reject"
+                  ? "This changeset will be rejected and cannot be published. Its source documents and other changesets will keep their current status."
+                  : `This will publish ${files.length} ${files.length === 1 ? "file change" : "file changes"} to the wiki. Existing files may be replaced or deleted.`}
+              </p>
+              {decision === "approve" &&
+                documents.some(
+                  (document) => document.review_status === "in_review",
+                ) && (
+                  <p>
+                    The following source documents will also be marked Ingested
+                    after publication succeeds:{" "}
+                    <strong>
+                      {documents
+                        .filter(
+                          (document) => document.review_status === "in_review",
+                        )
+                        .map((document) => document.title)
+                        .join(", ")}
+                    </strong>
+                    . Their other changesets will still need separate approval.
+                  </p>
+                )}
+              <p>
+                Your identity, review note, and decision time will be recorded.
+              </p>
+            </>
+          }
           note={note}
           setNote={setNote}
           pending={mutation.isPending}
           allowed={decision === "approve" ? canApprove : canReject}
           error={mutation.isError ? errorMessage(mutation.error) : null}
-          fileCount={files.length}
           onClose={() => {
             if (!mutation.isPending) setDecision(null)
           }}
@@ -451,106 +507,5 @@ function Loading({ label }: { label: string }) {
     <div className="loading-state">
       <LoaderCircle className="spin" size={18} /> {label}
     </div>
-  )
-}
-
-function ReviewDialog({
-  decision,
-  note,
-  setNote,
-  pending,
-  allowed,
-  error,
-  fileCount,
-  onClose,
-  onSubmit,
-}: {
-  decision: "approve" | "reject"
-  note: string
-  setNote: (value: string) => void
-  pending: boolean
-  allowed: boolean
-  error: string | null
-  fileCount: number
-  onClose: () => void
-  onSubmit: () => void
-}) {
-  const ref = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    const dialog = ref.current
-    dialog?.showModal()
-    return () => dialog?.close()
-  }, [])
-  const reject = decision === "reject"
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (!pending && allowed) onSubmit()
-  }
-  return (
-    <dialog
-      aria-labelledby="review-dialog-title"
-      className="knowledge-review-dialog"
-      onCancel={(event) => {
-        event.preventDefault()
-        onClose()
-      }}
-      ref={ref}
-    >
-      <form onSubmit={submit}>
-        <div className="eyebrow">WIKI REVIEW</div>
-        <h2 id="review-dialog-title">
-          {reject ? "Reject this proposal?" : "Publish these changes?"}
-        </h2>
-        <p>
-          {reject
-            ? "The proposal and source evidence will be retained, but this changeset can no longer be published."
-            : `This will publish ${fileCount} ${fileCount === 1 ? "file change" : "file changes"} to the wiki. Existing files may be replaced or deleted. The reviewer identity and time will be recorded.`}
-        </p>
-        <label htmlFor="review-note">
-          {reject ? "Reason for rejection" : "Review note (optional)"}
-        </label>
-        <textarea
-          disabled={pending}
-          id="review-note"
-          maxLength={2000}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder={
-            reject
-              ? "Add a note to the review record."
-              : "Anything future reviewers should know?"
-          }
-          required={reject}
-          rows={4}
-          value={note}
-        />
-        {error && (
-          <div className="error-state" role="alert">
-            {error}
-          </div>
-        )}
-        <footer>
-          <button
-            className="secondary-button"
-            disabled={pending}
-            onClick={onClose}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button
-            className={`primary-button${reject ? " knowledge-reject-confirm" : ""}`}
-            disabled={pending || !allowed || (reject && !note.trim())}
-            type="submit"
-          >
-            {pending && <LoaderCircle className="spin" size={15} />}
-            {pending
-              ? "Saving decision…"
-              : reject
-                ? "Reject proposal"
-                : "Approve & publish"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
   )
 }

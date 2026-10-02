@@ -53,7 +53,10 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
   }
   const active =
     documentProcessing(document.status) || document.status === "uploading"
-  const canEdit = auth.user?.entity_id === document.uploaded_by && !active
+  const canEdit =
+    auth.user?.entity_id === document.uploaded_by &&
+    !active &&
+    document.review_status !== "rejected"
   const extracted = document.extracted_metadata
   const save = useMutation({
     mutationFn: (patch: Partial<DocumentMetadataFields>) =>

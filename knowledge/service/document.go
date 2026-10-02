@@ -39,11 +39,12 @@ type DocumentMetadata struct {
 }
 
 type DocumentDetails struct {
-	Document   model.Document               `json:"document"`
-	Pages      []model.DocumentPage         `json:"pages"`
-	Chunks     []model.DocumentChunk        `json:"chunks"`
-	Notes      *model.DocumentNotesRevision `json:"notes"`
-	Changesets []model.Changeset            `json:"changesets"`
+	Document      model.Document               `json:"document"`
+	Pages         []model.DocumentPage         `json:"pages"`
+	Chunks        []model.DocumentChunk        `json:"chunks"`
+	Notes         *model.DocumentNotesRevision `json:"notes"`
+	Changesets    []model.Changeset            `json:"changesets"`
+	ReviewBlocked bool                         `json:"review_blocked"`
 }
 
 type PDFExtractor interface {
@@ -262,11 +263,16 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 		if len(notes) > 0 {
 			result.Notes = &notes[0]
 		}
-		changesets := tx.Where("id IN (SELECT changeset_id FROM knowledge_changeset_source_record JOIN knowledge_document_page ON knowledge_document_page.source_record_id = knowledge_changeset_source_record.source_record_id WHERE document_id = ?)", id)
-		if result.Document.SessionID != "" {
-			changesets = changesets.Or("session_id = ?", result.Document.SessionID)
+		if err := documentChangesets(tx, result.Document).Order("created_at").Find(&result.Changesets).Error; err != nil {
+			return err
 		}
-		return changesets.Order("created_at").Find(&result.Changesets).Error
+		for _, changeset := range result.Changesets {
+			if documentPublicationStarted(changeset) {
+				result.ReviewBlocked = true
+				break
+			}
+		}
+		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err
 }

@@ -36,12 +36,20 @@ func TestChangesetRoutesEnforceReviewRoles(t *testing.T) {
 	}))
 	defer keys.Close()
 	router := gin.New()
-	InitializeRoutes(router, nil, nil, service.NewWikiService(nil, nil), nil, service.NewAuthService(sentinel.NewClient(keys.URL, "blix-test")))
+	InitializeRoutes(router, nil, nil, service.NewWikiService(nil, nil), service.NewDocumentService(nil, "", nil), service.NewAuthService(sentinel.NewClient(keys.URL, "blix-test")))
 	for _, tc := range []struct {
 		name, method, path, entityType string
 		groups                         []string
 		status                         int
 	}{
+		{"anonymous document rejection", "POST", "/v1/documents/invalid/review/reject", "", nil, 401},
+		{"nonmember document rejection", "POST", "/v1/documents/invalid/review/reject", "USER", nil, 403},
+		{"user document rejection", "POST", "/v1/documents/invalid/review/reject", "USER", []string{"BlixUsers"}, 400},
+		{"user document approval", "POST", "/v1/documents/invalid/review/approve", "USER", []string{"BlixUsers"}, 403},
+		{"admin document approval", "POST", "/v1/documents/invalid/review/approve", "USER", []string{"BlixAdmins"}, 400},
+		{"admin document rejection", "POST", "/v1/documents/invalid/review/reject", "USER", []string{"BlixAdmins"}, 400},
+		{"service account document approval", "POST", "/v1/documents/invalid/review/approve", "SERVICE_ACCOUNT", []string{"BlixAdmins"}, 403},
+		{"service account document rejection", "POST", "/v1/documents/invalid/review/reject", "SERVICE_ACCOUNT", []string{"BlixUsers"}, 403},
 		{"anonymous rejection", "POST", "/v1/changesets/invalid/review/reject", "", nil, 401},
 		{"nonmember rejection", "POST", "/v1/changesets/invalid/review/reject", "USER", nil, 403},
 		{"user rejection", "POST", "/v1/changesets/invalid/review/reject", "USER", []string{"BlixUsers"}, 400},

@@ -20,6 +20,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
+import { DocumentReview } from "@/components/document-review"
 import { DocumentMetadata } from "@/components/document-metadata"
 import { ProgressBar } from "@/components/progress-bar"
 import { errorMessage } from "@/lib/runtime"
@@ -36,7 +37,9 @@ export function DocumentDetailsPage() {
     refetchInterval: (query) =>
       query.state.data && documentProcessing(query.state.data.document.status)
         ? 2000
-        : false,
+        : query.state.data?.document.review_status === "in_review"
+          ? 5000
+          : false,
   })
   return (
     <div className="workspace-page document-page">
@@ -57,6 +60,7 @@ export function DocumentDetailsPage() {
       ) : (
         <>
           <DocumentHeader details={query.data} />
+          <DocumentReview details={query.data} />
           <DocumentIngestion details={query.data} />
           <DocumentMetadata
             details={query.data}
@@ -72,7 +76,9 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
   const { document, chunks, notes, changesets } = details
   const cache = useQueryClient()
   const auth = useAuth()
-  const canControl = auth.user?.entity_id === document.uploaded_by
+  const canControl =
+    auth.user?.entity_id === document.uploaded_by &&
+    document.review_status !== "rejected"
   const [selectedChunk, setSelectedChunk] = useState<number | null>(null)
   const completed = chunks.filter((chunk) => chunk.completed_at !== null)
   const currentChunk =
@@ -116,14 +122,6 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
           </h2>
         </div>
         <div className="ingestion-actions">
-          {document.conversation_id && (
-            <Link
-              className="secondary-button"
-              to={`/chat/${document.conversation_id}`}
-            >
-              Discuss with Blix
-            </Link>
-          )}
           {canControl && active && document.status !== "cancelling" && (
             <button
               className="secondary-button"
@@ -262,6 +260,8 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
 }
 
 function ingestionStage({ document, chunks }: DocumentDetails): string {
+  if (document.review_status === "rejected")
+    return "This document was rejected. The saved reading work below is retained for the review record."
   switch (document.status) {
     case "uploading":
       return "Your document is uploading."

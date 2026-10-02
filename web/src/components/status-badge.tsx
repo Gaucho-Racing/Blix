@@ -8,7 +8,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   return (
     <span className={`status-badge status-${status}`}>
       <span className="status-dot" />
-      {status}
+      {status.replaceAll("_", " ")}
     </span>
   )
 }

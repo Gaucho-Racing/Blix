@@ -46,7 +46,7 @@ func (r *publishingRepository) Publish(context.Context, string, string) error {
 }
 func publishFixture(t *testing.T, db *gorm.DB) string {
 	t.Helper()
-	if err := db.Exec("TRUNCATE knowledge_changeset, knowledge_changeset_file, knowledge_changeset_source_record").Error; err != nil {
+	if err := db.Exec("TRUNCATE knowledge_changeset, knowledge_changeset_file, knowledge_changeset_source_record, knowledge_changeset_document").Error; err != nil {
 		t.Fatal(err)
 	}
 	id := identifier.New(identifier.Changeset)
@@ -90,7 +90,7 @@ func TestPublicationLeaseReleasesDatabaseLocks(t *testing.T) {
 		close(repo.release)
 		t.Fatal("competing publisher bypassed lease")
 	}
-	if _, err := competing.ReviewChangeset(context.Background(), id, "reject", ReviewChangesetInput{Caller: CallerContext{EntityID: identifier.New(identifier.Entity), EntityType: "USER", Groups: []string{"BlixAdmins"}}, Note: "Reject"}); !errors.Is(err, ErrConflict) {
+	if _, err := competing.ReviewChangeset(context.Background(), id, "reject", ReviewInput{Caller: CallerContext{EntityID: identifier.New(identifier.Entity), EntityType: "USER", Groups: []string{"BlixAdmins"}}, Note: "Reject"}); !errors.Is(err, ErrConflict) {
 		close(repo.release)
 		t.Fatal("in-flight publication could be rejected")
 	}

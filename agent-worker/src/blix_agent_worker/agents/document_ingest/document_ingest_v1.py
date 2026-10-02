@@ -283,7 +283,7 @@ class DocumentIngestV1Agent:
                         "unknown or conflicting; do not substitute upload dates, invent versions, or resolve "
                         "date ambiguity by guessing. Explain missing or conflicting information in warnings. "
                         "List exact original source_record_ids supporting extracted facts. Preserve the full "
-                        "document title and edition qualifiers. Suggest 3–5 concise, useful document tags based on "
+                        "document title and edition qualifiers. Suggest 2–3 concise, useful document tags based on "
                         "its subjects, systems, organization, or purpose. Use free-form lowercase labels, not a "
                         "fixed taxonomy; avoid redundant or overly generic tags. Use at most 8 tags of at most "
                         "64 UTF-8 bytes each, or an empty list if the document has no identifiable topics. "

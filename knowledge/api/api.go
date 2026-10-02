@@ -64,9 +64,10 @@ func InitializeRouter(production bool) *gin.Engine {
 
 func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *repository.Wiki, pages *service.WikiService, documents *service.DocumentService, auth *service.AuthService) {
 	handler := &Handler{sources: sources, wiki: wiki, pages: pages, documents: documents}
-	uploads := router.Group("/v1/documents", RequireAuthentication(auth), RequireGroup("BlixUsers"))
+	uploads := router.Group("/v1/documents", RequireAuthentication(auth), RequireGroup("BlixUsers", "BlixAdmins"))
 	uploads.GET("", handler.ListDocuments)
 	uploads.POST("/uploads", handler.InitiateDocumentUpload)
+	uploads.POST("/:documentID/review/:decision", handler.ReviewDocument)
 	uploads.POST("/:documentID/complete", handler.CompleteDocumentUpload)
 	uploads.POST("/:documentID/ingestion/:operation", handler.ControlDocument)
 	uploads.GET("/:documentID/chunks/:number", handler.ReadDocumentChunk)
@@ -74,7 +75,7 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	uploads.PATCH("/:documentID/metadata", handler.UpdateDocumentMetadata)
 	uploads.GET("/:documentID/pages/:number", handler.GetDocumentPage)
 	uploads.GET("/:documentID/file", handler.GetDocumentFile)
-	reads := router.Group("/v1/wiki", RequireAuthentication(auth), RequireGroup("BlixUsers"))
+	reads := router.Group("/v1/wiki", RequireAuthentication(auth), RequireGroup("BlixUsers", "BlixAdmins"))
 	reads.GET("/search", handler.SearchWiki)
 	reads.GET("/page", handler.ReadWikiPage)
 	reads.GET("/changesets/:changesetID", handler.GetWikiChangeset)

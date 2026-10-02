@@ -115,7 +115,7 @@ func (s *SourceService) GetSourceRecord(ctx context.Context, recordID string) (m
 		return model.SourceRecord{}, fmt.Errorf("%w: source_record_id is invalid", ErrInvalid)
 	}
 	var record model.SourceRecord
-	if err := s.database.WithContext(ctx).First(&record, "id = ?", recordID).Error; err != nil {
+	if err := s.database.WithContext(ctx).First(&record, "id = ? AND source_id IN (SELECT id FROM knowledge_source WHERE status = ?)", recordID, model.SourceStatusActive).Error; err != nil {
 		return model.SourceRecord{}, mapDatabaseError(err)
 	}
 	return record, nil

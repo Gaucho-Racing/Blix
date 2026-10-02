@@ -6,40 +6,41 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
 	"gorm.io/gorm"
 )
 
-type ReviewChangesetInput struct {
+type ReviewInput struct {
 	Caller CallerContext `json:"-"`
 	Note   string        `json:"note"`
 }
 
-func reviewUpdates(input ReviewChangesetInput, decision string) map[string]any {
+func reviewUpdates(input ReviewInput, decision string) map[string]any {
 	return map[string]any{"review_decision": decision, "reviewed_by": input.Caller.EntityID,
 		"review_note": strings.TrimSpace(input.Note), "reviewed_at": time.Now().UTC()}
 }
 
-func (s *WikiService) ReviewChangeset(ctx context.Context, id, decision string, input ReviewChangesetInput) (ChangesetDetails, error) {
-	isAdmin := slices.Contains(input.Caller.Groups, "BlixAdmins")
-	canReview := input.Caller.EntityType == "USER" && (isAdmin || slices.Contains(input.Caller.Groups, "BlixUsers"))
-	if !canReview || (decision == "approve" && !isAdmin) {
-		return ChangesetDetails{}, ErrForbidden
+func (s *WikiService) ReviewChangeset(ctx context.Context, id, decision string, input ReviewInput) (ChangesetDetails, error) {
+	if err := validateReviewInput(input, decision); err != nil {
+		return ChangesetDetails{}, err
+	}
+	if !identifier.IsValid(id, identifier.Changeset) {
+		return ChangesetDetails{}, ErrInvalid
 	}
 	input.Note = strings.TrimSpace(input.Note)
-	if !identifier.IsValid(id, identifier.Changeset) || !identifier.IsValid(input.Caller.EntityID, identifier.Entity) ||
-		len(input.Note) > 2000 || strings.ContainsRune(input.Note, 0) || (decision != "approve" && decision != "reject") ||
-		(decision == "reject" && input.Note == "") {
-		return ChangesetDetails{}, fmt.Errorf("%w: valid IDs and a review note up to 2000 bytes are required; rejection needs a reason", ErrInvalid)
-	}
+
 	s.writer.Lock()
 	defer s.writer.Unlock()
 	if decision == "approve" {
 		return s.applyReviewed(ctx, id, &input)
 	}
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := lockChangesetDocuments(tx, id); err != nil {
+			return err
+		}
 		result, err := s.lockChangeset(ctx, tx, id)
 		if err != nil {
 			return err
@@ -61,4 +62,17 @@ func (s *WikiService) ReviewChangeset(ctx context.Context, id, decision string, 
 		return ChangesetDetails{}, err
 	}
 	return s.GetChangeset(ctx, id)
+}
+
+func validateReviewInput(input ReviewInput, decision string) error {
+	isAdmin := slices.Contains(input.Caller.Groups, "BlixAdmins")
+	canReview := input.Caller.EntityType == "USER" && (isAdmin || slices.Contains(input.Caller.Groups, "BlixUsers"))
+	if !canReview || (decision == "approve" && !isAdmin) {
+		return ErrForbidden
+	}
+	note := strings.TrimSpace(input.Note)
+	if !identifier.IsValid(input.Caller.EntityID, identifier.Entity) || len(note) > 2000 || !utf8.ValidString(note) || strings.ContainsRune(note, 0) || (decision != "approve" && decision != "reject") || (decision == "reject" && note == "") {
+		return fmt.Errorf("%w: a review note up to 2000 UTF-8 bytes is required; rejection needs a reason", ErrInvalid)
+	}
+	return nil
 }

@@ -230,7 +230,7 @@ func (s *DocumentService) UpdateMetadata(ctx context.Context, id, owner string, 
 		if doc.UploadedBy != owner {
 			return ErrForbidden
 		}
-		if documentIsProcessing(doc.Status) || doc.Status == "uploading" || doc.MetadataRevision != patch.Revision {
+		if doc.ReviewStatus == model.DocumentReviewRejected || documentIsProcessing(doc.Status) || doc.Status == "uploading" || doc.MetadataRevision != patch.Revision {
 			return ErrConflict
 		}
 		overrides := map[string]bool{}

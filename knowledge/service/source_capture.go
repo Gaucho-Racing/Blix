@@ -81,7 +81,7 @@ func (s *SourceService) FindSources(ctx context.Context, query SourceQuery) ([]m
 	if query.Limit < 1 || query.Limit > 100 || (query.Before != "" && !identifier.IsValid(query.Before, identifier.Source)) {
 		return nil, fmt.Errorf("%w: invalid limit or source cursor", ErrInvalid)
 	}
-	db := s.database.WithContext(ctx)
+	db := s.database.WithContext(ctx).Where("status = ?", model.SourceStatusActive).Where("id NOT IN (SELECT source_id FROM knowledge_document WHERE review_status <> ?)", model.DocumentReviewIngested)
 	if query.Kind != "" {
 		db = db.Where("kind = ?", query.Kind)
 	}
@@ -109,8 +109,12 @@ func (s *SourceService) ListSourceRecords(ctx context.Context, query SourceRecor
 	if query.Limit < 1 || query.Limit > 100 || (query.Before != "" && !identifier.IsValid(query.Before, identifier.SourceRecord)) {
 		return nil, fmt.Errorf("%w: invalid limit or record cursor", ErrInvalid)
 	}
-	if _, err := s.GetSource(ctx, query.SourceID); err != nil {
+	source, err := s.GetSource(ctx, query.SourceID)
+	if err != nil {
 		return nil, err
+	}
+	if source.Status != model.SourceStatusActive {
+		return nil, ErrNotFound
 	}
 	db := s.database.WithContext(ctx).Where("source_id = ?", query.SourceID)
 	if query.ExternalID != "" {
@@ -120,6 +124,6 @@ func (s *SourceService) ListSourceRecords(ctx context.Context, query SourceRecor
 		db = db.Where("id < ?", query.Before)
 	}
 	records := []model.SourceRecord{}
-	err := db.Omit("content").Order("id DESC").Limit(query.Limit + 1).Find(&records).Error
+	err = db.Omit("content").Order("id DESC").Limit(query.Limit + 1).Find(&records).Error
 	return records, err
 }

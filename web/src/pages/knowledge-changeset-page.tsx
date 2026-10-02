@@ -26,7 +26,10 @@ function ChangesetPage({ admin }: { admin: boolean }) {
     enabled: allowed,
     refetchInterval: (query) =>
       query.state.data &&
-      !["committed", "rejected"].includes(query.state.data.changeset.status)
+      (!["committed", "rejected"].includes(query.state.data.changeset.status) ||
+        query.state.data.documents?.some(
+          (document) => document.review_status === "in_review",
+        ))
         ? 5000
         : false,
   })
@@ -69,6 +72,7 @@ function ChangesetPage({ admin }: { admin: boolean }) {
             admin={admin}
             changeset={query.data.changeset}
             files={query.data.files}
+            documents={query.data.documents ?? []}
             citations={query.data.citations ?? {}}
             key={changesetID}
             onRefresh={() => void query.refetch()}

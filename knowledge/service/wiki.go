@@ -68,6 +68,7 @@ type ChangesetDetails struct {
 	Files           []model.ChangesetFile `json:"files"`
 	SourceRecordIDs []string              `json:"source_record_ids"`
 	Citations       map[string]Citation   `json:"citations"`
+	Documents       []model.Document      `json:"documents"`
 }
 
 func NewWikiService(database *gorm.DB, wiki wikiRepository) *WikiService {
@@ -212,10 +213,35 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 	for _, sourceRecordID := range input.SourceRecordIDs {
 		links = append(links, model.ChangesetSourceRecord{ChangesetID: changeset.ID, SourceRecordID: sourceRecordID})
 	}
+	var referencedSources []string
+	for source := range seenSources {
+		referencedSources = append(referencedSources, source)
+	}
+	for _, file := range files {
+		for _, source := range sourceRecordReferencePattern.FindAllString(file.Content, -1) {
+			if _, exists := seenSources[source]; !exists {
+				seenSources[source] = struct{}{}
+				referencedSources = append(referencedSources, source)
+			}
+		}
+	}
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var docs []model.Document
+		query := tx.Where("id IN (SELECT document_id FROM knowledge_document_page WHERE source_record_id IN ?)", referencedSources)
+		if input.SessionID != "" {
+			query = query.Or("session_id = ? AND conversation_id = ?", input.SessionID, input.ConversationID)
+		}
+		if err := query.Order("id").Clauses(clause.Locking{Strength: "UPDATE"}).Find(&docs).Error; err != nil {
+			return err
+		}
+		for _, doc := range docs {
+			if doc.ReviewStatus == model.DocumentReviewRejected {
+				return fmt.Errorf("%w: rejected document evidence cannot be proposed", ErrConflict)
+			}
+		}
 		if len(input.SourceRecordIDs) > 0 {
 			var count int64
-			if err := tx.Model(&model.SourceRecord{}).Where("id IN ?", input.SourceRecordIDs).Count(&count).Error; err != nil {
+			if err := tx.Model(&model.SourceRecord{}).Where("id IN ? AND source_id IN (SELECT id FROM knowledge_source WHERE status = ?)", input.SourceRecordIDs, model.SourceStatusActive).Count(&count).Error; err != nil {
 				return err
 			}
 			if count != int64(len(input.SourceRecordIDs)) {
@@ -232,11 +258,23 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 			return err
 		}
 		if len(links) > 0 {
-			return tx.Create(&links).Error
+			if err := tx.Create(&links).Error; err != nil {
+				return err
+			}
+		}
+		if len(docs) > 0 {
+			documentLinks := make([]model.ChangesetDocument, 0, len(docs))
+			for _, doc := range docs {
+				documentLinks = append(documentLinks, model.ChangesetDocument{ChangesetID: changeset.ID, DocumentID: doc.ID})
+			}
+			return tx.Create(&documentLinks).Error
 		}
 		return nil
 	})
-	return ChangesetDetails{Changeset: changeset, Files: files, SourceRecordIDs: input.SourceRecordIDs}, err
+	if err != nil {
+		return ChangesetDetails{}, err
+	}
+	return s.GetChangeset(ctx, changeset.ID)
 }
 
 func validateDiscordAttribution(tx *gorm.DB, sourceRecordIDs []string, edits []repository.Edit) error {
@@ -286,7 +324,16 @@ func (s *WikiService) GetChangeset(ctx context.Context, id string) (ChangesetDet
 	for _, link := range links {
 		result.SourceRecordIDs = append(result.SourceRecordIDs, link.SourceRecordID)
 	}
-	result.Citations, err = s.resolveCitations(ctx, []string{strings.Join(result.SourceRecordIDs, " ")})
+	contents := []string{strings.Join(result.SourceRecordIDs, " ")}
+	for _, file := range result.Files {
+		contents = append(contents, file.Content)
+	}
+	result.Citations, err = s.resolveCitations(ctx, contents)
+	if err != nil {
+		return result, err
+	}
+	result.Documents = []model.Document{}
+	err = changesetDocuments(s.database.WithContext(ctx), id).Order("id").Find(&result.Documents).Error
 	return result, err
 }
 
@@ -376,11 +423,17 @@ func (s *WikiService) apply(ctx context.Context, id string) (ChangesetDetails, e
 	return s.applyReviewed(ctx, id, nil)
 }
 
-func (s *WikiService) applyReviewed(ctx context.Context, id string, review *ReviewChangesetInput) (ChangesetDetails, error) {
+func (s *WikiService) applyReviewed(ctx context.Context, id string, review *ReviewInput) (ChangesetDetails, error) {
+	if !identifier.IsValid(id, identifier.Changeset) {
+		return ChangesetDetails{}, ErrInvalid
+	}
 	owner := identifier.New(identifier.Changeset)
 	var result ChangesetDetails
 	err := s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
+		docs, err := lockChangesetDocuments(tx, id)
+		if err != nil {
+			return err
+		}
 		result, err = s.lockChangeset(ctx, tx, id)
 		if err != nil {
 			return err
@@ -394,6 +447,19 @@ func (s *WikiService) applyReviewed(ctx context.Context, id string, review *Revi
 		}
 		if changeset.PublicationLeaseUntil != nil && changeset.PublicationLeaseUntil.After(time.Now()) {
 			return fmt.Errorf("%w: publication is already running", ErrConflict)
+		}
+		for _, doc := range docs {
+			if doc.ReviewStatus == model.DocumentReviewRejected {
+				return fmt.Errorf("%w: rejected document evidence cannot be published", ErrConflict)
+			}
+			if doc.ReviewStatus == model.DocumentReviewInReview {
+				if review == nil {
+					return fmt.Errorf("%w: documents in review require BlixAdmin approval", ErrForbidden)
+				}
+				if !documentProcessingComplete(doc.Status) {
+					return fmt.Errorf("%w: document processing must finish before publishing its changeset", ErrConflict)
+				}
+			}
 		}
 		updates := map[string]any{"publication_owner": owner, "publication_lease_until": time.Now().Add(2 * time.Minute)}
 		if review != nil && changeset.ReviewDecision != "approved" {
@@ -409,15 +475,29 @@ func (s *WikiService) applyReviewed(ctx context.Context, id string, review *Revi
 	persist := func(updates map[string]any) error {
 		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		saved := s.database.WithContext(saveCtx).Model(&model.Changeset{}).
-			Where("id = ? AND publication_owner = ? AND publication_lease_until > ?", id, owner, time.Now()).Updates(updates)
-		if saved.Error != nil {
-			return saved.Error
-		}
-		if saved.RowsAffected != 1 {
-			return fmt.Errorf("%w: publication lease expired", ErrConflict)
-		}
-		return nil
+		return s.database.WithContext(saveCtx).Transaction(func(tx *gorm.DB) error {
+			docs, err := lockChangesetDocuments(tx, id)
+			if err != nil {
+				return err
+			}
+			saved := tx.Model(&model.Changeset{}).Where("id = ? AND publication_owner = ? AND publication_lease_until > ?", id, owner, time.Now()).Updates(updates)
+			if saved.Error != nil {
+				return saved.Error
+			}
+			if saved.RowsAffected != 1 {
+				return fmt.Errorf("%w: publication lease expired", ErrConflict)
+			}
+			if updates["status"] == model.ChangesetStatusCommitted && review != nil {
+				for _, doc := range docs {
+					if doc.ReviewStatus == model.DocumentReviewInReview {
+						if err := tx.Model(&doc).Updates(documentApprovalUpdates(*review)).Error; err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		})
 	}
 	fail := func(operationError error) (ChangesetDetails, error) {
 		saveError := persist(map[string]any{"status": model.ChangesetStatusFailed, "error": operationError.Error(), "publication_owner": "", "publication_lease_until": nil})

@@ -2,7 +2,13 @@ import axios from "axios"
 import { api } from "@/lib/api"
 import type { WikiChangeset } from "@/lib/knowledge"
 
+export type DocumentReviewStatus = "in_review" | "ingested" | "rejected"
+
 export interface TeamDocument {
+  review_status: DocumentReviewStatus
+  reviewed_by: string
+  review_note: string
+  reviewed_at?: string
   document_id: string
   uploaded_by: string
   depot_file_id: string
@@ -65,6 +71,7 @@ export interface DocumentChunk {
   findings: string
 }
 export interface DocumentDetails {
+  review_blocked: boolean
   chunks: DocumentChunk[]
   notes: { revision: number; notes: string; created_at: string } | null
   changesets: WikiChangeset[]
@@ -187,8 +194,8 @@ export const documentStatusLabel = (status: TeamDocument["status"]) =>
     extracting: "Extracting text",
     reading: "Reading document",
     reconciling: "Drafting wiki changes",
-    ready: "Ready for review",
-    partial: "Review with coverage warnings",
+    ready: "Reading complete",
+    partial: "Reading complete · coverage gaps",
     no_changes: "Processed · no new changes",
     failed: "Processing failed",
     cancelling: "Cancelling",
@@ -243,5 +250,26 @@ export async function readWiki(
       params: { path, cursor, commit_sha: commit, max_bytes: 32_000 },
       signal,
     })
+  ).data
+}
+
+export const documentReviewLabel = (status: DocumentReviewStatus) =>
+  ({ in_review: "In Review", ingested: "Ingested", rejected: "Rejected" })[
+    status
+  ]
+
+export const documentProcessingComplete = (status: TeamDocument["status"]) =>
+  ["ready", "partial", "no_changes", "imported"].includes(status)
+
+export async function reviewDocument(
+  id: string,
+  decision: "approve" | "reject",
+  note: string,
+) {
+  return (
+    await api.post<DocumentDetails>(
+      `${root}/documents/${encodeURIComponent(id)}/review/${decision}`,
+      { note },
+    )
   ).data
 }
