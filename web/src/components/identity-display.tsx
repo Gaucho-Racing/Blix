@@ -24,7 +24,8 @@ export function IdentityDisplay({ entityID, identity }: IdentityDisplayProps) {
     resolved?.name ||
     (lookup.isLoading ? "Loading identity…" : "Unknown entity")
   const avatarURL = resolved?.avatar_url || resolved?.application?.icon_url
-  const subtitle = resolved?.username || resolved?.application?.name
+  const username = resolved?.username?.trim().replace(/^@+/, "")
+  const subtitle = username ? `@${username}` : resolved?.application?.name
 
   return (
     <div className="identity-display">
