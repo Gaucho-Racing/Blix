@@ -721,7 +721,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-file small, .document-help { color: #8a7d90; font-size: 12px; line-height: 1.7; font-weight: 400; }
 .document-help { display: block; margin: 6px 0 18px; }
 .document-progress { display: flex; align-items: center; gap: 15px; margin: 15px 0; color: #8a3775; font-size: 12px; }
-.document-progress progress { accent-color: #ce3b9a; }
+.progress-bar { width: 160px; max-width: 100%; height: 8px; flex-shrink: 0; overflow: hidden; border-radius: 9999px; background: var(--pink-soft); }
+.progress-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--pink); transition: width .35s ease; }
+@media (prefers-reduced-motion: reduce) { .progress-bar-fill { transition: none; } }
 .document-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
 .document-card { padding: 24px; display: block; transition: border-color .15s; }
 .document-card:hover { border-color: #d9a2c7; }
@@ -803,7 +805,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-upload-status { display: flex; gap: 1rem; align-items: center; padding: 1.5rem; }
 .document-upload-status > div { flex: 1; min-width: 0; }
 .document-upload-status strong { overflow-wrap: anywhere; }
-.document-upload-status progress { width: 100%; }
+.document-upload-status .progress-bar { width: 100%; }
 .document-metadata-panel { padding: 1.5rem; }
 .document-metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 2rem; margin: 1.25rem 0; }
 .document-metadata-grid dt { color: var(--muted); font-size: .8rem; }

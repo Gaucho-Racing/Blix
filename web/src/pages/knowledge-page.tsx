@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
+import { ProgressBar } from "@/components/progress-bar"
 import {
   importDocument,
   listDocuments,
@@ -204,7 +205,7 @@ export function KnowledgePage() {
                 ? `Uploading ${progress}%`
                 : "Starting background ingestion…"}
             </p>
-            <progress max={100} value={progress} />
+            <ProgressBar value={progress} label="PDF upload progress" />
           </div>
         </section>
       )}

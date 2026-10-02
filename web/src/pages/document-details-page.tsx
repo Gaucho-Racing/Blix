@@ -22,6 +22,7 @@ import remarkGfm from "remark-gfm"
 import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
 import { DocumentMetadata } from "@/components/document-metadata"
+import { ProgressBar } from "@/components/progress-bar"
 import { appendMessage, createConversation, errorMessage } from "@/lib/runtime"
 
 export function DocumentDetailsPage() {
@@ -383,7 +384,12 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
       </header>
       {chunks.length > 0 && (
         <div className="document-progress">
-          <progress max={chunks.length} value={completed.length} />
+          <ProgressBar
+            max={chunks.length}
+            value={completed.length}
+            label="Document reading progress"
+            valueText={`${completed.length} of ${chunks.length} reading chunks saved`}
+          />
           <span>
             {completed.length} / {chunks.length} reading chunks saved ·{" "}
             {document.page_count} PDF pages
