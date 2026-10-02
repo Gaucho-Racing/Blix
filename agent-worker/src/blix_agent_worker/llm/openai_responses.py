@@ -347,7 +347,7 @@ class OpenAIResponsesModel:
 
     def _text_input_items(self, request: ModelRequest) -> list[JsonObject]:
         if request.continuation is None:
-            return self._conversation_items(request.messages)
+            return self._run_items(request.messages)
         if request.continuation.adapter_id != self._CONTINUATION_ADAPTER_ID:
             raise ValueError("the saved execution uses a different model adapter; start a new run")
         if (
@@ -364,7 +364,7 @@ class OpenAIResponsesModel:
         return [*cast(list[JsonObject], continuation_items), *self._call_output_items(request.messages)]
 
     @staticmethod
-    def _conversation_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
+    def _run_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
         items: list[JsonObject] = []
         for message in messages:
             if message.role is ModelMessageRole.SYSTEM:
@@ -372,10 +372,10 @@ class OpenAIResponsesModel:
             if message.role is ModelMessageRole.CALL_OUTPUT or message.call_requests:
                 raise ValueError("callable exchanges require model continuation state")
             if message.content is None:
-                raise ValueError("conversation messages must contain text")
+                raise ValueError("run messages must contain text")
             items.append({"role": message.role.value, "content": message.content})
         if not items:
-            raise ValueError("the model request does not contain conversation input")
+            raise ValueError("the model request does not contain run input")
         return items
 
     @staticmethod

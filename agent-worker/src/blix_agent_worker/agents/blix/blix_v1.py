@@ -49,14 +49,14 @@ from blix_agent_worker.models.llm import (
     ModelRequest,
     ModelResponse,
 )
-from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
+from blix_agent_worker.models.message import RunMessage, RunMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRunner
 from blix_agent_worker.tools.registry import ToolRegistryError
 
 
 class BlixV1Input(ContractModel):
-    messages: Annotated[tuple[ConversationMessage, ...], Field(min_length=0)]
+    messages: Annotated[tuple[RunMessage, ...], Field(min_length=0)]
     notifications: tuple[JsonObject, ...] = ()
     reply_to_message_id: MessageID | None = None
 
@@ -64,15 +64,15 @@ class BlixV1Input(ContractModel):
     def validate_messages(self) -> Self:
         if self.reply_to_message_id is not None:
             if not any(
-                message.message_id == self.reply_to_message_id and message.role is ConversationMessageRole.USER
+                message.message_id == self.reply_to_message_id and message.role is RunMessageRole.USER
                 for message in self.messages
             ):
-                raise ValueError("reply_to_message_id must identify a user message in this conversation")
+                raise ValueError("reply_to_message_id must identify a user message in this run")
             return self
         if not self.messages and not self.notifications:
-            raise ValueError("a lead turn requires conversation messages or completion notifications")
-        if not self.notifications and self.messages[-1].role is not ConversationMessageRole.USER:
-            raise ValueError("the latest conversation message must be from the user")
+            raise ValueError("a lead turn requires run messages or completion notifications")
+        if not self.notifications and self.messages[-1].role is not RunMessageRole.USER:
+            raise ValueError("the latest run message must be from the user")
         return self
 
 
@@ -84,7 +84,7 @@ class BlixV1Agent:
     definition = AgentDefinition(
         id="blix_v1",
         kind=AgentKind.ENTRYPOINT,
-        description="Handle a general text conversation and use available tools when helpful.",
+        description="Handle a general text run and use available tools when helpful.",
         instructions=BLIX_V1_SYSTEM_PROMPT,
         input_schema=BlixV1Input.model_json_schema(mode="validation"),
         output_schema=BlixV1Output.model_json_schema(mode="serialization"),
@@ -142,10 +142,10 @@ class BlixV1Agent:
             return self._failure(
                 task,
                 "invalid_agent_input",
-                "The conversation agent input is invalid.",
+                "The run agent input is invalid.",
                 details=validation_error_details(error),
             )
-        if any(message.conversation_id != task.conversation_id for message in agent_input.messages):
+        if any(message.run_id != task.run_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the task run.")
         if any(message.session_id != task.session_id for message in agent_input.messages):
             return self._failure(task, "invalid_agent_input", "All messages must belong to the agent execution.")
@@ -173,7 +173,7 @@ class BlixV1Agent:
                         "created_at": message.created_at.isoformat(),
                     }
                     for position, message in enumerate(agent_input.messages, start=1)
-                    if message.role is ConversationMessageRole.USER
+                    if message.role is RunMessageRole.USER
                 ],
                 separators=(",", ":"),
             )
@@ -185,7 +185,7 @@ class BlixV1Agent:
         if agent_input.reply_to_message_id is not None:
             system_prompt += (
                 f"\n\nThis turn answers user message {agent_input.reply_to_message_id}. "
-                "Conversation messages are in delivery order. Assistant replies after that user message "
+                "Run messages are in delivery order. Assistant replies after that user message "
                 "belong to earlier requests; use them as context without changing which request you answer."
             )
         if agent_input.notifications:
@@ -201,12 +201,12 @@ class BlixV1Agent:
                     ModelMessage(
                         role=(
                             ModelMessageRole.USER
-                            if message.role is ConversationMessageRole.USER
+                            if message.role is RunMessageRole.USER
                             else ModelMessageRole.ASSISTANT
                         ),
                         content=(
                             BLIX_V1_USER_MESSAGE.format(message_id=message.message_id, content=message.content)
-                            if message.role is ConversationMessageRole.USER
+                            if message.role is RunMessageRole.USER
                             else message.content
                         ),
                     )
@@ -215,14 +215,14 @@ class BlixV1Agent:
             ]
             if (
                 agent_input.reply_to_message_id is not None
-                and agent_input.messages[-1].role is ConversationMessageRole.ASSISTANT
+                and agent_input.messages[-1].role is RunMessageRole.ASSISTANT
             ):
                 messages.append(
                     ModelMessage(
                         role=ModelMessageRole.USER,
                         content=(
                             f"Answer my message {agent_input.reply_to_message_id} above, "
-                            "using the conversation as context."
+                            "using the run as context."
                         ),
                     )
                 )
@@ -289,7 +289,7 @@ class BlixV1Agent:
                     )
                 output = BlixV1Output(message=response_message.content)
                 return AgentResult(
-                    conversation_id=task.conversation_id,
+                    run_id=task.run_id,
                     session_id=task.session_id,
                     parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
@@ -438,7 +438,7 @@ class BlixV1Agent:
 
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(
-                conversation_id=task.conversation_id,
+                run_id=task.run_id,
                 call_id=new_ulid("call"),
                 parent_session_id=task.session_id,
                 tool_id=model_call_request.callable_id,
@@ -447,7 +447,7 @@ class BlixV1Agent:
             )
             if model_call_request.callable_id not in allowed_tool_ids:
                 tool_result = ToolResult(
-                    conversation_id=call.conversation_id,
+                    run_id=call.run_id,
                     call_id=call.call_id,
                     parent_session_id=call.parent_session_id,
                     status=ToolResultStatus.FAILED,
@@ -534,7 +534,7 @@ class BlixV1Agent:
         usage: AgentUsage | None = None,
     ) -> AgentResult:
         return AgentResult(
-            conversation_id=task.conversation_id,
+            run_id=task.run_id,
             session_id=task.session_id,
             parent_session_id=task.parent_session_id,
             agent_id=task.agent_id,

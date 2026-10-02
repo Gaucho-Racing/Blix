@@ -9,7 +9,7 @@ from blix_agent_worker.models.agent import (
 from blix_agent_worker.models.common import (
     CallID,
     ContractError,
-    ConversationID,
+    RunID,
     EntityID,
     EventID,
     JobID,
@@ -35,7 +35,7 @@ from blix_agent_worker.models.llm import (
     ModelResponse,
     ModelUsage,
 )
-from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
+from blix_agent_worker.models.message import RunMessage, RunMessageRole
 from blix_agent_worker.models.tool import (
     ToolCall,
     ToolDefinition,
@@ -57,8 +57,8 @@ __all__ = [
     "ContractError",
     "EntityID",
     "EntityType",
-    "ConversationMessage",
-    "ConversationMessageRole",
+    "RunMessage",
+    "RunMessageRole",
     "EventID",
     "SessionID",
     "JobID",
@@ -75,7 +75,7 @@ __all__ = [
     "ModelResponse",
     "ModelUsage",
     "OutboxID",
-    "ConversationID",
+    "RunID",
     "ServiceAccountID",
     "ToolCall",
     "ToolDefinition",

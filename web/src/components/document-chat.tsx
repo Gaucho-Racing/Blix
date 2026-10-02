@@ -6,8 +6,8 @@ import { useAuth } from "@/lib/auth"
 import { createDocumentChat, documentQuestionFailure } from "@/lib/document-chat"
 import type { DocumentDetails } from "@/lib/documents"
 import {
-  activeStatus, appendMessage, errorMessage, getConversation,
-  interruptConversation, liveOutputs, loadEvents,
+  activeStatus, appendMessage, errorMessage, getRun,
+  interruptRun, liveOutputs, loadEvents,
 } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/lib/runtime"
 
@@ -16,31 +16,31 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
   const auth = useAuth()
   const cache = useQueryClient()
   const [draft, setDraft] = useState("")
-  const [conversationID, setConversationID] = useState("")
+  const [runID, setRunID] = useState("")
   const transcript = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const follow = useRef(true)
-  const conversation = useQuery({
-    queryKey: ["conversation", conversationID],
-    queryFn: ({ signal }) => getConversation(conversationID, signal),
-    enabled: !!conversationID,
+  const run = useQuery({
+    queryKey: ["run", runID],
+    queryFn: ({ signal }) => getRun(runID, signal),
+    enabled: !!runID,
     refetchInterval: (query) =>
       query.state.data?.turns.some((turn) => activeStatus(turn.status)) ? 1000 : false,
   })
-  const working = conversation.data?.turns.some((turn) => activeStatus(turn.status)) ?? false
-  const eventsKey = ["conversation-events", conversationID]
+  const working = run.data?.turns.some((turn) => activeStatus(turn.status)) ?? false
+  const eventsKey = ["run-events", runID]
   const events = useQuery({
     queryKey: eventsKey,
     queryFn: ({ signal }) => loadEvents(
-      conversationID, cache.getQueryData<RuntimeEvent[]>(eventsKey) ?? [], signal,
+      runID, cache.getQueryData<RuntimeEvent[]>(eventsKey) ?? [], signal,
     ),
-    enabled: !!conversationID,
+    enabled: !!runID,
     refetchInterval: working ? 1000 : false,
   })
-  const live = liveOutputs(events.data ?? [], conversation.data)
+  const live = liveOutputs(events.data ?? [], run.data)
   const refresh = async () => {
     await Promise.all([
-      cache.invalidateQueries({ queryKey: ["conversation", conversationID] }),
+      cache.invalidateQueries({ queryKey: ["run", runID] }),
       cache.invalidateQueries({ queryKey: eventsKey }),
     ])
   }
@@ -48,30 +48,30 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
     mutationFn: async (question: string) => {
       follow.current = true
       const chat = await createDocumentChat(document.document_id)
-      setConversationID(chat.conversation_id)
-      await appendMessage(chat.conversation_id, question)
+      setRunID(chat.run_id)
+      await appendMessage(chat.run_id, question)
       await Promise.all([
-        cache.invalidateQueries({ queryKey: ["conversation", chat.conversation_id] }),
-        cache.invalidateQueries({ queryKey: ["conversation-events", chat.conversation_id] }),
+        cache.invalidateQueries({ queryKey: ["run", chat.run_id] }),
+        cache.invalidateQueries({ queryKey: ["run-events", chat.run_id] }),
       ])
     },
     onSuccess: () => setDraft(""),
   })
   const stop = useMutation({
-    mutationFn: () => interruptConversation(conversationID),
+    mutationFn: () => interruptRun(runID),
     onSuccess: refresh,
   })
-  const latestTurn = conversation.data?.turns.at(-1)
+  const latestTurn = run.data?.turns.at(-1)
   const failure = documentQuestionFailure(latestTurn, events.data ?? [])
   const turnStatus = latestTurn?.status
   useEffect(() => {
-    if (conversationID && turnStatus && !activeStatus(turnStatus)) {
-      void cache.invalidateQueries({ queryKey: ["conversation-events", conversationID] })
+    if (runID && turnStatus && !activeStatus(turnStatus)) {
+      void cache.invalidateQueries({ queryKey: ["run-events", runID] })
     }
-  }, [cache, conversationID, turnStatus])
-  const messages = conversation.data?.messages ?? []
+  }, [cache, runID, turnStatus])
+  const messages = run.data?.messages ?? []
   const disabled = working || send.isPending ||
-    (!!conversationID && !conversation.data)
+    (!!runID && !run.data)
   const liveText = live.at(-1)?.[1]
   useEffect(() => {
     if (!follow.current) return
@@ -121,12 +121,12 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
           </div>
         )}
       </div>
-      {(conversation.error || events.error || send.error || stop.error) && (
+      {(run.error || events.error || send.error || stop.error) && (
         <p className="runtime-error" role="alert">
-          {errorMessage(conversation.error || events.error || send.error || stop.error)}
-          {conversation.error && (
+          {errorMessage(run.error || events.error || send.error || stop.error)}
+          {run.error && (
             <button className="secondary-button" type="button"
-              onClick={() => void conversation.refetch()}>Retry</button>
+              onClick={() => void run.refetch()}>Retry</button>
           )}
         </p>
       )}

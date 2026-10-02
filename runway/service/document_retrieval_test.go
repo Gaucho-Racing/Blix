@@ -21,24 +21,24 @@ func (v *documentValidator) ValidateDocuments(_ context.Context, ids []string) e
 	return v.err
 }
 
-func TestConversationDocumentScopeIsValidatedAndSessionBound(t *testing.T) {
+func TestRunDocumentScopeIsValidatedAndSessionBound(t *testing.T) {
 	f := setup(t)
 	ids := []string{identifier.New(identifier.Prefix("document")), identifier.New(identifier.Prefix("document"))}
 	validator := &documentValidator{}
 	f.s.SetDocumentScopeValidator(validator)
-	created, err := f.s.CreateConversationWithDocuments(f.ctx, f.owner, ids)
-	if err != nil || !slices.Equal(validator.ids, ids) || !slices.Equal(created.Conversation.DocumentIDs, ids) {
+	created, err := f.s.CreateRunWithDocuments(f.ctx, f.owner, ids)
+	if err != nil || !slices.Equal(validator.ids, ids) || !slices.Equal(created.Run.DocumentIDs, ids) {
 		t.Fatalf("document scope was not saved: %+v %v", created, err)
 	}
-	scope, err := f.s.RetrievalContext(f.ctx, created.Conversation.ID, created.Session.ID)
+	scope, err := f.s.RetrievalContext(f.ctx, created.Run.ID, created.Session.ID)
 	if err != nil || !slices.Equal(scope.DocumentIDs, ids) {
 		t.Fatalf("retrieval scope: %+v %v", scope, err)
 	}
-	if _, err := f.s.RetrievalContext(f.ctx, created.Conversation.ID, f.conversation.Session.ID); !errors.Is(err, ErrForbidden) {
+	if _, err := f.s.RetrievalContext(f.ctx, created.Run.ID, f.run.Session.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign session read scope: %v", err)
 	}
 	validator.err = ErrNotFound
-	if _, err := f.s.CreateConversationWithDocuments(f.ctx, f.owner, ids); !errors.Is(err, ErrNotFound) {
+	if _, err := f.s.CreateRunWithDocuments(f.ctx, f.owner, ids); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unverified document attached: %v", err)
 	}
 	oversized := make([]string, 9)
@@ -46,7 +46,7 @@ func TestConversationDocumentScopeIsValidatedAndSessionBound(t *testing.T) {
 		oversized[i] = identifier.New(identifier.Prefix("document"))
 	}
 	for _, invalid := range [][]string{{ids[0], ids[0]}, {"document_invalid"}, oversized} {
-		if _, err := f.s.CreateConversationWithDocuments(f.ctx, f.owner, invalid); !errors.Is(err, ErrInvalid) {
+		if _, err := f.s.CreateRunWithDocuments(f.ctx, f.owner, invalid); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("invalid scope accepted: %v", err)
 		}
 	}

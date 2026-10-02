@@ -23,7 +23,7 @@ type DelegationRequest struct {
 	Checkpoint *CheckpointRequest `json:"checkpoint,omitempty"`
 }
 type invocationEnvelope struct {
-	ConversationID  string          `json:"conversation_id"`
+	RunID           string          `json:"run_id"`
 	SessionID       string          `json:"session_id"`
 	ParentSessionID *string         `json:"parent_session_id"`
 	AgentID         string          `json:"agent_id"`
@@ -55,7 +55,7 @@ func (s *ExecutionService) Delegate(ctx context.Context, id string, r Delegation
 		if err := tx.First(&parentSession, "id = ?", a.SessionID).Error; err != nil {
 			return err
 		}
-		if !contains(profiles[parentSession.ProfileID].Executors, invocation.AgentID) || invocation.ConversationID != a.ConversationID || invocation.ParentSessionID == nil || *invocation.ParentSessionID != a.SessionID {
+		if !contains(profiles[parentSession.ProfileID].Executors, invocation.AgentID) || invocation.RunID != a.RunID || invocation.ParentSessionID == nil || *invocation.ParentSessionID != a.SessionID {
 			return ErrForbidden
 		}
 		var existing model.Task
@@ -68,17 +68,17 @@ func (s *ExecutionService) Delegate(ctx context.Context, id string, r Delegation
 			return err
 		}
 		var active int64
-		if err := tx.Model(&model.Task{}).Where("conversation_id = ? AND status IN ?", a.ConversationID, []string{model.StatusQueued, model.StatusRunning, model.StatusWaiting}).Count(&active).Error; err != nil {
+		if err := tx.Model(&model.Task{}).Where("run_id = ? AND status IN ?", a.RunID, []string{model.StatusQueued, model.StatusRunning, model.StatusWaiting}).Count(&active).Error; err != nil {
 			return err
 		}
 		if active >= 16 {
 			return fmt.Errorf("%w: too many active tasks", ErrConflict)
 		}
-		childSession, err := s.createSession(tx, a.ConversationID, &a.SessionID, profile, invocation.SessionID)
+		childSession, err := s.createSession(tx, a.RunID, &a.SessionID, profile, invocation.SessionID)
 		if err != nil {
 			return err
 		}
-		task := model.Task{ID: identifier.New(identifier.Task), ConversationID: a.ConversationID, ParentSessionID: a.SessionID, SessionID: childSession.ID, ParentTargetID: a.TargetID, DelegationRef: r.RequestRef, Background: r.Background, Objective: invocation.Objective, Input: datatypes.JSON(invocation.Input), Invocation: datatypes.JSON(r.Invocation), Status: model.StatusQueued, Policy: datatypes.NewJSONType(profile.Policy), DeadlineAt: time.Now().UTC().Add(time.Duration(profile.Policy.DeadlineSeconds) * time.Second)}
+		task := model.Task{ID: identifier.New(identifier.Task), RunID: a.RunID, ParentSessionID: a.SessionID, SessionID: childSession.ID, ParentTargetID: a.TargetID, DelegationRef: r.RequestRef, Background: r.Background, Objective: invocation.Objective, Input: datatypes.JSON(invocation.Input), Invocation: datatypes.JSON(r.Invocation), Status: model.StatusQueued, Policy: datatypes.NewJSONType(profile.Policy), DeadlineAt: time.Now().UTC().Add(time.Duration(profile.Policy.DeadlineSeconds) * time.Second)}
 		if a.TurnID != nil {
 			task.OriginTurnID = a.TurnID
 		} else {
@@ -97,7 +97,7 @@ func (s *ExecutionService) Delegate(ctx context.Context, id string, r Delegation
 				return err
 			}
 		}
-		if _, err := s.newAttempt(tx, task.ConversationID, task.SessionID, task.ID, nil, &task.ID, profile.Policy, task.DeadlineAt); err != nil {
+		if _, err := s.newAttempt(tx, task.RunID, task.SessionID, task.ID, nil, &task.ID, profile.Policy, task.DeadlineAt); err != nil {
 			return err
 		}
 		if _, err := s.event(tx, a, "task.created_v1", childSession.ID, map[string]any{"task_id": task.ID, "session_id": childSession.ID, "agent_id": profile.ID, "objective": task.Objective, "background": r.Background}); err != nil {
@@ -162,7 +162,7 @@ func (s *ExecutionService) Complete(ctx context.Context, id string, r Completion
 			if strings.TrimSpace(r.Content) == "" || len(r.Content) > 1024*1024 {
 				return ErrInvalid
 			}
-			msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: a.ConversationID, TurnID: *a.TurnID, SessionID: a.SessionID, Role: "assistant", Content: r.Content}
+			msg := model.Message{ID: identifier.New(identifier.Message), RunID: a.RunID, TurnID: *a.TurnID, SessionID: a.SessionID, Role: "assistant", Content: r.Content}
 			event, err := s.event(tx, a, "message.assistant_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": msg.Content, "usage": r.Usage})
 			if err != nil {
 				return err
@@ -176,13 +176,13 @@ func (s *ExecutionService) Complete(ctx context.Context, id string, r Completion
 				return ErrInvalid
 			}
 			var result struct {
-				ConversationID string          `json:"conversation_id"`
-				SessionID      string          `json:"session_id"`
-				Status         string          `json:"status"`
-				Error          json.RawMessage `json:"error"`
-				Output         json.RawMessage `json:"output"`
+				RunID     string          `json:"run_id"`
+				SessionID string          `json:"session_id"`
+				Status    string          `json:"status"`
+				Error     json.RawMessage `json:"error"`
+				Output    json.RawMessage `json:"output"`
 			}
-			if json.Unmarshal(r.Result, &result) != nil || result.ConversationID != a.ConversationID || result.SessionID != a.SessionID || !terminal(result.Status) {
+			if json.Unmarshal(r.Result, &result) != nil || result.RunID != a.RunID || result.SessionID != a.SessionID || !terminal(result.Status) {
 				return ErrInvalid
 			}
 			if result.Status != model.StatusSucceeded {
@@ -205,7 +205,7 @@ func (s *ExecutionService) Complete(ctx context.Context, id string, r Completion
 			if input.Kind == "" || !json.Valid(input.Content) || len(input.Content) > 4*1024*1024 {
 				return ErrInvalid
 			}
-			artifact := model.Artifact{ID: identifier.New(identifier.Artifact), ConversationID: a.ConversationID, TaskID: a.TaskID, AttemptID: a.ID, Kind: input.Kind, Content: datatypes.JSON(input.Content), StorageRef: input.StorageRef, Metadata: encoded(map[string]any{})}
+			artifact := model.Artifact{ID: identifier.New(identifier.Artifact), RunID: a.RunID, TaskID: a.TaskID, AttemptID: a.ID, Kind: input.Kind, Content: datatypes.JSON(input.Content), StorageRef: input.StorageRef, Metadata: encoded(map[string]any{})}
 			if err := tx.Create(&artifact).Error; err != nil {
 				return err
 			}
@@ -241,28 +241,28 @@ func (s *ExecutionService) taskSettled(tx *gorm.DB, id string) error {
 	if err := tx.First(&session, "id = ?", task.SessionID).Error; err != nil {
 		return err
 	}
-	eventAttempt := model.ExecutionAttempt{ConversationID: task.ConversationID, SessionID: task.ParentSessionID, TaskID: &task.ID}
+	eventAttempt := model.ExecutionAttempt{RunID: task.RunID, SessionID: task.ParentSessionID, TaskID: &task.ID}
 	if _, err := s.event(tx, eventAttempt, "task.result_v1", task.SessionID, map[string]any{"task_id": task.ID, "agent_id": session.ProfileID, "status": task.Status, "result": json.RawMessage(task.Result)}); err != nil {
 		return err
 	}
 	if task.Background {
-		var conversation model.Conversation
-		if err := tx.First(&conversation, "id = ?", task.ConversationID).Error; err != nil {
+		var run model.Run
+		if err := tx.First(&run, "id = ?", task.RunID).Error; err != nil {
 			return err
 		}
 		policy := profiles["blix_v1"].Policy
 		var position uint64
-		if err := tx.Model(&model.Event{}).Where("conversation_id = ?", conversation.ID).Select("COALESCE(MAX(position),0)").Scan(&position).Error; err != nil {
+		if err := tx.Model(&model.Event{}).Where("run_id = ?", run.ID).Select("COALESCE(MAX(position),0)").Scan(&position).Error; err != nil {
 			return err
 		}
-		turn := model.Turn{ID: identifier.New(identifier.Turn), ConversationID: conversation.ID, SessionID: conversation.LeadSessionID, TriggerTaskID: &task.ID, InputPosition: position, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{map[string]any{"task_id": task.ID, "session_id": task.SessionID, "status": task.Status, "result": json.RawMessage(task.Result)}})}
+		turn := model.Turn{ID: identifier.New(identifier.Turn), RunID: run.ID, SessionID: run.LeadSessionID, TriggerTaskID: &task.ID, InputPosition: position, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{map[string]any{"task_id": task.ID, "session_id": task.SessionID, "status": task.Status, "result": json.RawMessage(task.Result)}})}
 		if err := tx.Create(&turn).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&model.TurnTask{TurnID: turn.ID, TaskID: task.ID, Relation: "completion"}).Error; err != nil {
 			return err
 		}
-		_, err := s.newAttempt(tx, turn.ConversationID, turn.SessionID, turn.ID, &turn.ID, nil, policy, turn.DeadlineAt)
+		_, err := s.newAttempt(tx, turn.RunID, turn.SessionID, turn.ID, &turn.ID, nil, policy, turn.DeadlineAt)
 		return err
 	}
 	if identifier.IsValid(task.ParentTargetID, identifier.Turn) {
@@ -276,7 +276,7 @@ func (s *ExecutionService) taskSettled(tx *gorm.DB, id string) error {
 		if err := tx.Model(&turn).Update("status", model.StatusQueued).Error; err != nil {
 			return err
 		}
-		_, err := s.newAttempt(tx, turn.ConversationID, turn.SessionID, turn.ID, &turn.ID, nil, turn.Policy.Data(), turn.DeadlineAt)
+		_, err := s.newAttempt(tx, turn.RunID, turn.SessionID, turn.ID, &turn.ID, nil, turn.Policy.Data(), turn.DeadlineAt)
 		return err
 	}
 	var parent model.Task
@@ -289,7 +289,7 @@ func (s *ExecutionService) taskSettled(tx *gorm.DB, id string) error {
 	if err := tx.Model(&parent).Update("status", model.StatusQueued).Error; err != nil {
 		return err
 	}
-	_, err := s.newAttempt(tx, parent.ConversationID, parent.SessionID, parent.ID, nil, &parent.ID, parent.Policy.Data(), parent.DeadlineAt)
+	_, err := s.newAttempt(tx, parent.RunID, parent.SessionID, parent.ID, nil, &parent.ID, parent.Policy.Data(), parent.DeadlineAt)
 	return err
 }
 
@@ -334,7 +334,7 @@ func (s *ExecutionService) failOwned(tx *gorm.DB, a *model.ExecutionAttempt, fai
 		if err := tx.First(&session, "id = ?", a.SessionID).Error; err != nil {
 			return err
 		}
-		updates["result"] = encoded(map[string]any{"schema_version": 1, "conversation_id": a.ConversationID, "session_id": a.SessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": status, "error": json.RawMessage(failure), "usage": map[string]any{}})
+		updates["result"] = encoded(map[string]any{"schema_version": 1, "run_id": a.RunID, "session_id": a.SessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": status, "error": json.RawMessage(failure), "usage": map[string]any{}})
 	}
 	if err := s.updateTarget(tx, *a, updates); err != nil {
 		return err
@@ -389,7 +389,7 @@ func (s *ExecutionService) retryOwned(tx *gorm.DB, a *model.ExecutionAttempt, fa
 	if _, err := s.event(tx, *a, "attempt.lease_expired_v1", a.ID, map[string]any{"error": json.RawMessage(failure)}); err != nil {
 		return err
 	}
-	_, err = s.newAttempt(tx, a.ConversationID, a.SessionID, a.TargetID, a.TurnID, a.TaskID, policy, a.DeadlineAt)
+	_, err = s.newAttempt(tx, a.RunID, a.SessionID, a.TargetID, a.TurnID, a.TaskID, policy, a.DeadlineAt)
 	return err
 }
 func (s *ExecutionService) RecoverExpired(ctx context.Context) error {
@@ -400,7 +400,7 @@ func (s *ExecutionService) RecoverExpired(ctx context.Context) error {
 	}
 	for _, candidate := range candidates {
 		if err := s.transaction(ctx, func(tx *gorm.DB) error {
-			if _, err := lockConversation(tx, candidate.ConversationID); err != nil {
+			if _, err := lockRun(tx, candidate.RunID); err != nil {
 				return err
 			}
 			var a model.ExecutionAttempt
@@ -443,9 +443,9 @@ func (s *ExecutionService) RecoverExpired(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *ExecutionService) InterruptConversation(ctx context.Context, cid, owner string) error {
+func (s *ExecutionService) InterruptRun(ctx context.Context, runID, owner string) error {
 	return s.transaction(ctx, func(tx *gorm.DB) error {
-		c, err := lockConversation(tx, cid)
+		c, err := lockRun(tx, runID)
 		if err != nil {
 			return err
 		}
@@ -453,20 +453,20 @@ func (s *ExecutionService) InterruptConversation(ctx context.Context, cid, owner
 			return ErrForbidden
 		}
 		var turns []model.Turn
-		if err := tx.Where("conversation_id = ? AND status IN ?", cid, []string{model.StatusQueued, model.StatusRunning, model.StatusWaiting}).Find(&turns).Error; err != nil {
+		if err := tx.Where("run_id = ? AND status IN ?", runID, []string{model.StatusQueued, model.StatusRunning, model.StatusWaiting}).Find(&turns).Error; err != nil {
 			return err
 		}
 		for _, turn := range turns {
-			if err := s.cancelTarget(tx, cid, turn.SessionID, turn.ID, true); err != nil {
+			if err := s.cancelTarget(tx, runID, turn.SessionID, turn.ID, true); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 }
-func (s *ExecutionService) cancelTarget(tx *gorm.DB, cid, sessionID, targetID string, turn bool) error {
+func (s *ExecutionService) cancelTarget(tx *gorm.DB, runID, sessionID, targetID string, turn bool) error {
 	now := time.Now().UTC()
-	a := model.ExecutionAttempt{ConversationID: cid, SessionID: sessionID, TargetID: targetID}
+	a := model.ExecutionAttempt{RunID: runID, SessionID: sessionID, TargetID: targetID}
 	if turn {
 		a.TurnID = &targetID
 	} else {
@@ -492,7 +492,7 @@ func (s *ExecutionService) cancelTarget(tx *gorm.DB, cid, sessionID, targetID st
 		return err
 	}
 	for _, child := range children {
-		if err := s.cancelTarget(tx, cid, child.SessionID, child.ID, false); err != nil {
+		if err := s.cancelTarget(tx, runID, child.SessionID, child.ID, false); err != nil {
 			return err
 		}
 	}
@@ -505,7 +505,7 @@ func (s *ExecutionService) cancelTarget(tx *gorm.DB, cid, sessionID, targetID st
 		if err := tx.First(&session, "id = ?", sessionID).Error; err != nil {
 			return err
 		}
-		result := encoded(map[string]any{"schema_version": 1, "conversation_id": cid, "session_id": sessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": "cancelled", "usage": map[string]any{}, "error": map[string]any{"code": "task_cancelled", "message": "The user cancelled this task."}})
+		result := encoded(map[string]any{"schema_version": 1, "run_id": runID, "session_id": sessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": "cancelled", "usage": map[string]any{}, "error": map[string]any{"code": "task_cancelled", "message": "The user cancelled this task."}})
 		if err := tx.Model(&task).Update("result", result).Error; err != nil {
 			return err
 		}
@@ -519,7 +519,7 @@ func (s *ExecutionService) ControlTask(ctx context.Context, id, owner, operation
 		return err
 	}
 	return s.transaction(ctx, func(tx *gorm.DB) error {
-		c, err := lockConversation(tx, task.ConversationID)
+		c, err := lockRun(tx, task.RunID)
 		if err != nil {
 			return err
 		}
@@ -561,7 +561,7 @@ func (s *ExecutionService) controlTask(tx *gorm.DB, task model.Task, operation, 
 		return ErrConflict
 	}
 	if operation == "cancel" {
-		return s.cancelTarget(tx, task.ConversationID, task.SessionID, task.ID, false)
+		return s.cancelTarget(tx, task.RunID, task.SessionID, task.ID, false)
 	}
 	if operation != "steer" || strings.TrimSpace(content) == "" || len(content) > 65536 {
 		return ErrInvalid
@@ -570,7 +570,7 @@ func (s *ExecutionService) controlTask(tx *gorm.DB, task model.Task, operation, 
 	if err := tx.Create(&command).Error; err != nil {
 		return err
 	}
-	_, err := s.event(tx, model.ExecutionAttempt{ConversationID: task.ConversationID, SessionID: task.SessionID, TaskID: &task.ID}, "task.steered_v1", task.ID, map[string]any{"content": content})
+	_, err := s.event(tx, model.ExecutionAttempt{RunID: task.RunID, SessionID: task.SessionID, TaskID: &task.ID}, "task.steered_v1", task.ID, map[string]any{"content": content})
 	return err
 }
 
@@ -595,7 +595,7 @@ func (s *ExecutionService) SessionTaskControl(ctx context.Context, id string, r 
 		}
 		if r.Operation == "list" {
 			tasks := []model.Task{}
-			if err := tx.Where("conversation_id = ? AND parent_session_id = ?", a.ConversationID, a.SessionID).Order("created_at DESC").Limit(100).Find(&tasks).Error; err != nil {
+			if err := tx.Where("run_id = ? AND parent_session_id = ?", a.RunID, a.SessionID).Order("created_at DESC").Limit(100).Find(&tasks).Error; err != nil {
 				return err
 			}
 			result["tasks"] = tasks
@@ -605,7 +605,7 @@ func (s *ExecutionService) SessionTaskControl(ctx context.Context, id string, r 
 		if err := tx.First(&task, "id = ?", r.TaskID).Error; err != nil {
 			return err
 		}
-		if task.ConversationID != a.ConversationID || task.ParentSessionID != a.SessionID {
+		if task.RunID != a.RunID || task.ParentSessionID != a.SessionID {
 			return ErrForbidden
 		}
 		if r.Operation == "status" {

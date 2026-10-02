@@ -73,7 +73,7 @@ func (s *ExecutionService) BeginAction(ctx context.Context, id string, r ActionR
 				return err
 			}
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			action = model.Action{ReplaySafe: safeActionReplay(r.ToolID), ID: identifier.New(identifier.Action), ConversationID: a.ConversationID, TargetID: a.TargetID, SessionID: a.SessionID, AttemptID: a.ID, IdempotencyKey: r.IdempotencyKey, ToolID: r.ToolID, Arguments: datatypes.JSON(r.Arguments), Status: "running"}
+			action = model.Action{ReplaySafe: safeActionReplay(r.ToolID), ID: identifier.New(identifier.Action), RunID: a.RunID, TargetID: a.TargetID, SessionID: a.SessionID, AttemptID: a.ID, IdempotencyKey: r.IdempotencyKey, ToolID: r.ToolID, Arguments: datatypes.JSON(r.Arguments), Status: "running"}
 			if r.RequiresApproval || r.ToolID == "knowledge_apply_v1" {
 				action.Status = "awaiting_approval"
 			}
@@ -81,7 +81,7 @@ func (s *ExecutionService) BeginAction(ctx context.Context, id string, r ActionR
 				return err
 			}
 			if r.RequiresApproval || r.ToolID == "knowledge_apply_v1" {
-				approval := model.Approval{ID: identifier.New(identifier.Approval), ConversationID: a.ConversationID, ActionID: action.ID, Status: "pending", RequestedBySessionID: a.SessionID}
+				approval := model.Approval{ID: identifier.New(identifier.Approval), RunID: a.RunID, ActionID: action.ID, Status: "pending", RequestedBySessionID: a.SessionID}
 				if err := tx.Create(&approval).Error; err != nil {
 					return err
 				}
@@ -187,7 +187,7 @@ func (s *ExecutionService) WaitApproval(ctx context.Context, id, actionID string
 			if err := s.updateTarget(tx, a, map[string]any{"status": model.StatusQueued}); err != nil {
 				return err
 			}
-			_, err = s.newAttempt(tx, a.ConversationID, a.SessionID, a.TargetID, a.TurnID, a.TaskID, policy, a.DeadlineAt)
+			_, err = s.newAttempt(tx, a.RunID, a.SessionID, a.TargetID, a.TurnID, a.TaskID, policy, a.DeadlineAt)
 			return err
 		}
 		return nil
@@ -202,7 +202,7 @@ func (s *ExecutionService) DecideApproval(ctx context.Context, id, owner, decisi
 		if err := tx.First(&approval, "id = ?", id).Error; err != nil {
 			return err
 		}
-		c, err := lockConversation(tx, approval.ConversationID)
+		c, err := lockRun(tx, approval.RunID)
 		if err != nil {
 			return err
 		}

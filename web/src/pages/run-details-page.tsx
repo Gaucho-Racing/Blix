@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
-import { getConversation, loadEvents, errorMessage } from "@/lib/runtime"
+import { getRun, loadEvents, errorMessage } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
 
@@ -9,16 +9,16 @@ export function RunDetailsPage() {
   const { runID = "" } = useParams()
   const cache = useQueryClient()
   const detail = useQuery({
-    queryKey: ["conversation", runID],
-    queryFn: ({ signal }) => getConversation(runID, signal),
+    queryKey: ["run", runID],
+    queryFn: ({ signal }) => getRun(runID, signal),
     refetchInterval: 2500,
   })
   const events = useQuery({
-    queryKey: ["conversation-events", runID],
+    queryKey: ["run-events", runID],
     queryFn: ({ signal }) =>
       loadEvents(
         runID,
-        cache.getQueryData<RuntimeEvent[]>(["conversation-events", runID]) ??
+        cache.getQueryData<RuntimeEvent[]>(["run-events", runID]) ??
           [],
         signal,
       ),
@@ -27,12 +27,12 @@ export function RunDetailsPage() {
   return (
     <div className="page">
       <Link className="knowledge-review-back" to="/admin/runs">
-        <ArrowLeft size={15} /> Conversations
+        <ArrowLeft size={15} /> Runs
       </Link>
       <header className="page-header">
         <div>
           <div className="eyebrow">ADMIN · RUNTIME TRACE</div>
-          <h1>{detail.data?.conversation.name || "Conversation"}</h1>
+          <h1>{detail.data?.run.name || "Run"}</h1>
           <code>{runID}</code>
         </div>
         <Link className="primary-button" to={`/chat/${runID}`}>
@@ -85,7 +85,7 @@ export function RunDetailsPage() {
         </div>
         <small>
           Updated{" "}
-          {detail.data && formatTimestamp(detail.data.conversation.updated_at)}
+          {detail.data && formatTimestamp(detail.data.run.updated_at)}
         </small>
       </section>
     </div>

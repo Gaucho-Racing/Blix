@@ -70,11 +70,11 @@ type DocumentExecution struct {
 	Generation   uint64 `json:"generation"`
 }
 type validatedDocumentExecution struct {
-	TaskID         string `json:"task_id"`
-	SessionID      string `json:"session_id"`
-	ConversationID string `json:"conversation_id"`
-	AttemptNumber  uint64 `json:"attempt_number"`
-	Input          struct {
+	TaskID        string `json:"task_id"`
+	SessionID     string `json:"session_id"`
+	RunID         string `json:"run_id"`
+	AttemptNumber uint64 `json:"attempt_number"`
+	Input         struct {
 		DocumentID string `json:"document_id"`
 		Generation uint64 `json:"generation"`
 	} `json:"input"`
@@ -92,17 +92,17 @@ func (c *DocumentRuntimeClient) control(ctx context.Context, task, owner, operat
 	return c.request(ctx, "POST", "tasks/"+url.PathEscape(task)+"/"+operation, map[string]string{"owner": owner}, nil)
 }
 
-func (s *DocumentService) ConversationRetrievalScope(ctx context.Context, conversationID, sessionID, scope string) (DocumentRetrievalScope, error) {
-	if scope != "conversation" && scope != "team" {
+func (s *DocumentService) RunRetrievalScope(ctx context.Context, runID, sessionID, scope string) (DocumentRetrievalScope, error) {
+	if scope != "run" && scope != "team" {
 		return DocumentRetrievalScope{}, ErrInvalid
 	}
 	if s.runtime == nil {
 		return DocumentRetrievalScope{}, ErrUnavailable
 	}
-	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
+	if !identifier.IsValid(runID, identifier.Run) || !identifier.IsValid(sessionID, identifier.Session) {
 		return DocumentRetrievalScope{}, ErrInvalid
 	}
-	access, err := s.agentDocumentContext(ctx, conversationID, sessionID)
+	access, err := s.agentDocumentContext(ctx, runID, sessionID)
 	if err != nil {
 		return DocumentRetrievalScope{}, err
 	}
@@ -122,15 +122,15 @@ type agentDocumentAccess struct {
 	ProfileID   string   `json:"profile_id"`
 }
 
-func (s *DocumentService) agentDocumentContext(ctx context.Context, conversationID, sessionID string) (agentDocumentAccess, error) {
+func (s *DocumentService) agentDocumentContext(ctx context.Context, runID, sessionID string) (agentDocumentAccess, error) {
 	var result agentDocumentAccess
 	if s.runtime == nil {
 		return result, ErrUnavailable
 	}
-	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
+	if !identifier.IsValid(runID, identifier.Run) || !identifier.IsValid(sessionID, identifier.Session) {
 		return result, ErrInvalid
 	}
-	err := s.runtime.request(ctx, "GET", "conversations/"+url.PathEscape(conversationID)+"/retrieval-context?session_id="+url.QueryEscape(sessionID), nil, &result)
+	err := s.runtime.request(ctx, "GET", "runs/"+url.PathEscape(runID)+"/retrieval-context?session_id="+url.QueryEscape(sessionID), nil, &result)
 	if err == nil {
 		err = validateRetrievalIDs(result.DocumentIDs)
 	}

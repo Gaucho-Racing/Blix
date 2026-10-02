@@ -8,7 +8,7 @@ from blix_agent_worker.models.tool import ToolResult, ToolResultStatus
 
 
 async def hydrate_document_images(
-    request: ModelRequest, client: KnowledgeClient, conversation_id: str, session_id: str
+    request: ModelRequest, client: KnowledgeClient, run_id: str, session_id: str
 ) -> ModelRequest:
     references = {image.uri: image for image in request.images}
     calls = {call.ref: call for message in request.messages for call in message.call_requests}
@@ -22,7 +22,7 @@ async def hydrate_document_images(
         result = ToolResult.model_validate_json(message.content)
         if result.status is not ToolResultStatus.SUCCEEDED or not result.output.get("image_reference"):
             continue
-        if result.conversation_id != conversation_id or result.parent_session_id != session_id:
+        if result.run_id != run_id or result.parent_session_id != session_id:
             raise ValueError("image receipt does not belong to this execution")
         image = DocumentImageReference.model_validate(result.output["image_reference"])
         if call.arguments.get("document_id") != image.document_id or call.arguments.get("page") != image.page:
@@ -48,7 +48,7 @@ async def hydrate_document_images(
     for uri, image in references.items():
         result = await client.request(
             os.environ["KNOWLEDGE_URL"], "GET", f"documents/{image.document_id}/pages/{image.page}/image",
-            params={"conversation_id": conversation_id, "session_id": session_id},
+            params={"run_id": run_id, "session_id": session_id},
         )
         returned_identity = (result.get("document_id"), result.get("page"), result.get("sha256"))
         if returned_identity != (image.document_id, image.page, image.sha256):

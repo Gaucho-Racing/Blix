@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from blix_agent_worker.models.agent import AgentResult, AgentTask
 from blix_agent_worker.models.common import DocumentID
 from blix_agent_worker.models.context import CallerContext
-from blix_agent_worker.models.message import ConversationMessage
+from blix_agent_worker.models.message import RunMessage
 
 
 class RunwayClientError(Exception):
@@ -24,7 +24,7 @@ class ResponseModel(BaseModel):
 
 class Attempt(ResponseModel):
     attempt_id: str
-    conversation_id: str
+    run_id: str
     session_id: str
     target_id: str
     turn_id: str | None = None
@@ -36,8 +36,8 @@ class Attempt(ResponseModel):
     runtime_kind: str
 
 
-class Conversation(ResponseModel):
-    conversation_id: str
+class Run(ResponseModel):
+    run_id: str
     caller_context: CallerContext
     document_ids: tuple[DocumentID, ...] = ()
 
@@ -65,13 +65,13 @@ class RuntimeCheckpoint(ResponseModel):
 
 class ExecutionContext(ResponseModel):
     attempt: Attempt
-    conversation: Conversation
+    run: Run
     session: Session
     profile: Profile
     turn: dict[str, object] | None = None
     task: dict[str, object] | None = None
     checkpoint: RuntimeCheckpoint | None = None
-    messages: tuple[ConversationMessage, ...]
+    messages: tuple[RunMessage, ...]
     notifications: tuple[dict[str, object], ...] = ()
     resume_result: AgentResult | None = None
     commands: tuple[dict[str, object], ...] = ()

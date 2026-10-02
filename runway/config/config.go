@@ -10,27 +10,27 @@ import (
 )
 
 type Config struct {
-	Environment                      string
-	Port                             string
-	DatabaseHost                     string
-	DatabasePort                     string
-	DatabaseUser                     string
-	DatabasePassword                 string
-	DatabaseName                     string
-	MQTTURL                          string
-	MQTTClientID                     string
-	MQTTAttemptReadyTopic            string
-	MQTTConversationEventTopicPrefix string
-	OutboxPollInterval               time.Duration
-	ExecutionLeaseDuration           time.Duration
-	LeaseSweepInterval               time.Duration
-	WorkerHeartbeatInterval          time.Duration
-	WorkerOfflineAfter               time.Duration
-	SentinelURL                      string
-	SentinelClientID                 string
-	SentinelClientSecret             string
-	SentinelScopes                   string
-	SentinelServiceToken             string
+	Environment             string
+	Port                    string
+	DatabaseHost            string
+	DatabasePort            string
+	DatabaseUser            string
+	DatabasePassword        string
+	DatabaseName            string
+	MQTTURL                 string
+	MQTTClientID            string
+	MQTTAttemptReadyTopic   string
+	MQTTRunEventTopicPrefix string
+	OutboxPollInterval      time.Duration
+	ExecutionLeaseDuration  time.Duration
+	LeaseSweepInterval      time.Duration
+	WorkerHeartbeatInterval time.Duration
+	WorkerOfflineAfter      time.Duration
+	SentinelURL             string
+	SentinelClientID        string
+	SentinelClientSecret    string
+	SentinelScopes          string
+	SentinelServiceToken    string
 }
 
 func Load() (Config, error) {
@@ -59,33 +59,33 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("PORT must be a valid TCP port")
 	}
 	configuration := Config{
-		Environment:                      value("ENV", "PROD"),
-		Port:                             port,
-		DatabaseHost:                     value("DATABASE_HOST", "localhost"),
-		DatabasePort:                     value("DATABASE_PORT", "5432"),
-		DatabaseUser:                     value("DATABASE_USER", "postgres"),
-		DatabasePassword:                 value("DATABASE_PASSWORD", "password"),
-		DatabaseName:                     value("DATABASE_NAME", "blix"),
-		MQTTURL:                          value("MQTT_URL", "mqtt://localhost:1883"),
-		MQTTClientID:                     value("MQTT_CLIENT_ID", "blix-runway"),
-		MQTTAttemptReadyTopic:            value("MQTT_ATTEMPT_READY_TOPIC", "blix/v1/attempts/ready"),
-		MQTTConversationEventTopicPrefix: strings.TrimRight(value("MQTT_CONVERSATION_EVENT_TOPIC_PREFIX", "blix/v1/conversations"), "/"),
-		OutboxPollInterval:               pollInterval,
-		ExecutionLeaseDuration:           leaseDuration,
-		LeaseSweepInterval:               leaseSweepInterval,
-		WorkerHeartbeatInterval:          workerHeartbeatInterval,
-		WorkerOfflineAfter:               workerOfflineAfter,
-		SentinelURL:                      strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
-		SentinelClientID:                 value("SENTINEL_CLIENT_ID", ""),
-		SentinelClientSecret:             value("SENTINEL_CLIENT_SECRET", ""),
-		SentinelScopes:                   value("SENTINEL_SCOPES", "user:read groups:read"),
-		SentinelServiceToken:             value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
+		Environment:             value("ENV", "PROD"),
+		Port:                    port,
+		DatabaseHost:            value("DATABASE_HOST", "localhost"),
+		DatabasePort:            value("DATABASE_PORT", "5432"),
+		DatabaseUser:            value("DATABASE_USER", "postgres"),
+		DatabasePassword:        value("DATABASE_PASSWORD", "password"),
+		DatabaseName:            value("DATABASE_NAME", "blix"),
+		MQTTURL:                 value("MQTT_URL", "mqtt://localhost:1883"),
+		MQTTClientID:            value("MQTT_CLIENT_ID", "blix-runway"),
+		MQTTAttemptReadyTopic:   value("MQTT_ATTEMPT_READY_TOPIC", "blix/v1/attempts/ready"),
+		MQTTRunEventTopicPrefix: strings.TrimRight(value("MQTT_RUN_EVENT_TOPIC_PREFIX", "blix/v1/runs"), "/"),
+		OutboxPollInterval:      pollInterval,
+		ExecutionLeaseDuration:  leaseDuration,
+		LeaseSweepInterval:      leaseSweepInterval,
+		WorkerHeartbeatInterval: workerHeartbeatInterval,
+		WorkerOfflineAfter:      workerOfflineAfter,
+		SentinelURL:             strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
+		SentinelClientID:        value("SENTINEL_CLIENT_ID", ""),
+		SentinelClientSecret:    value("SENTINEL_CLIENT_SECRET", ""),
+		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
+		SentinelServiceToken:    value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
 	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")
 	}
-	if configuration.MQTTConversationEventTopicPrefix == "" || strings.ContainsAny(configuration.MQTTConversationEventTopicPrefix, "+#") {
-		return Config{}, fmt.Errorf("MQTT_CONVERSATION_EVENT_TOPIC_PREFIX must be a concrete MQTT topic prefix")
+	if configuration.MQTTRunEventTopicPrefix == "" || strings.ContainsAny(configuration.MQTTRunEventTopicPrefix, "+#") {
+		return Config{}, fmt.Errorf("MQTT_RUN_EVENT_TOPIC_PREFIX must be a concrete MQTT topic prefix")
 	}
 	if err := validateHTTPURL(configuration.SentinelURL); err != nil {
 		return Config{}, fmt.Errorf("SENTINEL_URL %w", err)

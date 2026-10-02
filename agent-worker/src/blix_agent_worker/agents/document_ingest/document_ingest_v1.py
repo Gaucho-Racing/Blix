@@ -158,7 +158,7 @@ class DocumentIngestV1Agent:
         path = f"documents/{request.document_id}"
         ownership = {**self.execution, "generation": request.generation}
         try:
-            details = await self.client.request(base_url, "GET", path, params={"conversation_id": task.conversation_id, "session_id": task.session_id})
+            details = await self.client.request(base_url, "GET", path, params={"run_id": task.run_id, "session_id": task.session_id})
             if details["document"]["status"] in {"ready", "partial", "no_changes"}:
                 outcome = "no_changes" if details["document"]["status"] == "no_changes" else "proposed"
                 return self.result(task, details, outcome, "Document processing already completed.")
@@ -196,7 +196,7 @@ class DocumentIngestV1Agent:
             return self.result(task, details, output["outcome"], output["summary"], output, curated.usage)
         except KnowledgeClientError as error:
             return AgentResult(
-                conversation_id=task.conversation_id,
+                run_id=task.run_id,
                 session_id=task.session_id,
                 parent_session_id=task.parent_session_id,
                 agent_id=task.agent_id,
@@ -221,7 +221,7 @@ class DocumentIngestV1Agent:
                 continue
             number = chunk["number"]
             evidence = await self.client.request(base_url, "GET", f"{path}/chunks/{number}",
-                params={"conversation_id": task.conversation_id, "session_id": task.session_id},
+                params={"run_id": task.run_id, "session_id": task.session_id},
             )
             reading, response = await self.read_chunk(task, details, evidence)
             notes = details.get("notes") or {}
@@ -323,7 +323,7 @@ class DocumentIngestV1Agent:
         images = []
         for number in numbers:
             chunk = await self.client.request(base_url, "GET", f"{path}/chunks/{number}",
-                params={"conversation_id": task.conversation_id, "session_id": task.session_id},
+                params={"run_id": task.run_id, "session_id": task.session_id},
             )
             evidence.extend(chunk["evidence"])
             images.extend(chunk.get("images", []))
@@ -401,7 +401,7 @@ class DocumentIngestV1Agent:
             ),
         )
         return AgentResult(
-            conversation_id=task.conversation_id,
+            run_id=task.run_id,
             session_id=task.session_id,
             parent_session_id=task.parent_session_id,
             agent_id=task.agent_id,

@@ -57,8 +57,8 @@ type client struct {
 	user    *currentUser
 }
 
-type conversation struct {
-	ID            string `json:"conversation_id"`
+type run struct {
+	ID            string `json:"run_id"`
 	LeadSessionID string `json:"lead_session_id"`
 }
 
@@ -66,9 +66,9 @@ type agentSession struct {
 	ID string `json:"session_id"`
 }
 
-type createdConversation struct {
-	Conversation conversation `json:"conversation"`
-	Session      agentSession `json:"session"`
+type createdRun struct {
+	Run     run          `json:"run"`
+	Session agentSession `json:"session"`
 }
 
 type appendedMessage struct {
@@ -232,21 +232,21 @@ func normalizeEndpoint(value string) (string, error) {
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
-func createConversationWithRetry(ctx context.Context, api *client) (createdConversation, error) {
+func createRunWithRetry(ctx context.Context, api *client) (createdRun, error) {
 	var lastErr error
 	for attempt := 0; attempt < 15; attempt++ {
-		created, err := api.createConversation(ctx)
+		created, err := api.createRun(ctx)
 		if err == nil {
 			return created, nil
 		}
 		lastErr = err
 		select {
 		case <-ctx.Done():
-			return createdConversation{}, ctx.Err()
+			return createdRun{}, ctx.Err()
 		case <-time.After(time.Second):
 		}
 	}
-	return createdConversation{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
+	return createdRun{}, fmt.Errorf("Blix did not become ready: %w", lastErr)
 }
 
 func newActivityTree(leadSessionID string) *activityTree {
@@ -383,31 +383,31 @@ func applyEvent(
 	return "", nil, false, nil
 }
 
-func (c *client) createConversation(ctx context.Context) (createdConversation, error) {
-	var created createdConversation
-	err := c.request(ctx, http.MethodPost, "/api/v1/conversations", map[string]string{"agent_id": agentID}, &created)
+func (c *client) createRun(ctx context.Context) (createdRun, error) {
+	var created createdRun
+	err := c.request(ctx, http.MethodPost, "/api/v1/runs", map[string]string{}, &created)
 	return created, err
 }
 
-func (c *client) appendMessage(ctx context.Context, conversationID string, content string) (appendedMessage, error) {
+func (c *client) appendMessage(ctx context.Context, runID string, content string) (appendedMessage, error) {
 	var appended appendedMessage
 	err := c.request(
 		ctx,
 		http.MethodPost,
-		"/api/v1/conversations/"+conversationID+"/messages",
+		"/api/v1/runs/"+runID+"/messages",
 		map[string]string{"content": content},
 		&appended,
 	)
 	return appended, err
 }
 
-func (c *client) interruptConversation(ctx context.Context, conversationID string) error {
-	return c.request(ctx, http.MethodPost, "/api/v1/conversations/"+conversationID+"/interrupt", nil, nil)
+func (c *client) interruptRun(ctx context.Context, runID string) error {
+	return c.request(ctx, http.MethodPost, "/api/v1/runs/"+runID+"/interrupt", nil, nil)
 }
 
-func (c *client) listEvents(ctx context.Context, conversationID string, after uint64) ([]executionEvent, error) {
+func (c *client) listEvents(ctx context.Context, runID string, after uint64) ([]executionEvent, error) {
 	var response eventsResponse
-	path := fmt.Sprintf("/api/v1/conversations/%s/events?after=%d", conversationID, after)
+	path := fmt.Sprintf("/api/v1/runs/%s/events?after=%d", runID, after)
 	if err := c.request(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return nil, err
 	}
@@ -447,7 +447,7 @@ func canUseBlixIdentity(caller *callerContext, user *currentUser) bool {
 
 func accessMessage(caller *callerContext, user *currentUser) string {
 	if caller == nil {
-		return "Sign in with /login before starting a conversation."
+		return "Sign in with /login before starting a run."
 	}
 	if user == nil {
 		return "Your Sentinel profile could not be verified. Sign in again with /login."
@@ -508,7 +508,7 @@ func (c *client) doRequest(
 }
 
 func renderSessionPanel(
-	current *createdConversation,
+	current *createdRun,
 	caller *callerContext,
 	user *currentUser,
 	endpoint string,
@@ -568,12 +568,12 @@ func renderSessionPanel(
 	return style.Render(content)
 }
 
-func sessionMetadata(current *createdConversation, caller *callerContext, endpoint string) string {
-	conversationID := "—"
+func sessionMetadata(current *createdRun, caller *callerContext, endpoint string) string {
+	runID := "—"
 	sessionID := "—"
 	callerID := "not authenticated"
 	if current != nil {
-		conversationID = current.Conversation.ID
+		runID = current.Run.ID
 		sessionID = current.Session.ID
 	}
 	if caller != nil {
@@ -587,7 +587,7 @@ func sessionMetadata(current *createdConversation, caller *callerContext, endpoi
 	}{
 		{label: "agent", value: agentID},
 		{label: "caller", value: callerID},
-		{label: "conversation", value: conversationID},
+		{label: "run", value: runID},
 		{label: "session", value: sessionID},
 		{label: "endpoint", value: endpoint},
 	}
@@ -606,7 +606,7 @@ func welcomeLines(caller *callerContext, user *currentUser, startupError error) 
 	if caller == nil {
 		return []string{
 			pinkStyle.Render("Welcome to Blix"),
-			mutedStyle.Render("Sign in with Sentinel to start a conversation."),
+			mutedStyle.Render("Sign in with Sentinel to start a run."),
 			mutedStyle.Render("Run ") + pinkStyle.Render("/login") + mutedStyle.Render(" to continue."),
 		}
 	}
@@ -654,14 +654,14 @@ func renderHelpPanel(width int) string {
 		{command: "/logout", detail: "Sign out and clear the saved session"},
 		{command: "/endpoint", detail: "Show or change the active Blix endpoint"},
 		{command: "/help", detail: "Show available commands"},
-		{command: "/reset", detail: "Start a fresh conversation"},
-		{command: "/tasks", detail: "List conversation tasks"},
+		{command: "/reset", detail: "Start a fresh run"},
+		{command: "/tasks", detail: "List run tasks"},
 		{command: "/cancel", detail: "Cancel a task: /cancel <task_id>"},
 		{command: "/steer", detail: "Guide a task: /steer <task_id> <guidance>"},
 		{command: "/approve", detail: "Approve publication: /approve <approval_id>"},
 		{command: "/reject", detail: "Reject publication: /reject <approval_id>"},
-		{command: "/conversations", detail: "List saved conversations"},
-		{command: "/resume", detail: "Continue: /resume <conversation_id>"},
+		{command: "/runs", detail: "List saved runs"},
+		{command: "/resume", detail: "Continue: /resume <run_id>"},
 		{command: "/quit", detail: "End the session"},
 	}
 	lines := make([]string, 0, len(commands)+1)

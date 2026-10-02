@@ -51,52 +51,6 @@ export interface CallerVerifiedPayload {
   worker_id: string
 }
 
-export interface RunSummary {
-  run_id: string
-  name: string
-  caller_entity_id: string
-  caller_context: CallerContext
-  kind: string
-  status: string
-  root_execution_id: string
-  agent_id: string
-  execution_status: ExecutionStatus
-  execution_count: number
-  event_count: number
-  last_event_position: number
-  created_at: string
-  last_activity_at: string
-}
-
-export interface CreatedRun {
-  run: {
-    run_id: string
-    name: string
-    caller_entity_id: string
-    caller_context: CallerContext
-    kind: string
-    root_execution_id: string
-    status: string
-    created_at: string
-    updated_at: string
-  }
-  execution: ExecutionSummary
-}
-
-export interface AppendedMessage {
-  message: {
-    message_id: string
-    run_id: string
-    parent_execution_id: string
-    event_position: number
-    role: string
-    content: string
-    created_at: string
-  }
-  event_position: number
-  version: number
-}
-
 export interface ExecutionSummary {
   execution_id: string
   run_id: string
@@ -112,11 +66,6 @@ export interface ExecutionSummary {
   completed_at?: string
   created_at: string
   updated_at: string
-}
-
-export interface RunDetails {
-  run: RunSummary
-  executions: ExecutionSummary[]
 }
 
 export interface ExecutionDetails {

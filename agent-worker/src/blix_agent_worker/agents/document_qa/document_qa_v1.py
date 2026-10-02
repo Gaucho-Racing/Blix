@@ -6,13 +6,13 @@ from blix_agent_worker.agents.tool_agent import AgentOutputValidationError, Tool
 from blix_agent_worker.models.agent import AgentDefinition, AgentKind, AgentTask
 from blix_agent_worker.models.common import ContractModel, DocumentID, NonEmptyText
 from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole
-from blix_agent_worker.models.message import ConversationMessage
+from blix_agent_worker.models.message import RunMessage
 from blix_agent_worker.models.tool import ToolResult, ToolResultStatus
 
 
 class DocumentQAV1Input(ContractModel):
     document_id: DocumentID
-    messages: tuple[ConversationMessage, ...]
+    messages: tuple[RunMessage, ...]
 
 
 class DocumentQAV1Output(ContractModel):
@@ -30,7 +30,7 @@ class DocumentQAV1Agent(ToolAgent):
         instructions=(
             "You are Blix's document Q&A specialist for Gaucho Racing. Answer only from the single document "
             "identified in trusted input. Search its original indexed text for every question, using "
-            "knowledge_document_search_v1 with scope=conversation and its document_id. Try short alternate "
+            "knowledge_document_search_v1 with scope=run and its document_id. Try short alternate "
             "keyword queries when helpful, retaining exact rule identifiers. Read relevant original pages, "
             "adjacent pages and next_cursor to check context, exceptions and qualifications. Cite factual "
             "answers with Markdown links using the exact returned citation_url and PDF page number. "
@@ -54,9 +54,9 @@ class DocumentQAV1Agent(ToolAgent):
             "You cannot approve, reject, publish, edit, or research outside this document."
             " Use response_kind=document_answer for document answers, including insufficient-evidence answers; "
             "these require a successful search in this turn. Only standalone document questions are supported. "
-            "There is no conversation history and no follow-up dialogue. For greetings, unrelated requests, "
+            "There is no run history and no follow-up dialogue. For greetings, unrelated requests, "
             "or questions requiring a prior exchange to understand, use response_kind=invalid_question. "
-            "Do not greet the user or invite conversational follow-ups; ask them to submit a standalone "
+            "Do not greet the user or invite runal follow-ups; ask them to submit a standalone "
             "question about this document. A clear request to summarize or explain document content is valid."
         ),
         input_schema=DocumentQAV1Input.model_json_schema(),

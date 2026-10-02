@@ -21,12 +21,12 @@ func internalAuthentication(c *gin.Context) {
 	}
 	c.Next()
 }
-func (h *Handler) authorizeConversationAccess(c *gin.Context, id string) error {
+func (h *Handler) authorizeRunAccess(c *gin.Context, id string) error {
 	caller, err := getCaller(c)
 	if err != nil {
 		return err
 	}
-	return h.executions.AuthorizeConversationAccess(c.Request.Context(), id, caller.EntityID, callerHasGroup(caller, adminGroup))
+	return h.executions.AuthorizeRunAccess(c.Request.Context(), id, caller.EntityID, callerHasGroup(caller, adminGroup))
 }
 func callerHasGroup(caller service.CallerContext, group string) bool {
 	for _, g := range caller.Groups {
@@ -38,19 +38,19 @@ func callerHasGroup(caller service.CallerContext, group string) bool {
 }
 func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthService) {
 	public := router.Group("/v1", RequireAuthentication(auth))
-	public.GET("/admin/conversations", RequireGroup(adminGroup), h.ListAdminConversations)
+	public.GET("/admin/runs", RequireGroup(adminGroup), h.ListAdminRuns)
 	public.GET("/document-chats/:documentID", RequireGroup("BlixUsers", "BlixAdmins"), func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil || caller.EntityType != "USER" {
 			respondError(c, service.ErrForbidden)
 			return
 		}
-		conversation, err := h.executions.GetDocumentChat(c.Request.Context(), c.Param("documentID"), caller.EntityID)
+		run, err := h.executions.GetDocumentChat(c.Request.Context(), c.Param("documentID"), caller.EntityID)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"conversation": conversation})
+		c.JSON(http.StatusOK, gin.H{"run": run})
 	})
 	public.POST("/document-chats/:documentID", RequireGroup("BlixUsers", "BlixAdmins"), func(c *gin.Context) {
 		caller, err := getCaller(c)
@@ -58,14 +58,14 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.CreateDocumentChat(c.Request.Context(), c.Param("documentID"), caller.ConversationContext())
+		result, err := h.executions.CreateDocumentChat(c.Request.Context(), c.Param("documentID"), caller.RunContext())
 		if err != nil {
 			respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusCreated, result)
 	})
-	public.POST("/conversations", func(c *gin.Context) {
+	public.POST("/runs", func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil {
 			respondError(c, err)
@@ -83,40 +83,40 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, service.ErrForbidden)
 			return
 		}
-		result, err := h.executions.CreateConversationWithDocuments(c.Request.Context(), caller.ConversationContext(), request.DocumentIDs)
+		result, err := h.executions.CreateRunWithDocuments(c.Request.Context(), caller.RunContext(), request.DocumentIDs)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusCreated, result)
 	})
-	public.GET("/conversations", func(c *gin.Context) {
+	public.GET("/runs", func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.ListConversations(c.Request.Context(), caller.EntityID, callerHasGroup(caller, adminGroup))
+		result, err := h.executions.ListRuns(c.Request.Context(), caller.EntityID, callerHasGroup(caller, adminGroup), c.Query("kind"))
 		if err != nil {
 			respondError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"conversations": result})
+		c.JSON(http.StatusOK, gin.H{"runs": result})
 	})
-	public.GET("/conversations/:conversationID", func(c *gin.Context) {
-		id := c.Param("conversationID")
-		if err := h.authorizeConversationAccess(c, id); err != nil {
+	public.GET("/runs/:runID", func(c *gin.Context) {
+		id := c.Param("runID")
+		if err := h.authorizeRunAccess(c, id); err != nil {
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.GetConversation(c.Request.Context(), id)
+		result, err := h.executions.GetRun(c.Request.Context(), id)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, result)
 	})
-	public.POST("/conversations/:conversationID/messages", func(c *gin.Context) {
+	public.POST("/runs/:runID/messages", func(c *gin.Context) {
 		var r struct {
 			Content        string `json:"content"`
 			DisplayContent string `json:"display_content"`
@@ -130,30 +130,30 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.AppendUserMessageWithDisplay(c.Request.Context(), c.Param("conversationID"), caller.EntityID, r.Content, r.DisplayContent)
+		result, err := h.executions.AppendUserMessageWithDisplay(c.Request.Context(), c.Param("runID"), caller.EntityID, r.Content, r.DisplayContent)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
 		c.JSON(http.StatusAccepted, result)
 	})
-	public.POST("/conversations/:conversationID/interrupt", func(c *gin.Context) {
+	public.POST("/runs/:runID/interrupt", func(c *gin.Context) {
 		caller, err := getCaller(c)
 		if err != nil {
 			respondError(c, err)
 			return
 		}
-		if err := h.executions.InterruptConversation(c.Request.Context(), c.Param("conversationID"), caller.EntityID); err != nil {
+		if err := h.executions.InterruptRun(c.Request.Context(), c.Param("runID"), caller.EntityID); err != nil {
 			respondError(c, err)
 			return
 		}
 		c.Status(http.StatusNoContent)
 	})
-	public.GET("/conversations/:conversationID/events", h.ListConversationEvents)
-	router.GET("/v1/conversations/:conversationID/events/stream", RequireStreamAuthentication(auth), h.StreamConversationEvents)
-	public.GET("/conversations/:conversationID/tasks", func(c *gin.Context) {
-		id := c.Param("conversationID")
-		if err := h.authorizeConversationAccess(c, id); err != nil {
+	public.GET("/runs/:runID/events", h.ListRunEvents)
+	router.GET("/v1/runs/:runID/events/stream", RequireStreamAuthentication(auth), h.StreamRunEvents)
+	public.GET("/runs/:runID/tasks", func(c *gin.Context) {
+		id := c.Param("runID")
+		if err := h.authorizeRunAccess(c, id); err != nil {
 			respondError(c, err)
 			return
 		}
@@ -170,7 +170,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		if err := h.authorizeConversationAccess(c, task.ConversationID); err != nil {
+		if err := h.authorizeRunAccess(c, task.RunID); err != nil {
 			respondError(c, err)
 			return
 		}
@@ -215,8 +215,8 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.Status(http.StatusNoContent)
 	})
 	internal := router.Group("/internal/v1", internalAuthentication)
-	internal.GET("/conversations/:conversationID/retrieval-context", func(c *gin.Context) {
-		result, err := h.executions.RetrievalContext(c.Request.Context(), c.Param("conversationID"), c.Query("session_id"))
+	internal.GET("/runs/:runID/retrieval-context", func(c *gin.Context) {
+		result, err := h.executions.RetrievalContext(c.Request.Context(), c.Param("runID"), c.Query("session_id"))
 		if err != nil {
 			respondError(c, err)
 			return
@@ -452,18 +452,18 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 
 }
 
-func (h *Handler) ListAdminConversations(c *gin.Context) {
-	result, err := h.executions.ListAllConversations(c.Request.Context())
+func (h *Handler) ListAdminRuns(c *gin.Context) {
+	result, err := h.executions.ListAllRuns(c.Request.Context())
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"conversations": result})
+	c.JSON(http.StatusOK, gin.H{"runs": result})
 }
 
-func (h *Handler) ListConversationEvents(c *gin.Context) {
-	id := c.Param("conversationID")
-	if err := h.authorizeConversationAccess(c, id); err != nil {
+func (h *Handler) ListRunEvents(c *gin.Context) {
+	id := c.Param("runID")
+	if err := h.authorizeRunAccess(c, id); err != nil {
 		respondError(c, err)
 		return
 	}

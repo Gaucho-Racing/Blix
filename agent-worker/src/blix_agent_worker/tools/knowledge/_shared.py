@@ -43,7 +43,7 @@ class KnowledgeTool:
         except KnowledgeClientError as error:
             return self._failure(call, error.code, str(error), retryable=error.retryable)
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -58,7 +58,7 @@ class KnowledgeTool:
         call: ToolCall, code: str, message: str, *, retryable: bool = False, details: JsonObject | None = None
     ) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

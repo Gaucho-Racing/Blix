@@ -110,7 +110,7 @@ class DiscordReadV1Tool:
                 warnings = (
                     "Discord requires View Channel and Read Message History. Missing history permission may return "
                     "an empty list; a disabled Message Content Intent may return empty content/embeds/attachments. "
-                    "Empty results alone do not establish that there is no conversation.",
+                    "Empty results alone do not establish that there is no run.",
                 )
             output = DiscordReadV1Output(
                 operation=tool_input.operation, guild_id=settings.guild_id, data=data, warnings=warnings
@@ -121,7 +121,7 @@ class DiscordReadV1Tool:
         except ValidationError:
             return self._failure(call, "invalid_discord_response", "Discord returned an invalid response.")
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -228,7 +228,7 @@ class DiscordReadV1Tool:
         call: ToolCall, code: str, message: str, *, retryable: bool = False, details: JsonObject | None = None
     ) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

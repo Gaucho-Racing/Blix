@@ -40,13 +40,13 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	ctx := context.Background()
 	renderer := &imageFixtureExtractor{fixtureExtractor: fixtureExtractor{pages: []string{""}}}
 	service := NewDocumentService(db, t.TempDir(), renderer)
-	id, cid, sid := identifier.New(identifier.Document), identifier.New(identifier.Conversation), identifier.New(identifier.Session)
+	id, runID, sid := identifier.New(identifier.Document), identifier.New(identifier.Run), identifier.New(identifier.Session)
 	data := []byte("%PDF-test-" + id)
 	hash := hashBytes(data)
 	if err := os.WriteFile(filepath.Join(service.directory, hash+".pdf"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	doc := model.Document{ID: id, SHA256: hash, Filename: "rules.pdf", Title: "Rules", Status: "queued", Generation: 1, SizeBytes: int64(len(data)), ReviewStatus: model.DocumentReviewPending, Tags: datatypes.NewJSONSlice([]string{}), ConversationID: cid}
+	doc := model.Document{ID: id, SHA256: hash, Filename: "rules.pdf", Title: "Rules", Status: "queued", Generation: 1, SizeBytes: int64(len(data)), ReviewStatus: model.DocumentReviewPending, Tags: datatypes.NewJSONSlice([]string{}), RunID: runID}
 	if err := db.Create(&doc).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"document_ids": []string{id}, "profile_id": "document_qa_v1"})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"task_id": "task_test", "session_id": sid, "conversation_id": cid, "attempt_number": 1, "input": map[string]any{"document_id": id, "generation": 1}})
+		json.NewEncoder(w).Encode(map[string]any{"task_id": "task_test", "session_id": sid, "run_id": runID, "attempt_number": 1, "input": map[string]any{"document_id": id, "generation": 1}})
 	}))
 	defer runtime.Close()
 	service.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "test"))
@@ -109,7 +109,7 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err := service.AuthorizeImage(ctx, id, team); !errors.Is(err, ErrNotFound) {
 		t.Fatal("unapproved image leaked")
 	}
-	qa, err := service.AgentImageScope(ctx, cid, sid)
+	qa, err := service.AgentImageScope(ctx, runID, sid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPopplerPageRendering(t *testing.T) {
 
 func TestAgentImagesUseTrustedSingleDocumentScope(t *testing.T) {
 	id := identifier.New(identifier.Document)
-	cid, sid := identifier.New(identifier.Conversation), identifier.New(identifier.Session)
+	runID, sid := identifier.New(identifier.Run), identifier.New(identifier.Session)
 	for _, profile := range []string{"document_qa_v1", "document_ingest_v1", "blix_v1"} {
 		t.Run(profile, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +186,7 @@ func TestAgentImagesUseTrustedSingleDocumentScope(t *testing.T) {
 			defer server.Close()
 			service := NewDocumentService(nil, t.TempDir(), nil)
 			service.SetIntegration(nil, NewDocumentRuntimeClient(server.URL, "internal"))
-			scope, err := service.AgentImageScope(context.Background(), cid, sid)
+			scope, err := service.AgentImageScope(context.Background(), runID, sid)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestAgentImagesUseTrustedSingleDocumentScope(t *testing.T) {
 	defer server.Close()
 	service := NewDocumentService(nil, t.TempDir(), nil)
 	service.SetIntegration(nil, NewDocumentRuntimeClient(server.URL, "internal"))
-	if _, err := service.AgentImageScope(context.Background(), cid, sid); !errors.Is(err, ErrForbidden) {
+	if _, err := service.AgentImageScope(context.Background(), runID, sid); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("multi-document QA image scope: %v", err)
 	}
 }

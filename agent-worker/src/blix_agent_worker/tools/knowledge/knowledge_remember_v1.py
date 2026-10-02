@@ -3,7 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from blix_agent_worker.clients.knowledge import KnowledgeClient, KnowledgeClientError
 from blix_agent_worker.models.common import ContractModel, JsonObject, MessageID, SourceID, SourceRecordID
 from blix_agent_worker.models.context import CallerContext, EntityType
-from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
+from blix_agent_worker.models.message import RunMessage, RunMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact
 from blix_agent_worker.tools.knowledge._shared import KnowledgeTool
 
@@ -11,7 +11,7 @@ from blix_agent_worker.tools.knowledge._shared import KnowledgeTool
 class KnowledgeRememberV1Input(ContractModel):
     message_id: MessageID | None = Field(
         default=None,
-        description="Original user message ID from this conversation. Omit to capture the latest user message.",
+        description="Original user message ID from this run. Omit to capture the latest user message.",
     )
 
 
@@ -35,7 +35,7 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
         id="knowledge_remember_v1",
         description=(
             "Capture an original user chat message verbatim as attributed evidence when asked to remember team "
-            "knowledge. Supply message_id from the conversation message index to capture an earlier message, "
+            "knowledge. Supply message_id from the run message index to capture an earlier message, "
             "or omit it for the latest message. Call once per source message when remembering multiple messages. "
             "Text, caller, timestamp, run and execution IDs come from the runtime, not model-supplied content. "
             "Stores a source record only, not a wiki update. Delegate its returned source_record_id to "
@@ -48,12 +48,12 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
     )
 
     def __init__(
-        self, client: KnowledgeClient, messages: tuple[ConversationMessage, ...], caller: CallerContext
+        self, client: KnowledgeClient, messages: tuple[RunMessage, ...], caller: CallerContext
     ) -> None:
         super().__init__(client)
         self._messages = {message.message_id: message for message in messages}
         self._latest_message_id = next(
-            (message.message_id for message in reversed(messages) if message.role is ConversationMessageRole.USER), None
+            (message.message_id for message in reversed(messages) if message.role is RunMessageRole.USER), None
         )
         self._caller = caller
 
@@ -62,13 +62,13 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
         message = self._messages.get(message_id)
         if (
             message is None
-            or message.role is not ConversationMessageRole.USER
-            or message.conversation_id != call.conversation_id
+            or message.role is not RunMessageRole.USER
+            or message.run_id != call.run_id
             or message.session_id != call.parent_session_id
         ):
             raise KnowledgeClientError(
                 "chat_context_unavailable",
-                "The selected message must be an original user message from this run and conversation execution.",
+                "The selected message must be an original user message from this run and run execution.",
             )
         if self._caller.entity_type is not EntityType.USER or self._caller.user_id is None:
             raise KnowledgeClientError("invalid_caller", "Remembering chat knowledge requires a user caller.")
@@ -79,7 +79,7 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
             "POST",
             "chat-records",
             payload={
-                "conversation_id": call.conversation_id,
+                "run_id": call.run_id,
                 "session_id": call.parent_session_id,
                 "message_id": message.message_id,
                 "entity_id": self._caller.entity_id,

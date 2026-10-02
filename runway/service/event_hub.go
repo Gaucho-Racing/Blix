@@ -9,8 +9,8 @@ import (
 const eventSubscriberBuffer = 256
 
 type eventSubscription struct {
-	conversationID string
-	events         chan model.Event
+	runID  string
+	events chan model.Event
 }
 
 type EventHub struct {
@@ -23,13 +23,13 @@ func NewEventHub() *EventHub {
 	return &EventHub{subscriptions: make(map[uint64]eventSubscription)}
 }
 
-func (h *EventHub) Subscribe(conversationID string) (<-chan model.Event, func()) {
+func (h *EventHub) Subscribe(runID string) (<-chan model.Event, func()) {
 	h.mutex.Lock()
 	h.nextID++
 	id := h.nextID
 	subscription := eventSubscription{
-		conversationID: conversationID,
-		events:         make(chan model.Event, eventSubscriberBuffer),
+		runID:  runID,
+		events: make(chan model.Event, eventSubscriberBuffer),
 	}
 	h.subscriptions[id] = subscription
 	h.mutex.Unlock()
@@ -52,7 +52,7 @@ func (h *EventHub) Publish(event model.Event) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	for id, subscription := range h.subscriptions {
-		if subscription.conversationID != "" && subscription.conversationID != event.ConversationID {
+		if subscription.runID != "" && subscription.runID != event.RunID {
 			continue
 		}
 		select {

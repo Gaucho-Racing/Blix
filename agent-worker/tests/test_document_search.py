@@ -12,7 +12,7 @@ from blix_agent_worker.tools.knowledge.knowledge_document_search_v1 import (
 
 
 class DocumentSearchTests(unittest.IsolatedAsyncioTestCase):
-    async def test_search_uses_trusted_conversation_and_session(self):
+    async def test_search_uses_trusted_run_and_session(self):
         requests = []
 
         class Client:
@@ -22,7 +22,7 @@ class DocumentSearchTests(unittest.IsolatedAsyncioTestCase):
 
         tool = KnowledgeDocumentSearchV1Tool(Client())
         call = ToolCall(
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             parent_session_id=new_ulid("session"),
             call_id=new_ulid("call"),
             tool_id=tool.definition.id,
@@ -33,7 +33,7 @@ class DocumentSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolResultStatus.SUCCEEDED)
         self.assertEqual(requests[0][0:2], ("GET", "document-evidence"))
         params = requests[0][2]["params"]
-        self.assertEqual(params["conversation_id"], call.conversation_id)
+        self.assertEqual(params["run_id"], call.run_id)
         self.assertEqual(params["session_id"], call.parent_session_id)
         self.assertEqual(params["scope"], "team")
         self.assertEqual(params["q"], "T.3.2 brakes")
@@ -42,7 +42,7 @@ class DocumentSearchTests(unittest.IsolatedAsyncioTestCase):
         for arguments in (
             {"operation": "search"},
             {"operation": "search", "query": "brakes", "page": 1},
-            {"operation": "search", "query": "brakes", "conversation_id": new_ulid("conversation")},
+            {"operation": "search", "query": "brakes", "run_id": new_ulid("run")},
             {"operation": "read_page", "page": 1},
             {"operation": "list_documents", "document_id": new_ulid("document")},
             {"operation": "search", "query": "brakes", "scope": "all"},

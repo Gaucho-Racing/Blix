@@ -19,7 +19,7 @@ type Changeset struct {
 	PublicationLeaseUntil *time.Time `json:"publication_lease_until,omitempty"`
 	ID                    string     `json:"changeset_id" gorm:"primaryKey"`
 	Origin                string     `json:"origin" gorm:"index;not null;default:'agent'"`
-	ConversationID        string     `json:"conversation_id" gorm:"index;not null"`
+	RunID                 string     `json:"run_id" gorm:"index;not null"`
 	SessionID             string     `json:"session_id" gorm:"index;not null"`
 	SeasonSlug            string     `json:"season_slug" gorm:"index;not null"`
 	Type                  string     `json:"type" gorm:"index;not null"`

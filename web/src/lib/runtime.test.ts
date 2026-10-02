@@ -1,30 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/lib/api"
 import {
-  listAdminConversations,
-  listConversations,
+  listAdminRuns,
+  listChatRuns,
   liveOutputs,
   loadEvents,
   streamedMessage,
 } from "@/lib/runtime"
-import type { ConversationDetails, RuntimeEvent } from "@/lib/runtime"
+import type { RunDetails, RuntimeEvent } from "@/lib/runtime"
 
 vi.mock("@/lib/api", () => ({ api: { get: vi.fn() } }))
 
-describe("conversation listings", () => {
+describe("run listings", () => {
   beforeEach(() => vi.mocked(api.get).mockReset())
   it("uses the normal history endpoint for chat", async () => {
-    vi.mocked(api.get).mockResolvedValueOnce({ data: { conversations: [] } })
-    expect(await listConversations()).toEqual([])
-    expect(api.get).toHaveBeenCalledWith("/v1/conversations")
+    vi.mocked(api.get).mockResolvedValueOnce({ data: { runs: [] } })
+    expect(await listChatRuns()).toEqual([])
+    expect(api.get).toHaveBeenCalledWith("/v1/runs", { params: { kind: "chat" } })
   })
-  it("uses the admin endpoint and preserves internal conversations", async () => {
-    const internal = { conversation_id: "ingestion", kind: "internal" }
+  it("uses the admin endpoint and preserves internal runs", async () => {
+    const internal = { run_id: "ingestion", kind: "internal" }
     vi.mocked(api.get).mockResolvedValueOnce({
-      data: { conversations: [internal] },
+      data: { runs: [internal] },
     })
-    expect(await listAdminConversations()).toEqual([internal])
-    expect(api.get).toHaveBeenCalledWith("/v1/admin/conversations")
+    expect(await listAdminRuns()).toEqual([internal])
+    expect(api.get).toHaveBeenCalledWith("/v1/admin/runs")
   })
 })
 const event = (
@@ -42,11 +42,11 @@ const event = (
   entity_id: "call",
   payload: { delta },
 })
-const details: ConversationDetails = {
-  conversation: {
+const details: RunDetails = {
+  run: {
     kind: "chat",
     document_ids: [],
-    conversation_id: "conv",
+    run_id: "conv",
     name: "",
     status: "active",
     lead_session_id: "lead",
@@ -110,7 +110,7 @@ describe("event polling", () => {
       reply,
       newerInput,
     ])
-    expect(api.get).toHaveBeenCalledWith("/v1/conversations/conv/events", {
+    expect(api.get).toHaveBeenCalledWith("/v1/runs/conv/events", {
       params: { after: 5 },
       signal: undefined,
     })
@@ -125,7 +125,7 @@ describe("event polling", () => {
         data: { events: [first[99], event(101, "message.created_v1")] },
       })
     expect((await loadEvents("conv", [])).length).toBe(101)
-    expect(api.get).toHaveBeenLastCalledWith("/v1/conversations/conv/events", {
+    expect(api.get).toHaveBeenLastCalledWith("/v1/runs/conv/events", {
       params: { after: 100 },
       signal: undefined,
     })

@@ -19,7 +19,7 @@ class KnowledgeReadTests(unittest.IsolatedAsyncioTestCase):
 
         tool = KnowledgeReadV1Tool(Client())
         call = ToolCall(
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             parent_session_id=new_ulid("session"),
             call_id=new_ulid("call"),
             tool_id=tool.definition.id,
@@ -59,7 +59,7 @@ class KnowledgeReadTests(unittest.IsolatedAsyncioTestCase):
 
         tool = KnowledgeReadV1Tool(Client())
         call = ToolCall(
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             parent_session_id=new_ulid("session"),
             call_id=new_ulid("call"),
             tool_id=tool.definition.id,

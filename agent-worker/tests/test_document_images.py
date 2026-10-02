@@ -21,13 +21,13 @@ class DocumentImageTests(unittest.IsolatedAsyncioTestCase):
         content = b"test-jpeg"
         image = DocumentImageReference(document_id=new_ulid("document"), page=24,
                                        sha256=hashlib.sha256(content).hexdigest())
-        cid, sid = new_ulid("conversation"), new_ulid("session")
+        cid, sid = new_ulid("run"), new_ulid("session")
         data_url = "data:image/jpeg;base64," + base64.b64encode(content).decode()
         knowledge_calls, model_calls = [], []
 
         def knowledge_handler(request):
             knowledge_calls.append(request)
-            self.assertEqual(request.url.params["conversation_id"], cid)
+            self.assertEqual(request.url.params["run_id"], cid)
             self.assertEqual(request.url.params["session_id"], sid)
             return httpx.Response(200, json={**image.model_dump(), "data_url": data_url})
 
@@ -69,8 +69,8 @@ class DocumentImageTests(unittest.IsolatedAsyncioTestCase):
         content = b"page"
         image = DocumentImageReference(document_id=new_ulid("document"), page=1,
                                        sha256=hashlib.sha256(content).hexdigest())
-        cid, sid = new_ulid("conversation"), new_ulid("session")
-        receipt = ToolResult(conversation_id=cid, parent_session_id=sid, call_id=new_ulid("call"),
+        cid, sid = new_ulid("run"), new_ulid("session")
+        receipt = ToolResult(run_id=cid, parent_session_id=sid, call_id=new_ulid("call"),
                              status=ToolResultStatus.SUCCEEDED, output={"image_reference": image.model_dump()})
         request = ModelRequest(messages=(
             ModelMessage(role=ModelMessageRole.ASSISTANT, call_requests=(ModelCallRequest(
@@ -103,4 +103,4 @@ class DocumentImageTests(unittest.IsolatedAsyncioTestCase):
             with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
                 with self.assertRaisesRegex(KnowledgeClientError, "changed"):
                     await hydrate_document_images(ModelRequest(images=(image,), messages=(ModelMessage(role="user", content="Inspect"),)),
-                                                  knowledge, new_ulid("conversation"), new_ulid("session"))
+                                                  knowledge, new_ulid("run"), new_ulid("session"))

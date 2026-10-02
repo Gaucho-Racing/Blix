@@ -12,7 +12,7 @@ import (
 
 func testUI() *tuiModel {
 	m := newTUIModel(context.Background(), &client{})
-	m.current = &createdConversation{Conversation: conversation{ID: "conversation_test", LeadSessionID: "session_lead"}, Session: agentSession{ID: "session_lead"}}
+	m.current = &createdRun{Run: run{ID: "run_test", LeadSessionID: "session_lead"}, Session: agentSession{ID: "session_lead"}}
 	m.activeTurnID = 1
 	m.busy = true
 	m.activeTurn = &turnView{backendTurnID: "turn_active", leadSessionID: "session_lead", tree: newActivityTree("session_lead"), toolIDs: map[string]string{}, completedExecutions: map[string]bool{}, activityIndex: map[string]int{}, startedAt: time.Now()}
@@ -41,7 +41,7 @@ func TestTaskCommandsUseNewEndpoints(t *testing.T) {
 	requests := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
-		if r.URL.Path == "/api/v1/conversations/conversation_test/tasks" {
+		if r.URL.Path == "/api/v1/runs/run_test/tasks" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"tasks":[{"task_id":"task_research","status":"running","objective":"Find evidence"}]}`))
 			return
@@ -74,13 +74,13 @@ func TestTaskCommandsUseNewEndpoints(t *testing.T) {
 		t.Fatal(requests)
 	}
 }
-func TestResumeRestoresConversationSessionAndCursor(t *testing.T) {
+func TestResumeRestoresRunSessionAndCursor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"conversation":{"conversation_id":"conversation_test","lead_session_id":"session_lead"},"messages":[{"role":"user","content":"Hello","event_position":3},{"role":"assistant","content":"Hi","event_position":8}]}`))
+		w.Write([]byte(`{"run":{"run_id":"run_test","lead_session_id":"session_lead"},"messages":[{"role":"user","content":"Hello","event_position":3},{"role":"assistant","content":"Hi","event_position":8}]}`))
 	}))
 	defer server.Close()
-	result := resumeConversationCmd(context.Background(), &client{baseURL: server.URL, http: server.Client()}, "conversation_test")().(conversationResumedMsg)
+	result := resumeRunCmd(context.Background(), &client{baseURL: server.URL, http: server.Client()}, "run_test")().(runResumedMsg)
 	if result.err != nil || result.current.Session.ID != "session_lead" || result.cursor != 8 || len(result.messages) != 2 {
 		t.Fatalf("resume=%+v", result)
 	}

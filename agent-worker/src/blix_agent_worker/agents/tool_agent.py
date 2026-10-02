@@ -156,7 +156,7 @@ class ToolAgent:
                 except ValueError as error:
                     return self._failure(task, "invalid_agent_output", str(error), usage=usage)
                 return AgentResult(
-                    conversation_id=task.conversation_id,
+                    run_id=task.run_id,
                     session_id=task.session_id,
                     parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
@@ -237,7 +237,7 @@ class ToolAgent:
 
             usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
             call = ToolCall(
-                conversation_id=task.conversation_id,
+                run_id=task.run_id,
                 call_id=new_ulid("call"),
                 parent_session_id=task.session_id,
                 tool_id=model_call_request.callable_id,
@@ -246,7 +246,7 @@ class ToolAgent:
             )
             if model_call_request.callable_id not in allowed_tool_ids:
                 tool_result = ToolResult(
-                    conversation_id=call.conversation_id,
+                    run_id=call.run_id,
                     call_id=call.call_id,
                     parent_session_id=call.parent_session_id,
                     status=ToolResultStatus.FAILED,
@@ -333,7 +333,7 @@ class ToolAgent:
         usage: AgentUsage | None = None,
     ) -> AgentResult:
         return AgentResult(
-            conversation_id=task.conversation_id,
+            run_id=task.run_id,
             session_id=task.session_id,
             parent_session_id=task.parent_session_id,
             agent_id=task.agent_id,

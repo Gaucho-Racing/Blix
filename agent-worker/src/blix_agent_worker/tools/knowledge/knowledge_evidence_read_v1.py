@@ -21,5 +21,5 @@ class KnowledgeEvidenceReadV1Tool(KnowledgeTool):
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeEvidenceReadV1Input, url: str) -> JsonObject:
         return await self._client.request(url, "GET", f"source-records/{arguments.source_record_id}",
-            params={"conversation_id": call.conversation_id, "session_id": call.parent_session_id},
+            params={"run_id": call.run_id, "session_id": call.parent_session_id},
         )

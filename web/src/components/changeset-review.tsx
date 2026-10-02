@@ -185,11 +185,11 @@ export function ChangesetReview({
           <span>Origin</span>
           <strong>{changeset.origin}</strong>
         </div>
-        {changeset.conversation_id && (
+        {changeset.run_id && (
           <div className="knowledge-review-provenance">
-            <span>Source conversation / session</span>
-            <Link to={`/chat/${changeset.conversation_id}`}>
-              {changeset.conversation_id}
+            <span>Source run / session</span>
+            <Link to={`/chat/${changeset.run_id}`}>
+              {changeset.run_id}
             </Link>
             <code>{changeset.session_id}</code>
           </div>

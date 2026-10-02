@@ -137,7 +137,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             request = calls.get(message.call_request_ref)
             if (
                 request is None
-                or result.conversation_id != task.conversation_id
+                or result.run_id != task.run_id
                 or result.parent_session_id != task.session_id
             ):
                 continue
@@ -183,7 +183,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
             actual = receipt.get("changeset", {})
             files = receipt.get("files", [])
             if (
-                actual.get("conversation_id") != task.conversation_id
+                actual.get("run_id") != task.run_id
                 or actual.get("session_id") != task.session_id
                 or actual.get("status") != reported.status
                 or (actual.get("result_commit_sha") or "") != reported.commit_sha

@@ -13,7 +13,7 @@ const destinations = [
     description: "Trace messages, turns, model calls, tools, and delegated tasks.",
     href: "/admin/runs",
     icon: Workflow,
-    label: "Conversations",
+    label: "Runs",
     status: "Live",
   },
   {

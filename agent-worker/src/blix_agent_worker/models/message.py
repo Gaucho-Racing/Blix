@@ -4,23 +4,23 @@ from typing import Self
 
 from pydantic import ConfigDict, model_validator
 
-from blix_agent_worker.models.common import ContractModel, ConversationID, MessageID, NonEmptyText, SessionID
+from blix_agent_worker.models.common import ContractModel, RunID, MessageID, NonEmptyText, SessionID
 
 
-class ConversationMessageRole(StrEnum):
+class RunMessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
 
 
-class ConversationMessage(ContractModel):
+class RunMessage(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False, extra="ignore")
 
     message_id: MessageID
-    conversation_id: ConversationID
+    run_id: RunID
     session_id: SessionID
     event_position: int = 0
     turn_id: str = ""
-    role: ConversationMessageRole
+    role: RunMessageRole
     content: NonEmptyText
     created_at: datetime
 

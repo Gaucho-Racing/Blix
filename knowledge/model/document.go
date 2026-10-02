@@ -27,7 +27,7 @@ type Document struct {
 	Objective         string                             `json:"objective" gorm:"type:text"`
 	Caller            datatypes.JSON                     `json:"-" gorm:"type:jsonb"`
 	Generation        uint64                             `json:"generation" gorm:"not null;default:0"`
-	ConversationID    string                             `json:"conversation_id" gorm:"index:idx_knowledge_document_session,priority:2"`
+	RunID             string                             `json:"run_id" gorm:"index:idx_knowledge_document_session,priority:2"`
 	TaskID            string                             `json:"task_id"`
 	SessionID         string                             `json:"-" gorm:"index:idx_knowledge_document_session,priority:1"`
 	AttemptNumber     uint64                             `json:"-"`

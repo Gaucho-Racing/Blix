@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestConversationCaptureIsAttributedAndIdempotent(t *testing.T) {
+func TestRunCaptureIsAttributedAndIdempotent(t *testing.T) {
 	port := os.Getenv("BLIX_TEST_DATABASE_PORT")
 	if port == "" {
 		t.Skip("BLIX_TEST_DATABASE_PORT is required for PostgreSQL integration tests")
@@ -28,12 +28,12 @@ func TestConversationCaptureIsAttributedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := NewSourceService(db)
-	input := IngestChatRecordInput{ConversationID: identifier.New(identifier.Conversation), SessionID: identifier.New(identifier.Session), MessageID: identifier.New(identifier.Message), EntityID: identifier.New(identifier.Entity), UserID: identifier.New(identifier.User), Content: "Original team knowledge", OccurredAt: time.Now().UTC()}
+	input := IngestChatRecordInput{RunID: identifier.New(identifier.Run), SessionID: identifier.New(identifier.Session), MessageID: identifier.New(identifier.Message), EntityID: identifier.New(identifier.Entity), UserID: identifier.New(identifier.User), Content: "Original team knowledge", OccurredAt: time.Now().UTC()}
 	captured, err := source.IngestChatRecord(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !captured.Created || captured.Record.CaptureConversationID != input.ConversationID || captured.Record.CaptureSessionID != input.SessionID || captured.Record.Content != input.Content {
+	if !captured.Created || captured.Record.CaptureRunID != input.RunID || captured.Record.CaptureSessionID != input.SessionID || captured.Record.Content != input.Content {
 		t.Fatalf("capture=%+v", captured)
 	}
 	if captured.Record.EvidenceType != "human_statement" || captured.Record.CaptureMethod != "runtime_chat" {

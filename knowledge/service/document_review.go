@@ -15,14 +15,14 @@ import (
 func documentChangesets(tx *gorm.DB, doc model.Document) *gorm.DB {
 	query := tx.Where("id IN (SELECT changeset_id FROM knowledge_changeset_document WHERE document_id = ?) OR id IN (SELECT changeset_id FROM knowledge_changeset_source_record JOIN knowledge_document_page ON (knowledge_document_page.source_record_id = knowledge_changeset_source_record.source_record_id OR knowledge_document_page.visual_source_record_id = knowledge_changeset_source_record.source_record_id) WHERE document_id = ?)", doc.ID, doc.ID)
 	if doc.SessionID != "" {
-		query = query.Or("session_id = ? AND conversation_id = ?", doc.SessionID, doc.ConversationID)
+		query = query.Or("session_id = ? AND run_id = ?", doc.SessionID, doc.RunID)
 	}
 	return query
 }
 
 func changesetDocuments(tx *gorm.DB, id string) *gorm.DB {
 	return tx.Where(`id IN (SELECT document_id FROM knowledge_changeset_document WHERE changeset_id = ?) OR id IN (SELECT document_id FROM knowledge_document_page JOIN knowledge_changeset_source_record ON (knowledge_document_page.source_record_id = knowledge_changeset_source_record.source_record_id OR knowledge_document_page.visual_source_record_id = knowledge_changeset_source_record.source_record_id) WHERE changeset_id = ?)
-		OR (session_id <> '' AND (session_id, conversation_id) IN (SELECT session_id, conversation_id FROM knowledge_changeset WHERE id = ?))`, id, id, id)
+		OR (session_id <> '' AND (session_id, run_id) IN (SELECT session_id, run_id FROM knowledge_changeset WHERE id = ?))`, id, id, id)
 }
 
 func lockChangesetDocuments(tx *gorm.DB, id string) ([]model.Document, error) {

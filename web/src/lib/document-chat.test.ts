@@ -6,11 +6,11 @@ import type { RuntimeEvent } from "@/lib/runtime"
 vi.mock("@/lib/api", () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 beforeEach(() => vi.clearAllMocks())
 
-describe("document Q&A conversation", () => {
+describe("document Q&A run", () => {
   it("uses the dedicated server-selected document chat endpoint when starting Q&A", async () => {
-    const conversation = { conversation_id: "qa", document_ids: ["document_rules"] }
-    vi.mocked(api.post).mockResolvedValueOnce({ data: { conversation } })
-    expect(await createDocumentChat("document_rules")).toBe(conversation)
+    const run = { run_id: "qa", document_ids: ["document_rules"] }
+    vi.mocked(api.post).mockResolvedValueOnce({ data: { run } })
+    expect(await createDocumentChat("document_rules")).toBe(run)
     expect(api.post).toHaveBeenCalledWith("/v1/document-chats/document_rules")
   })
 })

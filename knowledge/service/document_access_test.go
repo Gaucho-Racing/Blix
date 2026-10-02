@@ -36,7 +36,7 @@ func TestQuestionAccessIsIndexReadyProfileBoundAndRevokedOnRejection(t *testing.
 	if err := s.ValidateRetrievalDocuments(ctx, []string{id}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("general chat accepted an unapproved document: %v", err)
 	}
-	conversationID, sessionID := identifier.New(identifier.Conversation), identifier.New(identifier.Session)
+	runID, sessionID := identifier.New(identifier.Run), identifier.New(identifier.Session)
 	var profile, bound atomic.Value
 	profile.Store("blix_v1")
 	bound.Store([]string{id})
@@ -50,7 +50,7 @@ func TestQuestionAccessIsIndexReadyProfileBoundAndRevokedOnRejection(t *testing.
 	s.SetIntegration(nil, NewDocumentRuntimeClient(server.URL, "internal"))
 	for _, ordinary := range []string{"blix_v1", "deep_research_v1", "knowledge_curator_v1", "document_ingest_v1"} {
 		profile.Store(ordinary)
-		scope, err := s.ConversationRetrievalScope(ctx, conversationID, sessionID, "conversation")
+		scope, err := s.RunRetrievalScope(ctx, runID, sessionID, "run")
 		if err != nil || scope.AllowUnapproved {
 			t.Fatalf("ordinary profile obtained private indexes: %+v %v", scope, err)
 		}
@@ -60,7 +60,7 @@ func TestQuestionAccessIsIndexReadyProfileBoundAndRevokedOnRejection(t *testing.
 		}
 	}
 	profile.Store("document_qa_v1")
-	scope, err := s.ConversationRetrievalScope(ctx, conversationID, sessionID, "team")
+	scope, err := s.RunRetrievalScope(ctx, runID, sessionID, "team")
 	if err != nil || !scope.AllowUnapproved || scope.Team || len(scope.DocumentIDs) != 1 {
 		t.Fatalf("QA escaped its single document scope: %+v %v", scope, err)
 	}
@@ -68,24 +68,24 @@ func TestQuestionAccessIsIndexReadyProfileBoundAndRevokedOnRejection(t *testing.
 	if err != nil || len(hits.Results) != 1 {
 		t.Fatalf("QA lost unapproved evidence: %+v %v", hits, err)
 	}
-	if err := s.AuthorizeAgentRecord(ctx, details.Pages[0].SourceRecordID, conversationID, sessionID); !errors.Is(err, ErrForbidden) {
+	if err := s.AuthorizeAgentRecord(ctx, details.Pages[0].SourceRecordID, runID, sessionID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("QA bypassed indexed retrieval with a raw evidence read: %v", err)
 	}
 	profile.Store("knowledge_curator_v1")
-	if err := s.AuthorizeAgentDocument(ctx, id, conversationID, sessionID); !errors.Is(err, ErrForbidden) {
+	if err := s.AuthorizeAgentDocument(ctx, id, runID, sessionID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("general curator read unapproved document: %v", err)
 	}
 	profile.Store("document_ingest_v1")
-	if err := s.AuthorizeAgentRecord(ctx, details.Pages[0].SourceRecordID, conversationID, sessionID); err != nil {
+	if err := s.AuthorizeAgentRecord(ctx, details.Pages[0].SourceRecordID, runID, sessionID); err != nil {
 		t.Fatalf("ingestion lost its original evidence: %v", err)
 	}
 	bound.Store([]string{identifier.New(identifier.Document)})
-	if err := s.AuthorizeAgentDocument(ctx, id, conversationID, sessionID); !errors.Is(err, ErrForbidden) {
+	if err := s.AuthorizeAgentDocument(ctx, id, runID, sessionID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ingestion read a foreign document: %v", err)
 	}
 	profile.Store("document_qa_v1")
 	bound.Store([]string{id, identifier.New(identifier.Document)})
-	if _, err := s.ConversationRetrievalScope(ctx, conversationID, sessionID, "team"); !errors.Is(err, ErrForbidden) {
+	if _, err := s.RunRetrievalScope(ctx, runID, sessionID, "team"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("multi-document QA scope accepted: %v", err)
 	}
 	bound.Store([]string{id})
@@ -118,7 +118,7 @@ func TestQuestionAccessIsIndexReadyProfileBoundAndRevokedOnRejection(t *testing.
 	if err != nil || len(hits.Results) != 0 {
 		t.Fatalf("existing QA scope retained rejected evidence: %+v %v", hits, err)
 	}
-	if err := s.AuthorizeAgentRecord(ctx, recordID, conversationID, sessionID); !errors.Is(err, ErrNotFound) {
+	if err := s.AuthorizeAgentRecord(ctx, recordID, runID, sessionID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rejected raw evidence remained readable: %v", err)
 	}
 	audit, err := s.Page(ctx, id, 1)

@@ -34,12 +34,12 @@ func TestInternalRoutesRequireServiceCredentials(t *testing.T) {
 	}
 }
 
-func TestAdminConversationsRequireAuthentication(t *testing.T) {
+func TestAdminRunsRequireAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	initializeDomainRoutes(router, &Handler{}, nil)
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/admin/conversations", nil))
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/admin/runs", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

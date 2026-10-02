@@ -19,12 +19,12 @@ import (
 )
 
 type fixture struct {
-	s            *ExecutionService
-	db           *gorm.DB
-	ctx          context.Context
-	owner        model.CallerContext
-	conversation CreatedConversation
-	worker       string
+	s      *ExecutionService
+	db     *gorm.DB
+	ctx    context.Context
+	owner  model.CallerContext
+	run    CreatedRun
+	worker string
 }
 
 func setup(t *testing.T) *fixture {
@@ -32,14 +32,14 @@ func setup(t *testing.T) *fixture {
 	if os.Getenv("BLIX_TEST_DATABASE_PORT") == "" {
 		t.Skip("BLIX_TEST_DATABASE_PORT is required for PostgreSQL integration tests")
 	}
-	cfg := config.Config{DatabaseHost: "127.0.0.1", DatabasePort: os.Getenv("BLIX_TEST_DATABASE_PORT"), DatabaseUser: "postgres", DatabasePassword: "blix-test", DatabaseName: "blix_test", ExecutionLeaseDuration: 30 * time.Second, WorkerHeartbeatInterval: 5 * time.Second, WorkerOfflineAfter: time.Minute, MQTTAttemptReadyTopic: "test/ready", MQTTConversationEventTopicPrefix: "test/events"}
+	cfg := config.Config{DatabaseHost: "127.0.0.1", DatabasePort: os.Getenv("BLIX_TEST_DATABASE_PORT"), DatabaseUser: "postgres", DatabasePassword: "blix-test", DatabaseName: "blix_test", ExecutionLeaseDuration: 30 * time.Second, WorkerHeartbeatInterval: 5 * time.Second, WorkerOfflineAfter: time.Minute, MQTTAttemptReadyTopic: "test/ready", MQTTRunEventTopicPrefix: "test/events"}
 	ctx := context.Background()
 	db, err := database.Open(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	db.Logger = logger.Default.LogMode(logger.Silent)
-	if err := db.Exec("TRUNCATE runway_conversation, runway_agent_worker, runway_event, runway_outbox_message RESTART IDENTITY CASCADE").Error; err != nil {
+	if err := db.Exec("TRUNCATE runway_run, runway_agent_worker, runway_event, runway_outbox_message RESTART IDENTITY CASCADE").Error; err != nil {
 		t.Fatal(err)
 	}
 	workers := NewWorkerService(db, NewWorkerHub(), cfg)
@@ -48,7 +48,7 @@ func setup(t *testing.T) *fixture {
 	if _, err := workers.Register(ctx, WorkerRegistrationRequest{WorkerID: f.worker, Concurrency: 4, BackgroundConcurrency: 3}); err != nil {
 		t.Fatal(err)
 	}
-	f.conversation, err = s.CreateConversation(ctx, f.owner)
+	f.run, err = s.CreateRun(ctx, f.owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) turn(t *testing.T, text string) AttemptContext {
 	t.Helper()
-	msg, err := f.s.AppendUserMessage(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID, text)
+	msg, err := f.s.AppendUserMessage(f.ctx, f.run.Run.ID, f.owner.EntityID, text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func own(a AttemptContext) Ownership {
 }
 func (f *fixture) delegate(t *testing.T, a AttemptContext, background bool) DelegatedTask {
 	t.Helper()
-	invocation := encoded(map[string]any{"schema_version": 1, "conversation_id": a.Conversation.ID, "session_id": identifier.New(identifier.Session), "parent_session_id": a.Session.ID, "agent_id": "deep_research_v1", "objective": "Research a question", "input": map[string]any{"question": "test"}})
+	invocation := encoded(map[string]any{"schema_version": 1, "run_id": a.Run.ID, "session_id": identifier.New(identifier.Session), "parent_session_id": a.Session.ID, "agent_id": "deep_research_v1", "objective": "Research a question", "input": map[string]any{"question": "test"}})
 	r := DelegationRequest{Ownership: own(a), RequestRef: "research-call", Background: background, Invocation: json.RawMessage(invocation)}
 	if !background {
 		r.Checkpoint = &CheckpointRequest{RuntimeKind: "api", SchemaVersion: 1, Payload: json.RawMessage(`{"opaque":"python-owned"}`)}
@@ -100,7 +100,7 @@ func (f *fixture) taskAttempt(t *testing.T, id string) AttemptContext {
 }
 func (f *fixture) completeTask(t *testing.T, a AttemptContext) {
 	t.Helper()
-	result := encoded(map[string]any{"schema_version": 1, "conversation_id": a.Conversation.ID, "session_id": a.Session.ID, "parent_session_id": a.Session.ParentSessionID, "agent_id": a.Session.ProfileID, "status": "succeeded", "output": map[string]any{"report": "verified"}, "usage": map[string]any{}})
+	result := encoded(map[string]any{"schema_version": 1, "run_id": a.Run.ID, "session_id": a.Session.ID, "parent_session_id": a.Session.ParentSessionID, "agent_id": a.Session.ProfileID, "status": "succeeded", "output": map[string]any{"report": "verified"}, "usage": map[string]any{}})
 	if err := f.s.Complete(f.ctx, a.Attempt.ID, CompletionRequest{Ownership: own(a), Result: json.RawMessage(result)}); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestApprovalBeforeSuspensionAndActionReplay(t *testing.T) {
 	if response.Approval == nil {
 		t.Fatal("no approval")
 	}
-	detail, err := f.s.GetConversation(f.ctx, f.conversation.Conversation.ID)
+	detail, err := f.s.GetRun(f.ctx, f.run.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestCancelBlockingTaskResumesParentWithResult(t *testing.T) {
 func TestQueuedTurnIncludesPrecedingReply(t *testing.T) {
 	f := setup(t)
 	first := f.turn(t, "First question")
-	second, err := f.s.AppendUserMessage(f.ctx, first.Conversation.ID, f.owner.EntityID, "Second question")
+	second, err := f.s.AppendUserMessage(f.ctx, first.Run.ID, f.owner.EntityID, "Second question")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestQueuedTurnIncludesPrecedingReply(t *testing.T) {
 }
 func TestConcurrentClaimsHaveOneOwner(t *testing.T) {
 	f := setup(t)
-	message, err := f.s.AppendUserMessage(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID, "Question")
+	message, err := f.s.AppendUserMessage(f.ctx, f.run.Run.ID, f.owner.EntityID, "Question")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestFailedTaskProducesContractError(t *testing.T) {
 	lead := f.turn(t, "Start")
 	child := f.delegate(t, lead, false)
 	research := f.taskAttempt(t, child.TaskID)
-	result := encoded(map[string]any{"conversation_id": research.Conversation.ID, "session_id": research.Session.ID, "parent_session_id": lead.Session.ID, "agent_id": "deep_research_v1", "status": "failed", "error": map[string]any{"code": "no_evidence", "message": "No evidence"}})
+	result := encoded(map[string]any{"run_id": research.Run.ID, "session_id": research.Session.ID, "parent_session_id": lead.Session.ID, "agent_id": "deep_research_v1", "status": "failed", "error": map[string]any{"code": "no_evidence", "message": "No evidence"}})
 	if err := f.s.Complete(f.ctx, research.Attempt.ID, CompletionRequest{Ownership: own(research), Result: json.RawMessage(result)}); err != nil {
 		t.Fatal(err)
 	}
@@ -460,11 +460,11 @@ func TestRejectBeforeSuspensionResumesWithoutExecution(t *testing.T) {
 }
 func TestCancelledQueuedAttemptsStopDispatching(t *testing.T) {
 	f := setup(t)
-	message, err := f.s.AppendUserMessage(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID, "Cancel before claim")
+	message, err := f.s.AppendUserMessage(f.ctx, f.run.Run.ID, f.owner.EntityID, "Cancel before claim")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.InterruptConversation(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID); err != nil {
+	if err := f.s.InterruptRun(f.ctx, f.run.Run.ID, f.owner.EntityID); err != nil {
 		t.Fatal(err)
 	}
 	var pending int64
@@ -493,11 +493,11 @@ func TestDocumentRequestDisplayPreservesAgentInput(t *testing.T) {
 	f := setup(t)
 	original := "Curate source records in propose mode with complete original provenance."
 	display := "Summarize the brake rules from PDF pages 65–66."
-	appended, err := f.s.AppendUserMessageWithDisplay(f.ctx, f.conversation.Conversation.ID, f.owner.EntityID, original, display)
+	appended, err := f.s.AppendUserMessageWithDisplay(f.ctx, f.run.Run.ID, f.owner.EntityID, original, display)
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := f.s.GetConversation(f.ctx, f.conversation.Conversation.ID)
+	detail, err := f.s.GetRun(f.ctx, f.run.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,8 +505,8 @@ func TestDocumentRequestDisplayPreservesAgentInput(t *testing.T) {
 	if len(messages) != 1 || messages[0].Content != original || messages[0].DisplayContent != display {
 		t.Fatalf("message=%+v", messages)
 	}
-	if detail["conversation"].(model.Conversation).Name != display {
-		t.Fatal("conversation title used internal instructions")
+	if detail["run"].(model.Run).Name != display {
+		t.Fatal("run title used internal instructions")
 	}
 	var attempt model.ExecutionAttempt
 	if err := f.db.First(&attempt, "turn_id = ?", appended.Turn.ID).Error; err != nil {

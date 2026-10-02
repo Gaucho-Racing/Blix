@@ -140,15 +140,15 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				continue
 			}
 			var run struct {
-				ConversationID string `json:"conversation_id"`
-				TaskID         string `json:"task_id"`
+				RunID  string `json:"run_id"`
+				TaskID string `json:"task_id"`
 			}
 			request := map[string]any{"title": doc.Title, "key": fmt.Sprintf("%s:%d", doc.ID, doc.Generation), "document_id": doc.ID, "generation": doc.Generation, "caller": json.RawMessage(doc.Caller), "objective": doc.Objective}
 			if err := s.runtime.request(ctx, "POST", "document-ingestions", request, &run); err != nil {
 				_ = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status = ?", doc.ID, doc.Generation, "queued").Update("error", "Waiting for runtime scheduling").Error
 				continue
 			}
-			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "conversation_id": run.ConversationID, "error": ""})
+			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "run_id": run.RunID, "error": ""})
 			if saved.Error != nil {
 				return saved.Error
 			}
@@ -244,7 +244,7 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 				return ErrConflict
 			}
 			resetUnfinishedDocumentStages(&doc)
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "conversation_id": "", "error": ""})
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "run_id": "", "error": ""})
 		default:
 			return ErrInvalid
 		}
@@ -319,9 +319,9 @@ func (s *DocumentService) lockedExecution(ctx context.Context, tx *gorm.DB, id s
 	}
 	doc.TaskID = access.TaskID
 	doc.SessionID = access.SessionID
-	doc.ConversationID = access.ConversationID
+	doc.RunID = access.RunID
 	doc.AttemptNumber = access.AttemptNumber
-	return doc, tx.Model(&doc).Updates(map[string]any{"task_id": doc.TaskID, "session_id": doc.SessionID, "conversation_id": doc.ConversationID, "attempt_number": doc.AttemptNumber}).Error
+	return doc, tx.Model(&doc).Updates(map[string]any{"task_id": doc.TaskID, "session_id": doc.SessionID, "run_id": doc.RunID, "attempt_number": doc.AttemptNumber}).Error
 }
 func (s *DocumentService) Prepare(ctx context.Context, id string, e DocumentExecution) (DocumentDetails, error) {
 	details, err := s.Get(ctx, id)

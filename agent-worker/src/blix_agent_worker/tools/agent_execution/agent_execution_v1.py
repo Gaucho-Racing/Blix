@@ -62,7 +62,7 @@ class AgentExecutionV1Tool:
         except ValueError as error:
             return self._failure(call, "agent_execution_unavailable", str(error))
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -97,7 +97,7 @@ class AgentExecutionV1Tool:
     @staticmethod
     def _failure(call: ToolCall, code: str, message: str, *, retryable: bool = False) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

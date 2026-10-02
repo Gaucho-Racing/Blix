@@ -14,8 +14,8 @@ type taskCommandMsg struct {
 	content string
 	err     error
 }
-type conversationResumedMsg struct {
-	current   createdConversation
+type runResumedMsg struct {
+	current   createdRun
 	messages  []historyMessage
 	cursor    uint64
 	approvals []pendingApproval
@@ -49,10 +49,10 @@ func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
 	switch fields[0] {
 	case "/tasks":
 		if m.current == nil {
-			m.appendBlock(transcriptError, "Start a conversation first.", nil)
+			m.appendBlock(transcriptError, "Start a run first.", nil)
 			return nil, true
 		}
-		id := m.current.Conversation.ID
+		id := m.current.Run.ID
 		return func() tea.Msg {
 			var response struct {
 				Tasks []struct {
@@ -61,13 +61,13 @@ func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
 					Objective string `json:"objective"`
 				} `json:"tasks"`
 			}
-			err := m.api.request(m.ctx, http.MethodGet, "/api/v1/conversations/"+id+"/tasks", nil, &response)
+			err := m.api.request(m.ctx, http.MethodGet, "/api/v1/runs/"+id+"/tasks", nil, &response)
 			var lines []string
 			for _, task := range response.Tasks {
 				lines = append(lines, fmt.Sprintf("%s  %s\n%s", task.ID, task.Status, task.Objective))
 			}
 			if len(lines) == 0 {
-				lines = []string{"No tasks in this conversation."}
+				lines = []string{"No tasks in this run."}
 			}
 			return taskCommandMsg{content: strings.Join(lines, "\n\n"), err: err}
 		}, true
@@ -93,21 +93,21 @@ func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
 		}, true
 	case "/resume":
 		if len(fields) != 2 || m.busy {
-			m.appendBlock(transcriptError, "Usage: /resume <conversation_id> while idle", nil)
+			m.appendBlock(transcriptError, "Usage: /resume <run_id> while idle", nil)
 			return nil, true
 		}
-		return resumeConversationCmd(m.ctx, m.api, fields[1]), true
-	case "/conversations":
+		return resumeRunCmd(m.ctx, m.api, fields[1]), true
+	case "/runs":
 		return func() tea.Msg {
 			var response struct {
-				Conversations []struct {
-					ID   string `json:"conversation_id"`
+				Runs []struct {
+					ID   string `json:"run_id"`
 					Name string `json:"name"`
-				} `json:"conversations"`
+				} `json:"runs"`
 			}
-			err := m.api.request(m.ctx, http.MethodGet, "/api/v1/conversations", nil, &response)
+			err := m.api.request(m.ctx, http.MethodGet, "/api/v1/runs?kind=chat", nil, &response)
 			var lines []string
-			for _, c := range response.Conversations {
+			for _, c := range response.Runs {
 				lines = append(lines, c.ID+"  "+c.Name)
 			}
 			return taskCommandMsg{content: strings.Join(lines, "\n"), err: err}
@@ -115,18 +115,18 @@ func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
 	}
 	return nil, false
 }
-func resumeConversationCmd(ctx context.Context, api *client, id string) tea.Cmd {
+func resumeRunCmd(ctx context.Context, api *client, id string) tea.Cmd {
 	return func() tea.Msg {
 		var response struct {
-			Conversation conversation      `json:"conversation"`
-			Messages     []historyMessage  `json:"messages"`
-			Approvals    []pendingApproval `json:"pending_approvals"`
+			Run       run               `json:"run"`
+			Messages  []historyMessage  `json:"messages"`
+			Approvals []pendingApproval `json:"pending_approvals"`
 		}
-		err := api.request(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(id), nil, &response)
+		err := api.request(ctx, http.MethodGet, "/api/v1/runs/"+url.PathEscape(id), nil, &response)
 		var cursor uint64
 		for _, message := range response.Messages {
 			cursor = max(cursor, message.Position)
 		}
-		return conversationResumedMsg{current: createdConversation{Conversation: response.Conversation, Session: agentSession{ID: response.Conversation.LeadSessionID}}, messages: response.Messages, cursor: cursor, approvals: response.Approvals, err: err}
+		return runResumedMsg{current: createdRun{Run: response.Run, Session: agentSession{ID: response.Run.LeadSessionID}}, messages: response.Messages, cursor: cursor, approvals: response.Approvals, err: err}
 	}
 }

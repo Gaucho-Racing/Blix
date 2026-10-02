@@ -37,7 +37,7 @@ type ExecutionService struct {
 }
 
 func NewExecutionService(db *gorm.DB, workers *WorkerService, cfg config.Config) *ExecutionService {
-	return &ExecutionService{database: db, workers: workers, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTConversationEventTopicPrefix, notify: func() {}}
+	return &ExecutionService{database: db, workers: workers, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTRunEventTopicPrefix, notify: func() {}}
 }
 func (s *ExecutionService) SetDispatchNotifier(notify func()) { s.notify = notify }
 func mapDatabaseError(err error) error {
@@ -71,13 +71,13 @@ func (s *ExecutionService) transaction(ctx context.Context, f func(*gorm.DB) err
 	}
 	return mapDatabaseError(err)
 }
-func lockConversation(tx *gorm.DB, id string) (model.Conversation, error) {
-	var c model.Conversation
+func lockRun(tx *gorm.DB, id string) (model.Run, error) {
+	var c model.Run
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&c, "id = ?", id).Error
 	return c, mapDatabaseError(err)
 }
 func (s *ExecutionService) event(tx *gorm.DB, a model.ExecutionAttempt, kind, entity string, payload any) (model.Event, error) {
-	event := model.Event{ID: identifier.New(identifier.Event), ConversationID: a.ConversationID, SessionID: a.SessionID, TurnID: a.TurnID, TaskID: a.TaskID, AttemptID: nil, Type: kind, EntityID: entity, Payload: encoded(payload)}
+	event := model.Event{ID: identifier.New(identifier.Event), RunID: a.RunID, SessionID: a.SessionID, TurnID: a.TurnID, TaskID: a.TaskID, AttemptID: nil, Type: kind, EntityID: entity, Payload: encoded(payload)}
 	if a.ID != "" {
 		event.AttemptID = &a.ID
 	}
@@ -97,13 +97,13 @@ func (s *ExecutionService) event(tx *gorm.DB, a model.ExecutionAttempt, kind, en
 		}
 	}
 
-	outbox := model.OutboxMessage{ID: identifier.New(identifier.Outbox), AttemptID: a.ID, Topic: s.eventTopic + "/" + a.ConversationID + "/events", Payload: encoded(event), AcknowledgeOnPublish: true}
+	outbox := model.OutboxMessage{ID: identifier.New(identifier.Outbox), AttemptID: a.ID, Topic: s.eventTopic + "/" + a.RunID + "/events", Payload: encoded(event), AcknowledgeOnPublish: true}
 	return event, tx.Create(&outbox).Error
 }
 func (s *ExecutionService) dispatch(tx *gorm.DB, a model.ExecutionAttempt) error {
 	return tx.Create(&model.OutboxMessage{ID: identifier.New(identifier.Outbox), AttemptID: a.ID, Topic: s.attemptReadyTopic + "/" + a.Queue, Payload: encoded(map[string]any{"attempt_id": a.ID, "queue": a.Queue, "runtime_kind": a.RuntimeKind})}).Error
 }
-func (s *ExecutionService) newAttempt(tx *gorm.DB, conversationID, sessionID, targetID string, turnID, taskID *string, policy model.ExecutionPolicy, deadline time.Time) (model.ExecutionAttempt, error) {
+func (s *ExecutionService) newAttempt(tx *gorm.DB, runID, sessionID, targetID string, turnID, taskID *string, policy model.ExecutionPolicy, deadline time.Time) (model.ExecutionAttempt, error) {
 	var session model.AgentSession
 	if err := tx.First(&session, "id = ?", sessionID).Error; err != nil {
 		return model.ExecutionAttempt{}, err
@@ -112,55 +112,55 @@ func (s *ExecutionService) newAttempt(tx *gorm.DB, conversationID, sessionID, ta
 	if err := tx.Model(&model.ExecutionAttempt{}).Where("target_id = ?", targetID).Count(&count).Error; err != nil {
 		return model.ExecutionAttempt{}, err
 	}
-	a := model.ExecutionAttempt{ID: identifier.New(identifier.Attempt), ConversationID: conversationID, SessionID: sessionID, TargetID: targetID, TurnID: turnID, TaskID: taskID, Number: uint64(count + 1), Queue: policy.Queue, RuntimeKind: session.RuntimeKind, Status: model.StatusQueued, Version: 1, DeadlineAt: deadline}
+	a := model.ExecutionAttempt{ID: identifier.New(identifier.Attempt), RunID: runID, SessionID: sessionID, TargetID: targetID, TurnID: turnID, TaskID: taskID, Number: uint64(count + 1), Queue: policy.Queue, RuntimeKind: session.RuntimeKind, Status: model.StatusQueued, Version: 1, DeadlineAt: deadline}
 	if err := tx.Create(&a).Error; err != nil {
 		return a, err
 	}
 	return a, s.dispatch(tx, a)
 }
-func (s *ExecutionService) createSession(tx *gorm.DB, cid string, parent *string, profile AgentProfile, id string) (model.AgentSession, error) {
+func (s *ExecutionService) createSession(tx *gorm.DB, runID string, parent *string, profile AgentProfile, id string) (model.AgentSession, error) {
 	if id == "" {
 		id = identifier.New(identifier.Session)
 	}
-	session := model.AgentSession{ID: id, ConversationID: cid, ParentSessionID: parent, ProfileID: profile.ID, ProfileVersion: profile.Version, RuntimeKind: profile.RuntimeKind, Status: "ready", Memory: encoded(map[string]any{})}
+	session := model.AgentSession{ID: id, RunID: runID, ParentSessionID: parent, ProfileID: profile.ID, ProfileVersion: profile.Version, RuntimeKind: profile.RuntimeKind, Status: "ready", Memory: encoded(map[string]any{})}
 	if err := tx.Create(&session).Error; err != nil {
 		return session, err
 	}
 	for _, tool := range profile.Tools {
-		if err := tx.Create(&model.CapabilityGrant{ID: identifier.New(identifier.Grant), ConversationID: cid, SessionID: id, ToolID: tool, Scope: encoded(map[string]any{})}).Error; err != nil {
+		if err := tx.Create(&model.CapabilityGrant{ID: identifier.New(identifier.Grant), RunID: runID, SessionID: id, ToolID: tool, Scope: encoded(map[string]any{})}).Error; err != nil {
 			return session, err
 		}
 	}
 	return session, nil
 }
 
-type CreatedConversation struct {
-	Conversation model.Conversation `json:"conversation"`
-	Session      model.AgentSession `json:"session"`
+type CreatedRun struct {
+	Run     model.Run          `json:"run"`
+	Session model.AgentSession `json:"session"`
 }
 
-func (s *ExecutionService) CreateConversation(ctx context.Context, caller model.CallerContext) (CreatedConversation, error) {
-	return s.CreateConversationWithDocuments(ctx, caller, nil)
+func (s *ExecutionService) CreateRun(ctx context.Context, caller model.CallerContext) (CreatedRun, error) {
+	return s.CreateRunWithDocuments(ctx, caller, nil)
 }
 
-func (s *ExecutionService) CreateConversationWithDocuments(ctx context.Context, caller model.CallerContext, documents []string) (CreatedConversation, error) {
+func (s *ExecutionService) CreateRunWithDocuments(ctx context.Context, caller model.CallerContext, documents []string) (CreatedRun, error) {
 	if !identifier.IsValid(caller.EntityID, identifier.Entity) || caller.EntityType != model.EntityTypeUser || !identifier.IsValid(caller.UserID, identifier.User) {
-		return CreatedConversation{}, ErrForbidden
+		return CreatedRun{}, ErrForbidden
 	}
 	if err := validateDocumentIDs(documents); err != nil {
-		return CreatedConversation{}, err
+		return CreatedRun{}, err
 	}
 	if len(documents) > 0 {
 		if s.documents == nil {
-			return CreatedConversation{}, ErrUnavailable
+			return CreatedRun{}, ErrUnavailable
 		}
 		if err := s.documents.ValidateDocuments(ctx, documents); err != nil {
-			return CreatedConversation{}, err
+			return CreatedRun{}, err
 		}
 	}
-	var result CreatedConversation
+	var result CreatedRun
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		c := model.Conversation{ID: identifier.New(identifier.Conversation), Kind: model.ConversationKindChat, CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice(append([]string{}, documents...))}
+		c := model.Run{ID: identifier.New(identifier.Run), Kind: model.RunKindChat, CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice(append([]string{}, documents...))}
 		session, err := s.createSession(tx, c.ID, nil, profiles["blix_v1"], "")
 		if err != nil {
 			return err
@@ -169,10 +169,10 @@ func (s *ExecutionService) CreateConversationWithDocuments(ctx context.Context, 
 		if err := tx.Create(&c).Error; err != nil {
 			return err
 		}
-		if _, err := s.event(tx, model.ExecutionAttempt{ConversationID: c.ID, SessionID: session.ID}, "conversation.created_v1", c.ID, c); err != nil {
+		if _, err := s.event(tx, model.ExecutionAttempt{RunID: c.ID, SessionID: session.ID}, "run.created_v1", c.ID, c); err != nil {
 			return err
 		}
-		result = CreatedConversation{Conversation: c, Session: session}
+		result = CreatedRun{Run: c, Session: session}
 		return nil
 	})
 	return result, err
@@ -184,13 +184,13 @@ type AppendedMessage struct {
 	EventPosition uint64        `json:"event_position"`
 }
 
-func (s *ExecutionService) AppendUserMessage(ctx context.Context, cid, owner, content string) (AppendedMessage, error) {
-	return s.AppendUserMessageWithDisplay(ctx, cid, owner, content, "")
+func (s *ExecutionService) AppendUserMessage(ctx context.Context, runID, owner, content string) (AppendedMessage, error) {
+	return s.AppendUserMessageWithDisplay(ctx, runID, owner, content, "")
 }
 
-func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid, owner, content, displayContent string) (AppendedMessage, error) {
+func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, runID, owner, content, displayContent string) (AppendedMessage, error) {
 	content = strings.TrimSpace(content)
-	if !identifier.IsValid(cid, identifier.Conversation) || content == "" || !utf8.ValidString(content) || strings.ContainsRune(content, 0) || len(content) > 1024*1024 {
+	if !identifier.IsValid(runID, identifier.Run) || content == "" || !utf8.ValidString(content) || strings.ContainsRune(content, 0) || len(content) > 1024*1024 {
 		return AppendedMessage{}, ErrInvalid
 	}
 	displayContent = strings.TrimSpace(displayContent)
@@ -198,11 +198,11 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 		return AppendedMessage{}, ErrInvalid
 	}
 	var result AppendedMessage
-	if err := s.validateDocumentChatMessage(ctx, cid, owner); err != nil {
+	if err := s.validateDocumentChatMessage(ctx, runID, owner); err != nil {
 		return result, err
 	}
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		c, err := lockConversation(tx, cid)
+		c, err := lockRun(tx, runID)
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 			return ErrForbidden
 		}
 		var queued int64
-		if err := tx.Model(&model.Turn{}).Where("conversation_id = ? AND status = ?", cid, model.StatusQueued).Count(&queued).Error; err != nil {
+		if err := tx.Model(&model.Turn{}).Where("run_id = ? AND status = ?", runID, model.StatusQueued).Count(&queued).Error; err != nil {
 			return err
 		}
 		if queued >= 64 {
@@ -226,17 +226,17 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 		}
 		if session.ProfileID == "document_qa_v1" {
 			var turns int64
-			if err := tx.Model(&model.Turn{}).Where("conversation_id = ?", cid).Count(&turns).Error; err != nil {
+			if err := tx.Model(&model.Turn{}).Where("run_id = ?", runID).Count(&turns).Error; err != nil {
 				return err
 			}
 			if turns != 0 {
-				return fmt.Errorf("%w: document questions require a new conversation", ErrConflict)
+				return fmt.Errorf("%w: document questions require a new run", ErrConflict)
 			}
 		}
 		policy := profile.Policy
-		turn := model.Turn{ID: identifier.New(identifier.Turn), ConversationID: c.ID, SessionID: c.LeadSessionID, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{})}
-		msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: cid, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content, DisplayContent: displayContent}
-		e, err := s.event(tx, model.ExecutionAttempt{ConversationID: cid, SessionID: c.LeadSessionID, TurnID: &turn.ID}, "message.user_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": content, "display_content": displayContent})
+		turn := model.Turn{ID: identifier.New(identifier.Turn), RunID: c.ID, SessionID: c.LeadSessionID, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{})}
+		msg := model.Message{ID: identifier.New(identifier.Message), RunID: runID, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content, DisplayContent: displayContent}
+		e, err := s.event(tx, model.ExecutionAttempt{RunID: runID, SessionID: c.LeadSessionID, TurnID: &turn.ID}, "message.user_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": content, "display_content": displayContent})
 		if err != nil {
 			return err
 		}
@@ -262,7 +262,7 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 				return err
 			}
 		}
-		if _, err := s.newAttempt(tx, cid, c.LeadSessionID, turn.ID, &turn.ID, nil, policy, turn.DeadlineAt); err != nil {
+		if _, err := s.newAttempt(tx, runID, c.LeadSessionID, turn.ID, &turn.ID, nil, policy, turn.DeadlineAt); err != nil {
 			return err
 		}
 		result = AppendedMessage{Message: msg, Turn: turn, EventPosition: e.Position}
@@ -277,7 +277,7 @@ type ClaimRequest struct {
 }
 type AttemptContext struct {
 	Attempt           model.ExecutionAttempt   `json:"attempt"`
-	Conversation      model.Conversation       `json:"conversation"`
+	Run               model.Run                `json:"run"`
 	Session           model.AgentSession       `json:"session"`
 	Profile           AgentProfile             `json:"profile"`
 	Turn              *model.Turn              `json:"turn,omitempty"`
@@ -301,7 +301,7 @@ func (s *ExecutionService) ClaimAttempt(ctx context.Context, id string, r ClaimR
 		if err := tx.First(&a, "id = ?", id).Error; err != nil {
 			return err
 		}
-		c, err := lockConversation(tx, a.ConversationID)
+		c, err := lockRun(tx, a.RunID)
 		if err != nil {
 			return err
 		}
@@ -350,7 +350,7 @@ func (s *ExecutionService) ClaimAttempt(ctx context.Context, id string, r ClaimR
 		if !ok {
 			return ErrUnavailable
 		}
-		result = AttemptContext{Conversation: c, Session: session, Profile: profile, Messages: []model.Message{}, Notifications: json.RawMessage("[]"), Commands: []model.SessionCommand{}, AllowedTools: []string{}, LeaseRenewAfterMS: uint64((s.leaseDuration / 3).Milliseconds())}
+		result = AttemptContext{Run: c, Session: session, Profile: profile, Messages: []model.Message{}, Notifications: json.RawMessage("[]"), Commands: []model.SessionCommand{}, AllowedTools: []string{}, LeaseRenewAfterMS: uint64((s.leaseDuration / 3).Milliseconds())}
 		var waiting *string
 		if a.TurnID != nil {
 			var turn model.Turn
@@ -363,7 +363,7 @@ func (s *ExecutionService) ClaimAttempt(ctx context.Context, id string, r ClaimR
 			waiting = turn.WaitingTaskID
 			result.Turn = &turn
 			result.Notifications = json.RawMessage(turn.Notifications)
-			if err := tx.Table("runway_message AS message").Select("message.*").Joins("JOIN runway_turn origin ON origin.id = message.turn_id").Where("message.conversation_id = ? AND (message.event_position <= ? OR (message.role = ? AND origin.input_position < ?))", c.ID, turn.InputPosition, "assistant", turn.InputPosition).Order("message.event_position ASC").Find(&result.Messages).Error; err != nil {
+			if err := tx.Table("runway_message AS message").Select("message.*").Joins("JOIN runway_turn origin ON origin.id = message.turn_id").Where("message.run_id = ? AND (message.event_position <= ? OR (message.role = ? AND origin.input_position < ?))", c.ID, turn.InputPosition, "assistant", turn.InputPosition).Order("message.event_position ASC").Find(&result.Messages).Error; err != nil {
 				return err
 			}
 			if err := tx.Model(&turn).Update("status", model.StatusRunning).Error; err != nil {
@@ -444,7 +444,7 @@ func (s *ExecutionService) owned(tx *gorm.DB, id string, o Ownership) (model.Exe
 	if err := tx.First(&a, "id = ?", id).Error; err != nil {
 		return a, mapDatabaseError(err)
 	}
-	if _, err := lockConversation(tx, a.ConversationID); err != nil {
+	if _, err := lockRun(tx, a.RunID); err != nil {
 		return a, err
 	}
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&a, "id = ?", id).Error; err != nil {
@@ -562,11 +562,11 @@ func (s *ExecutionService) RecordEvents(ctx context.Context, id string, o Owners
 	return v, err
 }
 
-func (s *ExecutionService) ListEvents(ctx context.Context, cid string, after uint64) ([]model.Event, error) {
+func (s *ExecutionService) ListEvents(ctx context.Context, runID string, after uint64) ([]model.Event, error) {
 	events := []model.Event{}
 	q := s.database.WithContext(ctx).Where("position > ?", after)
-	if cid != "" {
-		q = q.Where("conversation_id = ?", cid)
+	if runID != "" {
+		q = q.Where("run_id = ?", runID)
 	}
 	err := q.Order("position ASC").Limit(100).Find(&events).Error
 	return events, err
@@ -574,12 +574,12 @@ func (s *ExecutionService) ListEvents(ctx context.Context, cid string, after uin
 func (s *ExecutionService) ListAllEvents(ctx context.Context, after uint64) ([]model.Event, error) {
 	return s.ListEvents(ctx, "", after)
 }
-func (s *ExecutionService) AuthorizeConversationAccess(ctx context.Context, cid, owner string, admin bool) error {
-	if !identifier.IsValid(cid, identifier.Conversation) {
+func (s *ExecutionService) AuthorizeRunAccess(ctx context.Context, runID, owner string, admin bool) error {
+	if !identifier.IsValid(runID, identifier.Run) {
 		return ErrInvalid
 	}
-	var c model.Conversation
-	if err := s.database.WithContext(ctx).First(&c, "id = ?", cid).Error; err != nil {
+	var c model.Run
+	if err := s.database.WithContext(ctx).First(&c, "id = ?", runID).Error; err != nil {
 		return mapDatabaseError(err)
 	}
 	if !admin && c.CallerEntityID != owner {
@@ -587,22 +587,28 @@ func (s *ExecutionService) AuthorizeConversationAccess(ctx context.Context, cid,
 	}
 	return nil
 }
-func (s *ExecutionService) ListConversations(ctx context.Context, owner string, admin bool) ([]model.Conversation, error) {
-	rows := []model.Conversation{}
-	q := s.database.WithContext(ctx).Where("kind = ?", model.ConversationKindChat)
+func (s *ExecutionService) ListRuns(ctx context.Context, owner string, admin bool, kind string) ([]model.Run, error) {
+	if kind != "" && kind != model.RunKindChat && kind != model.RunKindInternal {
+		return nil, ErrInvalid
+	}
+	rows := []model.Run{}
+	q := s.database.WithContext(ctx)
+	if kind != "" {
+		q = q.Where("kind = ?", kind)
+	}
 	if !admin {
 		q = q.Where("caller_entity_id = ?", owner)
 	}
 	err := q.Order("updated_at DESC").Limit(100).Find(&rows).Error
 	return rows, err
 }
-func (s *ExecutionService) ListAllConversations(ctx context.Context) ([]model.Conversation, error) {
-	rows := []model.Conversation{}
+func (s *ExecutionService) ListAllRuns(ctx context.Context) ([]model.Run, error) {
+	rows := []model.Run{}
 	err := s.database.WithContext(ctx).Order("updated_at DESC").Limit(100).Find(&rows).Error
 	return rows, err
 }
-func (s *ExecutionService) GetConversation(ctx context.Context, id string) (map[string]any, error) {
-	var c model.Conversation
+func (s *ExecutionService) GetRun(ctx context.Context, id string) (map[string]any, error) {
+	var c model.Run
 	if err := s.database.WithContext(ctx).First(&c, "id = ?", id).Error; err != nil {
 		return nil, mapDatabaseError(err)
 	}
@@ -613,12 +619,12 @@ func (s *ExecutionService) GetConversation(ctx context.Context, id string) (map[
 		dest  any
 		order string
 	}{{&messages, "event_position ASC"}, {&tasks, "created_at ASC"}, {&turns, "created_at ASC"}} {
-		if err := s.database.WithContext(ctx).Where("conversation_id = ?", id).Order(query.order).Find(query.dest).Error; err != nil {
+		if err := s.database.WithContext(ctx).Where("run_id = ?", id).Order(query.order).Find(query.dest).Error; err != nil {
 			return nil, err
 		}
 	}
 	approvals := []model.Approval{}
-	if err := s.database.WithContext(ctx).Where("conversation_id = ? AND status = ?", id, "pending").Order("created_at ASC").Find(&approvals).Error; err != nil {
+	if err := s.database.WithContext(ctx).Where("run_id = ? AND status = ?", id, "pending").Order("created_at ASC").Find(&approvals).Error; err != nil {
 		return nil, err
 	}
 	actions := []model.Action{}
@@ -631,16 +637,16 @@ func (s *ExecutionService) GetConversation(ctx context.Context, id string) (map[
 			return nil, err
 		}
 	}
-	return map[string]any{"conversation": c, "messages": messages, "tasks": tasks, "turns": turns, "pending_approvals": approvals, "approval_actions": actions}, nil
+	return map[string]any{"run": c, "messages": messages, "tasks": tasks, "turns": turns, "pending_approvals": approvals, "approval_actions": actions}, nil
 }
 func (s *ExecutionService) GetTask(ctx context.Context, id string) (model.Task, error) {
 	var task model.Task
 	err := s.database.WithContext(ctx).First(&task, "id = ?", id).Error
 	return task, mapDatabaseError(err)
 }
-func (s *ExecutionService) ListTasks(ctx context.Context, cid string) ([]model.Task, error) {
+func (s *ExecutionService) ListTasks(ctx context.Context, runID string) ([]model.Task, error) {
 	tasks := []model.Task{}
-	err := s.database.WithContext(ctx).Where("conversation_id = ?", cid).Order("created_at DESC").Limit(100).Find(&tasks).Error
+	err := s.database.WithContext(ctx).Where("run_id = ?", runID).Order("created_at DESC").Limit(100).Find(&tasks).Error
 	return tasks, err
 }
 func validateJSON(value json.RawMessage) error {

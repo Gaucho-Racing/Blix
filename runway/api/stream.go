@@ -21,24 +21,24 @@ func (h *Handler) StreamAllEvents(c *gin.Context) {
 	h.streamEvents(c, "", h.executions.ListAllEvents)
 }
 
-func (h *Handler) StreamConversationEvents(c *gin.Context) {
-	conversationID := c.Param("conversationID")
-	if err := h.authorizeConversationAccess(c, conversationID); err != nil {
+func (h *Handler) StreamRunEvents(c *gin.Context) {
+	runID := c.Param("runID")
+	if err := h.authorizeRunAccess(c, runID); err != nil {
 		respondError(c, err)
 		return
 	}
-	h.streamEvents(c, conversationID, func(ctx context.Context, after uint64) ([]model.Event, error) {
-		return h.executions.ListEvents(ctx, conversationID, after)
+	h.streamEvents(c, runID, func(ctx context.Context, after uint64) ([]model.Event, error) {
+		return h.executions.ListEvents(ctx, runID, after)
 	})
 }
 
-func (h *Handler) streamEvents(c *gin.Context, conversationID string, load eventLoader) {
+func (h *Handler) streamEvents(c *gin.Context, runID string, load eventLoader) {
 	cursor, err := streamCursor(c)
 	if err != nil {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	liveEvents, unsubscribe := h.events.Subscribe(conversationID)
+	liveEvents, unsubscribe := h.events.Subscribe(runID)
 	defer unsubscribe()
 
 	batch, err := load(c.Request.Context(), cursor)

@@ -19,14 +19,14 @@ type Publisher struct {
 	connection *autopaho.ConnectionManager
 }
 
-func Connect(ctx context.Context, configuration config.Config, handleConversationEvent func(model.Event)) (*Publisher, error) {
+func Connect(ctx context.Context, configuration config.Config, handleRunEvent func(model.Event)) (*Publisher, error) {
 	serverURL, err := url.Parse(configuration.MQTTURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse MQTT URL: %w", err)
 	}
 	subscriptionResult := make(chan error, 1)
 	var initialSubscription sync.Once
-	conversationEventTopic := configuration.MQTTConversationEventTopicPrefix + "/+/events"
+	runEventTopic := configuration.MQTTRunEventTopicPrefix + "/+/events"
 	connection, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
 		ServerUrls:                    []*url.URL{serverURL},
 		KeepAlive:                     20,
@@ -37,11 +37,11 @@ func Connect(ctx context.Context, configuration config.Config, handleConversatio
 			subscribeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			_, subscribeErr := connection.Subscribe(subscribeCtx, &paho.Subscribe{
-				Subscriptions: []paho.SubscribeOptions{{Topic: conversationEventTopic, QoS: 1}},
+				Subscriptions: []paho.SubscribeOptions{{Topic: runEventTopic, QoS: 1}},
 			})
 			initialSubscription.Do(func() { subscriptionResult <- subscribeErr })
 			if subscribeErr != nil {
-				logger.SugarLogger.Errorf("subscribe to conversation events: %v", subscribeErr)
+				logger.SugarLogger.Errorf("subscribe to run events: %v", subscribeErr)
 			}
 		},
 		ClientConfig: paho.ClientConfig{
@@ -50,14 +50,14 @@ func Connect(ctx context.Context, configuration config.Config, handleConversatio
 				func(received paho.PublishReceived) (bool, error) {
 					var event model.Event
 					if err := json.Unmarshal(received.Packet.Payload, &event); err != nil {
-						logger.SugarLogger.Errorf("decode conversation event from MQTT: %v", err)
+						logger.SugarLogger.Errorf("decode run event from MQTT: %v", err)
 						return true, nil
 					}
-					if event.Position == 0 || event.ID == "" || event.ConversationID == "" || event.SessionID == "" {
-						logger.SugarLogger.Errorf("discard invalid conversation event from MQTT topic %s", received.Packet.Topic)
+					if event.Position == 0 || event.ID == "" || event.RunID == "" || event.SessionID == "" {
+						logger.SugarLogger.Errorf("discard invalid run event from MQTT topic %s", received.Packet.Topic)
 						return true, nil
 					}
-					handleConversationEvent(event)
+					handleRunEvent(event)
 					return true, nil
 				},
 			},
@@ -72,7 +72,7 @@ func Connect(ctx context.Context, configuration config.Config, handleConversatio
 	select {
 	case err := <-subscriptionResult:
 		if err != nil {
-			return nil, fmt.Errorf("subscribe to conversation events: %w", err)
+			return nil, fmt.Errorf("subscribe to run events: %w", err)
 		}
 	case <-ctx.Done():
 		return nil, ctx.Err()

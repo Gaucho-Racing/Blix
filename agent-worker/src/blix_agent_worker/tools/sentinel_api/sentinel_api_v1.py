@@ -125,7 +125,7 @@ class SentinelApiV1Tool:
                 service_account_token=service_account_token,
                 user_id=self._caller_user_id,
                 application_client_id=SENTINEL_CLIENT_ID,
-                conversation_id=call.conversation_id,
+                run_id=call.run_id,
                 session_id=call.parent_session_id,
             )
             status_code, data = await self._client.get_api(
@@ -146,7 +146,7 @@ class SentinelApiV1Tool:
 
         output = SentinelApiV1Output(path=tool_input.path, status_code=status_code, data=data)
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -163,7 +163,7 @@ class SentinelApiV1Tool:
         details: JsonObject | None = None,
     ) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

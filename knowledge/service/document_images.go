@@ -191,8 +191,8 @@ func (s *DocumentService) ReadPageImage(ctx context.Context, id string, number i
 	return data, asset, nil
 }
 
-func (s *DocumentService) AgentImageScope(ctx context.Context, conversationID, sessionID string) (DocumentRetrievalScope, error) {
-	access, err := s.agentDocumentContext(ctx, conversationID, sessionID)
+func (s *DocumentService) AgentImageScope(ctx context.Context, runID, sessionID string) (DocumentRetrievalScope, error) {
+	access, err := s.agentDocumentContext(ctx, runID, sessionID)
 	if err != nil {
 		return DocumentRetrievalScope{}, err
 	}

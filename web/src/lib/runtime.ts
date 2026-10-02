@@ -1,9 +1,9 @@
 import { api } from "@/lib/api"
 
-export interface Conversation {
+export interface Run {
   kind: "chat" | "internal"
   document_ids: string[]
-  conversation_id: string
+  run_id: string
   name: string
   status: string
   lead_session_id: string
@@ -47,8 +47,8 @@ export interface ApprovalAction {
   tool_id: string
   arguments: Record<string, unknown>
 }
-export interface ConversationDetails {
-  conversation: Conversation
+export interface RunDetails {
+  run: Run
   messages: RuntimeMessage[]
   turns: RuntimeTurn[]
   tasks: RuntimeTask[]
@@ -62,25 +62,28 @@ export const errorMessage = (error: unknown) =>
   (error as { response?: { data?: { error?: string } } })?.response?.data
     ?.error ??
   (error instanceof Error ? error.message : "Request failed. Try again.")
-export async function listConversations() {
-  return (await api.get<{ conversations: Conversation[] }>("/v1/conversations"))
-    .data.conversations
+export async function listRuns(kind?: Run["kind"]) {
+  return (await api.get<{ runs: Run[] }>("/v1/runs", { params: { kind } }))
+    .data.runs
 }
-export async function listAdminConversations() {
-  return (
-    await api.get<{ conversations: Conversation[] }>("/v1/admin/conversations")
-  ).data.conversations
+export async function listChatRuns() {
+  return listRuns("chat")
 }
-export async function createConversation(documentIDs: string[] = []) {
+export async function listAdminRuns() {
   return (
-    await api.post<{ conversation: Conversation }>("/v1/conversations", {
+    await api.get<{ runs: Run[] }>("/v1/admin/runs")
+  ).data.runs
+}
+export async function createRun(documentIDs: string[] = []) {
+  return (
+    await api.post<{ run: Run }>("/v1/runs", {
       document_ids: documentIDs,
     })
-  ).data.conversation
+  ).data.run
 }
-export async function getConversation(id: string, signal?: AbortSignal) {
+export async function getRun(id: string, signal?: AbortSignal) {
   return (
-    await api.get<ConversationDetails>(`/v1/conversations/${id}`, { signal })
+    await api.get<RunDetails>(`/v1/runs/${id}`, { signal })
   ).data
 }
 export async function appendMessage(
@@ -90,13 +93,13 @@ export async function appendMessage(
 ) {
   return (
     await api.post<{ message: RuntimeMessage }>(
-      `/v1/conversations/${id}/messages`,
+      `/v1/runs/${id}/messages`,
       { content, display_content: displayContent },
     )
   ).data
 }
-export async function interruptConversation(id: string) {
-  await api.post(`/v1/conversations/${id}/interrupt`)
+export async function interruptRun(id: string) {
+  await api.post(`/v1/runs/${id}/interrupt`)
 }
 export async function controlTask(
   id: string,
@@ -122,7 +125,7 @@ export async function loadEvents(
   while (true) {
     const batch = (
       await api.get<{ events: RuntimeEvent[] }>(
-        `/v1/conversations/${id}/events`,
+        `/v1/runs/${id}/events`,
         { params: { after }, signal },
       )
     ).data.events
@@ -134,7 +137,7 @@ export async function loadEvents(
 }
 export function liveOutputs(
   events: RuntimeEvent[],
-  details: ConversationDetails | undefined,
+  details: RunDetails | undefined,
 ) {
   const output = new Map<string, string>()
   const finished = new Set(

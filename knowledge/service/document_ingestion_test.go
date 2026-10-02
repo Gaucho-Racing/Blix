@@ -27,7 +27,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	docID := ""
 	generation := uint64(1)
 	taskID := identifier.New(identifier.Prefix("task"))
-	cid := identifier.New(identifier.Conversation)
+	runID := identifier.New(identifier.Run)
 	session := identifier.New(identifier.Session)
 	status := "running"
 	attempt := uint64(1)
@@ -56,7 +56,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 		switch {
 		case r.URL.Path == "/internal/v1/document-ingestions":
-			json.NewEncoder(w).Encode(map[string]string{"conversation_id": cid, "task_id": taskID})
+			json.NewEncoder(w).Encode(map[string]string{"run_id": runID, "task_id": taskID})
 		case r.URL.Path == "/internal/v1/document-attempts/validate":
 			var request DocumentExecution
 			json.NewDecoder(r.Body).Decode(&request)
@@ -64,7 +64,7 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 				w.WriteHeader(409)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": session, "conversation_id": cid, "attempt_number": attempt, "input": map[string]any{"document_id": docID, "generation": generation}})
+			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": session, "run_id": runID, "attempt_number": attempt, "input": map[string]any{"document_id": docID, "generation": generation}})
 		case strings.HasSuffix(r.URL.Path, "/cancel"):
 			status = "cancelled"
 			json.NewEncoder(w).Encode(map[string]any{})

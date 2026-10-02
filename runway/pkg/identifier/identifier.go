@@ -5,7 +5,7 @@ import ulid "github.com/gaucho-racing/ulid-go"
 type Prefix string
 
 const (
-	Conversation        Prefix = "conversation"
+	Run                 Prefix = "run"
 	Session             Prefix = "session"
 	Turn                Prefix = "turn"
 	Task                Prefix = "task"

@@ -21,7 +21,7 @@ from blix_agent_worker.models.agent import (
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.context import CallerContext
 from blix_agent_worker.models.llm import ModelCallRequest, ModelMessage, ModelMessageRole, ModelResponse
-from blix_agent_worker.models.message import ConversationMessage, ConversationMessageRole
+from blix_agent_worker.models.message import RunMessage, RunMessageRole
 from blix_agent_worker.models.tool import ToolCall, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
@@ -44,10 +44,10 @@ def assistant(content=None, calls=()):
 
 
 def lead_task():
-    conversation, session = new_ulid("conversation"), new_ulid("session")
-    message = ConversationMessage(
+    run, session = new_ulid("run"), new_ulid("session")
+    message = RunMessage(
         message_id=new_ulid("message"),
-        conversation_id=conversation,
+        run_id=run,
         session_id=session,
         role="user",
         content="Help with research",
@@ -55,7 +55,7 @@ def lead_task():
         event_position=1,
     )
     return AgentTask(
-        conversation_id=conversation,
+        run_id=run,
         session_id=session,
         agent_id="blix_v1",
         objective="Help the user",
@@ -81,11 +81,11 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delayed_reply_preserves_current_question_and_delivery_order(self):
         task = lead_task()
-        question = ConversationMessage.model_validate(task.input["messages"][0])
+        question = RunMessage.model_validate(task.input["messages"][0])
         delayed = question.model_copy(
             update={
                 "message_id": new_ulid("message"),
-                "role": ConversationMessageRole.ASSISTANT,
+                "role": RunMessageRole.ASSISTANT,
                 "content": "Earlier research",
                 "event_position": 2,
             }
@@ -108,10 +108,10 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, {"message": "Current answer"})
 
     def test_reply_target_must_identify_an_existing_user_message(self):
-        question = ConversationMessage.model_validate(lead_task().input["messages"][0])
+        question = RunMessage.model_validate(lead_task().input["messages"][0])
         with self.assertRaises(ValidationError):
             BlixV1Input(messages=(question,), reply_to_message_id=new_ulid("message"))
-        reply = question.model_copy(update={"role": ConversationMessageRole.ASSISTANT})
+        reply = question.model_copy(update={"role": RunMessageRole.ASSISTANT})
         with self.assertRaises(ValidationError):
             BlixV1Input(messages=(reply,), reply_to_message_id=reply.message_id)
 
@@ -147,7 +147,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(suspended, AgentSuspension)
         child = suspended.child_task
         result = AgentResult(
-            conversation_id=child.conversation_id,
+            run_id=child.run_id,
             session_id=child.session_id,
             parent_session_id=task.session_id,
             agent_id=child.agent_id,
@@ -222,14 +222,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_completed_action_replay_skips_execution(self):
         call = ToolCall(
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             parent_session_id=new_ulid("session"),
             call_id=new_ulid("call"),
             tool_id="current_time_v1",
             arguments={},
         )
         replay = ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             parent_session_id=call.parent_session_id,
             call_id=call.call_id,
             status="succeeded",
@@ -254,7 +254,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         attempt = Attempt(
             attempt_id=new_ulid("attempt"),
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             session_id=new_ulid("session"),
             target_id=new_ulid("turn"),
             version=1,
@@ -271,7 +271,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_capture_uses_original_message_and_new_identity(self):
         task = lead_task()
-        message = ConversationMessage.model_validate(task.input["messages"][0])
+        message = RunMessage.model_validate(task.input["messages"][0])
         payloads = []
 
         class Knowledge:
@@ -286,7 +286,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         delayed = message.model_copy(
             update={
                 "message_id": new_ulid("message"),
-                "role": ConversationMessageRole.ASSISTANT,
+                "role": RunMessageRole.ASSISTANT,
                 "content": "Earlier answer",
             }
         )
@@ -294,7 +294,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
             result = await tool.execute(
                 ToolCall(
-                    conversation_id=task.conversation_id,
+                    run_id=task.run_id,
                     parent_session_id=task.session_id,
                     call_id=new_ulid("call"),
                     tool_id=tool.definition.id,
@@ -318,7 +318,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {
                 "attempt": {
                     "attempt_id": new_ulid("attempt"),
-                    "conversation_id": lead.conversation_id,
+                    "run_id": lead.run_id,
                     "session_id": session,
                     "target_id": new_ulid("task" if task else "turn"),
                     "version": 1,
@@ -327,8 +327,8 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "deadline_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
                     "runtime_kind": "api",
                 },
-                "conversation": {
-                    "conversation_id": lead.conversation_id,
+                "run": {
+                    "run_id": lead.run_id,
                     "caller_context": {"entity_id": new_ulid("ent"), "entity_type": "USER", "user_id": new_ulid("usr")},
                 },
                 "session": {"session_id": session, "profile_id": profile, "runtime_kind": "api", "memory": {}},
@@ -356,15 +356,15 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             question.model_copy(
                 update={
                     "message_id": new_ulid("message"),
-                    "role": ConversationMessageRole.ASSISTANT,
+                    "role": RunMessageRole.ASSISTANT,
                     "content": "Earlier research",
                     "event_position": 2,
                 }
             ),
         )
         caller = SentinelUser.model_construct(
-            id=execution.conversation.caller_context.user_id,
-            entity_id=execution.conversation.caller_context.entity_id,
+            id=execution.run.caller_context.user_id,
+            entity_id=execution.run.caller_context.entity_id,
             first_name="Test",
             last_name="User",
             username="test",
@@ -407,8 +407,8 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         task = lead_task().model_copy(update={"agent_id": "document_ingest_v1"})
         execution = self.context(task)
         caller = SentinelUser.model_construct(
-            id=execution.conversation.caller_context.user_id,
-            entity_id=execution.conversation.caller_context.entity_id,
+            id=execution.run.caller_context.user_id,
+            entity_id=execution.run.caller_context.entity_id,
             first_name="Test", last_name="User", username="test", avatar_url="", groups=("BlixUsers",),
         )
 
@@ -449,7 +449,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 await agent.on_response(sequence, response)
             await asyncio.gather(complete(1), complete(2))
             return AgentResult(
-                conversation_id=invocation.conversation_id, session_id=invocation.session_id,
+                run_id=invocation.run_id, session_id=invocation.session_id,
                 agent_id=invocation.agent_id, status=AgentResultStatus.SUCCEEDED, output={},
             )
 
@@ -474,7 +474,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         for rejected in (False, True):
             execution = self.context()
             document_id = new_ulid("document")
-            execution.conversation.document_ids = (document_id,)
+            execution.run.document_ids = (document_id,)
             execution.profile.profile_id = "document_qa_v1"
             execution.session.profile_id = "document_qa_v1"
             execution.profile.policy["model_profile"] = "document_qa"
@@ -486,8 +486,8 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 template.model_copy(update={"message_id": new_ulid("message"), "content": "Other question must not enter this query."}),
             )
             caller = SentinelUser.model_construct(
-                id=execution.conversation.caller_context.user_id,
-                entity_id=execution.conversation.caller_context.entity_id,
+                id=execution.run.caller_context.user_id,
+                entity_id=execution.run.caller_context.entity_id,
                 first_name="Test", last_name="Admin", username="test", avatar_url="", groups=("BlixAdmins",),
             )
 
@@ -521,7 +521,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
             model = ScriptedModel(
                 assistant(calls=(ModelCallRequest(ref="search", callable_id="knowledge_document_search_v1",
-                    arguments={"operation": "search", "scope": "conversation", "document_id": document_id, "query": "brakes"}),)),
+                    arguments={"operation": "search", "scope": "run", "document_id": document_id, "query": "brakes"}),)),
                 assistant(json.dumps({"message": "I couldn’t find that in this document."})),
             )
             model.model = "test-qa"
@@ -584,7 +584,7 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             question.model_copy(
                 update={
                     "message_id": new_ulid("message"),
-                    "role": ConversationMessageRole.ASSISTANT,
+                    "role": RunMessageRole.ASSISTANT,
                     "event_position": position,
                     "content": "Delayed answer " + str(position),
                 }
@@ -618,7 +618,7 @@ class TaskControlTests(unittest.IsolatedAsyncioTestCase):
                 return {"operation": "steer"}
 
         call = ToolCall(
-            conversation_id=new_ulid("conversation"),
+            run_id=new_ulid("run"),
             parent_session_id=new_ulid("session"),
             call_id=new_ulid("call"),
             tool_id="agent_execution_v1",

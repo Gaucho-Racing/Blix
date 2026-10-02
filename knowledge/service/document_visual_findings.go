@@ -58,7 +58,7 @@ func saveVisualFindings(ctx context.Context, tx *gorm.DB, doc model.Document, ch
 			return err
 		}
 		record, err := NewSourceService(tx).ingestSourceRecord(ctx, doc.SourceID, IngestSourceRecordInput{
-			ExternalID: fmt.Sprintf("page:%d:visual", finding.Page), ExternalVersion: hashBytes([]byte(content)), ParentExternalID: fmt.Sprintf("page:%d", finding.Page), RecordType: "pdf_page_visual", Content: content, Metadata: metadata, OccurredAt: doc.CreatedAt, EvidenceType: "agent_summary", CaptureMethod: "document_vision", CaptureConversationID: doc.ConversationID, CaptureSessionID: doc.SessionID,
+			ExternalID: fmt.Sprintf("page:%d:visual", finding.Page), ExternalVersion: hashBytes([]byte(content)), ParentExternalID: fmt.Sprintf("page:%d", finding.Page), RecordType: "pdf_page_visual", Content: content, Metadata: metadata, OccurredAt: doc.CreatedAt, EvidenceType: "agent_summary", CaptureMethod: "document_vision", CaptureRunID: doc.RunID, CaptureSessionID: doc.SessionID,
 		}, false)
 		if err != nil {
 			return err

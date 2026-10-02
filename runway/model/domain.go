@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	ConversationKindChat     = "chat"
-	ConversationKindInternal = "internal"
+	RunKindChat              = "chat"
+	RunKindInternal          = "internal"
 	EntityTypeUser           = "USER"
 	EntityTypeServiceAccount = "SERVICE_ACCOUNT"
 	StatusQueued             = "queued"
@@ -27,10 +27,10 @@ type CallerContext struct {
 	ServiceAccountID string `json:"service_account_id,omitempty"`
 }
 
-type Conversation struct {
-	Kind           string                            `json:"kind" gorm:"not null;default:chat;index;check:chk_conversation_kind,kind IN ('chat','internal')"`
+type Run struct {
+	Kind           string                            `json:"kind" gorm:"not null;default:chat;index;check:chk_run_kind,kind IN ('chat','internal')"`
 	DocumentIDs    datatypes.JSONSlice[string]       `json:"document_ids" gorm:"type:jsonb;not null;default:'[]'"`
-	ID             string                            `json:"conversation_id" gorm:"primaryKey"`
+	ID             string                            `json:"run_id" gorm:"primaryKey"`
 	Name           string                            `json:"name" gorm:"not null"`
 	CallerEntityID string                            `json:"caller_entity_id" gorm:"index;not null"`
 	CallerContext  datatypes.JSONType[CallerContext] `json:"caller_context" gorm:"type:jsonb;not null"`
@@ -40,11 +40,11 @@ type Conversation struct {
 	UpdatedAt      time.Time                         `json:"updated_at"`
 }
 
-func (Conversation) TableName() string { return "runway_conversation" }
+func (Run) TableName() string { return "runway_run" }
 
 type AgentSession struct {
 	ID              string         `json:"session_id" gorm:"primaryKey"`
-	ConversationID  string         `json:"conversation_id" gorm:"index;not null"`
+	RunID           string         `json:"run_id" gorm:"index;not null"`
 	ParentSessionID *string        `json:"parent_session_id,omitempty" gorm:"index"`
 	ProfileID       string         `json:"profile_id" gorm:"not null"`
 	ProfileVersion  uint64         `json:"profile_version" gorm:"not null"`
@@ -67,7 +67,7 @@ type ExecutionPolicy struct {
 
 type Turn struct {
 	ID             string                              `json:"turn_id" gorm:"primaryKey"`
-	ConversationID string                              `json:"conversation_id" gorm:"index;not null"`
+	RunID          string                              `json:"run_id" gorm:"index;not null"`
 	SessionID      string                              `json:"session_id" gorm:"index;not null"`
 	InputMessageID *string                             `json:"input_message_id,omitempty"`
 	InputPosition  uint64                              `json:"input_position"`
@@ -86,7 +86,7 @@ func (Turn) TableName() string { return "runway_turn" }
 
 type Task struct {
 	ID              string                              `json:"task_id" gorm:"primaryKey"`
-	ConversationID  string                              `json:"conversation_id" gorm:"index;not null"`
+	RunID           string                              `json:"run_id" gorm:"index;not null"`
 	OriginTurnID    *string                             `json:"origin_turn_id,omitempty" gorm:"index"`
 	ParentTaskID    *string                             `json:"parent_task_id,omitempty" gorm:"index"`
 	ParentSessionID string                              `json:"parent_session_id" gorm:"index;not null"`
@@ -113,7 +113,7 @@ func (Task) TableName() string { return "runway_task" }
 
 type ExecutionAttempt struct {
 	ID             string         `json:"attempt_id" gorm:"primaryKey"`
-	ConversationID string         `json:"conversation_id" gorm:"index;not null"`
+	RunID          string         `json:"run_id" gorm:"index;not null"`
 	SessionID      string         `json:"session_id" gorm:"index;not null"`
 	TargetID       string         `json:"target_id" gorm:"index;not null"`
 	TurnID         *string        `json:"turn_id,omitempty"`
@@ -149,7 +149,7 @@ func (RuntimeCheckpoint) TableName() string { return "runway_runtime_checkpoint"
 
 type Message struct {
 	ID             string    `json:"message_id" gorm:"primaryKey"`
-	ConversationID string    `json:"conversation_id" gorm:"index;not null"`
+	RunID          string    `json:"run_id" gorm:"index;not null"`
 	TurnID         string    `json:"turn_id" gorm:"index;not null"`
 	SessionID      string    `json:"session_id" gorm:"not null"`
 	EventPosition  uint64    `json:"event_position" gorm:"uniqueIndex;not null"`
@@ -162,17 +162,17 @@ type Message struct {
 func (Message) TableName() string { return "runway_message" }
 
 type Event struct {
-	Position       uint64         `json:"position" gorm:"primaryKey;autoIncrement"`
-	ID             string         `json:"event_id" gorm:"uniqueIndex;not null"`
-	ConversationID string         `json:"conversation_id" gorm:"index;not null"`
-	SessionID      string         `json:"session_id" gorm:"index;not null"`
-	TurnID         *string        `json:"turn_id,omitempty" gorm:"index"`
-	TaskID         *string        `json:"task_id,omitempty" gorm:"index"`
-	AttemptID      *string        `json:"attempt_id,omitempty"`
-	Type           string         `json:"type" gorm:"index;not null"`
-	EntityID       string         `json:"entity_id" gorm:"not null"`
-	Payload        datatypes.JSON `json:"payload" gorm:"type:jsonb;not null"`
-	CreatedAt      time.Time      `json:"created_at"`
+	Position  uint64         `json:"position" gorm:"primaryKey;autoIncrement"`
+	ID        string         `json:"event_id" gorm:"uniqueIndex;not null"`
+	RunID     string         `json:"run_id" gorm:"index;not null"`
+	SessionID string         `json:"session_id" gorm:"index;not null"`
+	TurnID    *string        `json:"turn_id,omitempty" gorm:"index"`
+	TaskID    *string        `json:"task_id,omitempty" gorm:"index"`
+	AttemptID *string        `json:"attempt_id,omitempty"`
+	Type      string         `json:"type" gorm:"index;not null"`
+	EntityID  string         `json:"entity_id" gorm:"not null"`
+	Payload   datatypes.JSON `json:"payload" gorm:"type:jsonb;not null"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 func (Event) TableName() string { return "runway_event" }

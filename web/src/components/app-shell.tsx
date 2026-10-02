@@ -59,7 +59,7 @@ export function AppShell() {
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/runs">
                 <Workflow size={17} />
-                Conversations
+                Runs
                 {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/workers">

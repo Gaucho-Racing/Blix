@@ -40,7 +40,7 @@ func (h *Handler) ValidateDocumentAccess(c *gin.Context) {
 }
 
 func (h *Handler) GetAgentDocument(c *gin.Context) {
-	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("run_id"), c.Query("session_id")); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -48,7 +48,7 @@ func (h *Handler) GetAgentDocument(c *gin.Context) {
 }
 
 func (h *Handler) ReadAgentDocumentChunk(c *gin.Context) {
-	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+	if err := h.documents.AuthorizeAgentDocument(c.Request.Context(), c.Param("documentID"), c.Query("run_id"), c.Query("session_id")); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -56,7 +56,7 @@ func (h *Handler) ReadAgentDocumentChunk(c *gin.Context) {
 }
 
 func (h *Handler) RetrieveDocumentEvidence(c *gin.Context) {
-	scope, err := h.documents.ConversationRetrievalScope(c.Request.Context(), c.Query("conversation_id"), c.Query("session_id"), c.Query("scope"))
+	scope, err := h.documents.RunRetrievalScope(c.Request.Context(), c.Query("run_id"), c.Query("session_id"), c.Query("scope"))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -104,7 +104,7 @@ func (h *Handler) RetrieveDocumentEvidence(c *gin.Context) {
 }
 
 func (h *Handler) GetAgentPageImage(c *gin.Context) {
-	scope, err := h.documents.AgentImageScope(c.Request.Context(), c.Query("conversation_id"), c.Query("session_id"))
+	scope, err := h.documents.AgentImageScope(c.Request.Context(), c.Query("run_id"), c.Query("session_id"))
 	if err == nil {
 		err = h.documents.AuthorizeImage(c.Request.Context(), c.Param("documentID"), scope)
 	}

@@ -1,5 +1,5 @@
 import { api } from "@/lib/api"
-import type { Conversation, RuntimeEvent, RuntimeTurn } from "@/lib/runtime"
+import type { Run, RuntimeEvent, RuntimeTurn } from "@/lib/runtime"
 
 export function documentQuestionFailure(turn: RuntimeTurn | undefined, events: RuntimeEvent[]) {
   if (!turn) return null
@@ -24,6 +24,6 @@ export function documentQuestionFailure(turn: RuntimeTurn | undefined, events: R
 
 export async function createDocumentChat(documentID: string) {
   return (
-    await api.post<{ conversation: Conversation }>(`/v1/document-chats/${documentID}`)
-  ).data.conversation
+    await api.post<{ run: Run }>(`/v1/document-chats/${documentID}`)
+  ).data.run
 }

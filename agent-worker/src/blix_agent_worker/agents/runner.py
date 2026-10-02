@@ -79,7 +79,7 @@ class AgentRunner:
             )
 
         task = AgentTask(
-            conversation_id=parent_task.conversation_id,
+            run_id=parent_task.run_id,
             session_id=session_id,
             parent_session_id=parent_task.session_id,
             agent_id=agent.definition.id,
@@ -98,14 +98,14 @@ class AgentRunner:
 
     def validate_result(self, task: AgentTask, result: AgentResult) -> AgentResult:
         if (
-            result.conversation_id != task.conversation_id
+            result.run_id != task.run_id
             or result.session_id != task.session_id
             or result.parent_session_id != task.parent_session_id
             or result.agent_id != task.agent_id
         ):
             return self._emit(
                 AgentResult(
-                    conversation_id=task.conversation_id,
+                    run_id=task.run_id,
                     session_id=task.session_id,
                     parent_session_id=task.parent_session_id,
                     agent_id=task.agent_id,
@@ -134,7 +134,7 @@ class AgentRunner:
         details: JsonObject | None = None,
     ) -> AgentResult:
         return AgentResult(
-            conversation_id=parent_task.conversation_id,
+            run_id=parent_task.run_id,
             session_id=session_id,
             parent_session_id=parent_task.session_id,
             agent_id=agent_id,

@@ -37,7 +37,7 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 	}
 	setDocumentStage(&doc, "indexing", "running")
 	taskID, sessionID := identifier.New(identifier.Prefix("task")), identifier.New(identifier.Session)
-	conversationID := identifier.New(identifier.Conversation)
+	runID := identifier.New(identifier.Run)
 	if err := saveDocumentProgress(db, &doc, map[string]any{"status": "indexing", "review_status": model.DocumentReviewPending, "generation": doc.Generation, "task_id": taskID}); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 	runtimeStatus.Store("running")
 	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/internal/v1/document-attempts/validate" {
-			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": sessionID, "conversation_id": conversationID, "attempt_number": 1, "input": map[string]any{"document_id": doc.ID, "generation": generation.Load()}})
+			json.NewEncoder(w).Encode(map[string]any{"task_id": taskID, "session_id": sessionID, "run_id": runID, "attempt_number": 1, "input": map[string]any{"document_id": doc.ID, "generation": generation.Load()}})
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/internal/v1/tasks/") {

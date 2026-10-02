@@ -55,7 +55,7 @@ type turnView struct {
 type tuiModel struct {
 	ctx                  context.Context
 	api                  *client
-	current              *createdConversation
+	current              *createdRun
 	caller               *callerContext
 	user                 *currentUser
 	startupError         error
@@ -81,7 +81,7 @@ type tuiModel struct {
 
 type sessionLoadedMsg struct {
 	api          *client
-	current      *createdConversation
+	current      *createdRun
 	caller       *callerContext
 	user         *currentUser
 	startupError error
@@ -89,14 +89,14 @@ type sessionLoadedMsg struct {
 	clearBlocks  bool
 }
 
-type conversationCreatedMsg struct {
-	current createdConversation
+type runCreatedMsg struct {
+	current createdRun
 	err     error
 }
 
 type messageAppendedMsg struct {
 	turnID  uint64
-	current createdConversation
+	current createdRun
 	result  appendedMessage
 	err     error
 }
@@ -119,10 +119,10 @@ type executionEventsMsg struct {
 }
 
 type backgroundEventsMsg struct {
-	conversationID string
-	after          uint64
-	events         []executionEvent
-	err            error
+	runID  string
+	after  uint64
+	events []executionEvent
+	err    error
 }
 
 func runTUI(ctx context.Context, api *client) error {
@@ -185,7 +185,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		if message.String() == "esc" && m.busy && m.current != nil {
-			return m, interruptConversationCmd(m.ctx, m.api, m.current.Conversation.ID)
+			return m, interruptRunCmd(m.ctx, m.api, m.current.Run.ID)
 		}
 		return m, m.handleKey(message)
 	case taskCommandMsg:
@@ -195,7 +195,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendBlock(transcriptNotice, message.content, nil)
 		}
 		return m, nil
-	case conversationResumedMsg:
+	case runResumedMsg:
 		if message.err != nil {
 			m.appendBlock(transcriptError, message.err.Error(), nil)
 			return m, nil
@@ -215,7 +215,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		for _, approval := range message.approvals {
 			m.appendBlock(transcriptNotice, fmt.Sprintf("Pending approval %s for action %s\n/approve %s or /reject %s", approval.ID, approval.ActionID, approval.ID, approval.ID), nil)
 		}
-		return m, pollBackgroundEventsCmd(m.ctx, m.api, m.current.Conversation.ID, message.cursor)
+		return m, pollBackgroundEventsCmd(m.ctx, m.api, m.current.Run.ID, message.cursor)
 	case spinner.TickMsg:
 		if !m.busy {
 			return m, nil
@@ -226,7 +226,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, command
 	case sessionLoadedMsg:
 		return m, m.handleSessionLoaded(message)
-	case conversationCreatedMsg:
+	case runCreatedMsg:
 		return m, m.handleRunCreated(message)
 	case messageAppendedMsg:
 		return m, m.handleMessageAppended(message)
@@ -242,7 +242,7 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			m.appendBlock(transcriptError, message.err.Error(), nil)
 		} else {
-			m.appendBlock(transcriptNotice, "Stopping conversation turns; background tasks will continue.", nil)
+			m.appendBlock(transcriptNotice, "Stopping run turns; background tasks will continue.", nil)
 		}
 		return m, nil
 	case executionEventsMsg:
@@ -328,7 +328,7 @@ func (m *tuiModel) submitInput() tea.Cmd {
 		})
 		m.syncTranscript(true)
 		m.input.Reset()
-		return queueMessageCmd(m.ctx, m.api, m.current.Conversation.ID, m.nextQueueID, value)
+		return queueMessageCmd(m.ctx, m.api, m.current.Run.ID, m.nextQueueID, value)
 	}
 	if m.current == nil {
 		m.appendBlock(transcriptError, accessMessage(m.caller, m.user), nil)
@@ -380,7 +380,7 @@ func (m *tuiModel) handleCommand(command string) tea.Cmd {
 			return nil
 		}
 		m.setBusy("Starting a new run")
-		return tea.Batch(createConversationCmd(m.ctx, m.api), m.spinner.Tick)
+		return tea.Batch(createRunCmd(m.ctx, m.api), m.spinner.Tick)
 	}
 
 	if strings.HasPrefix(command, "/endpoint ") {
@@ -433,12 +433,12 @@ func (m *tuiModel) handleSessionLoaded(message sessionLoadedMsg) tea.Cmd {
 	m.resizeInput()
 	m.syncTranscript(true)
 	if m.current != nil {
-		return pollBackgroundEventsCmd(m.ctx, m.api, m.current.Conversation.ID, 0)
+		return pollBackgroundEventsCmd(m.ctx, m.api, m.current.Run.ID, 0)
 	}
 	return nil
 }
 
-func (m *tuiModel) handleRunCreated(message conversationCreatedMsg) tea.Cmd {
+func (m *tuiModel) handleRunCreated(message runCreatedMsg) tea.Cmd {
 	m.busy = false
 	m.operation = ""
 	if message.err != nil {
@@ -452,7 +452,7 @@ func (m *tuiModel) handleRunCreated(message conversationCreatedMsg) tea.Cmd {
 	m.backgroundExecutions = make(map[string]bool)
 	m.input.Focus()
 	m.syncTranscript(true)
-	return pollBackgroundEventsCmd(m.ctx, m.api, message.current.Conversation.ID, 0)
+	return pollBackgroundEventsCmd(m.ctx, m.api, message.current.Run.ID, 0)
 }
 
 func (m *tuiModel) handleMessageAppended(message messageAppendedMsg) tea.Cmd {
@@ -464,7 +464,7 @@ func (m *tuiModel) handleMessageAppended(message messageAppendedMsg) tea.Cmd {
 	}
 	m.current = &message.current
 	m.activeTurn.backendTurnID = message.result.Turn.ID
-	return pollEventsCmd(m.ctx, m.api, message.turnID, message.current.Conversation.ID, m.backgroundCursor)
+	return pollEventsCmd(m.ctx, m.api, message.turnID, message.current.Run.ID, m.backgroundCursor)
 }
 
 func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
@@ -523,7 +523,7 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 		}
 	}
 	m.syncTranscript(true)
-	return pollEventsCmd(m.ctx, m.api, message.turnID, m.current.Conversation.ID, position)
+	return pollEventsCmd(m.ctx, m.api, message.turnID, m.current.Run.ID, position)
 }
 
 func (m *tuiModel) finishTurn(content string, err error, after uint64) tea.Cmd {
@@ -542,14 +542,14 @@ func (m *tuiModel) finishTurn(content string, err error, after uint64) tea.Cmd {
 }
 
 func (m *tuiModel) handleBackgroundEvents(message backgroundEventsMsg) tea.Cmd {
-	if m.current == nil || m.current.Conversation.ID != message.conversationID {
+	if m.current == nil || m.current.Run.ID != message.runID {
 		return nil
 	}
 	if m.activeTurn != nil {
-		return pollBackgroundEventsCmd(m.ctx, m.api, message.conversationID, max(message.after, m.backgroundCursor))
+		return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, max(message.after, m.backgroundCursor))
 	}
 	if message.err != nil {
-		return pollBackgroundEventsCmd(m.ctx, m.api, message.conversationID, message.after)
+		return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, message.after)
 	}
 	position := max(message.after, m.backgroundCursor)
 	for _, event := range message.events {
@@ -589,7 +589,7 @@ func (m *tuiModel) handleBackgroundEvents(message backgroundEventsMsg) tea.Cmd {
 			}
 		}
 	}
-	return pollBackgroundEventsCmd(m.ctx, m.api, message.conversationID, position)
+	return pollBackgroundEventsCmd(m.ctx, m.api, message.runID, position)
 }
 
 func (m *tuiModel) setBusy(operation string) {
@@ -939,7 +939,7 @@ func loadSession(ctx context.Context, api *client, clearBlocks bool) sessionLoad
 		return result
 	}
 
-	created, err := createConversationWithRetry(ctx, api)
+	created, err := createRunWithRetry(ctx, api)
 	if err != nil {
 		result.err = err
 		return result
@@ -964,36 +964,36 @@ func logoutCmd(ctx context.Context, api *client) tea.Cmd {
 	}
 }
 
-func createConversationCmd(ctx context.Context, api *client) tea.Cmd {
+func createRunCmd(ctx context.Context, api *client) tea.Cmd {
 	return func() tea.Msg {
-		created, err := api.createConversation(ctx)
-		return conversationCreatedMsg{current: created, err: err}
+		created, err := api.createRun(ctx)
+		return runCreatedMsg{current: created, err: err}
 	}
 }
 
-func appendMessageCmd(ctx context.Context, api *client, turnID uint64, current createdConversation, content string) tea.Cmd {
+func appendMessageCmd(ctx context.Context, api *client, turnID uint64, current createdRun, content string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := api.appendMessage(ctx, current.Conversation.ID, content)
+		result, err := api.appendMessage(ctx, current.Run.ID, content)
 		return messageAppendedMsg{turnID: turnID, current: current, result: result, err: err}
 	}
 }
 
-func queueMessageCmd(ctx context.Context, api *client, conversationID string, queueID uint64, content string) tea.Cmd {
+func queueMessageCmd(ctx context.Context, api *client, runID string, queueID uint64, content string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := api.appendMessage(ctx, conversationID, content)
+		result, err := api.appendMessage(ctx, runID, content)
 		return queuedMessageMsg{queueID: queueID, result: result, err: err}
 	}
 }
 
-func interruptConversationCmd(ctx context.Context, api *client, conversationID string) tea.Cmd {
+func interruptRunCmd(ctx context.Context, api *client, runID string) tea.Cmd {
 	return func() tea.Msg {
-		return interruptedMsg{err: api.interruptConversation(ctx, conversationID)}
+		return interruptedMsg{err: api.interruptRun(ctx, runID)}
 	}
 }
 
-func pollEventsCmd(ctx context.Context, api *client, turnID uint64, conversationID string, after uint64) tea.Cmd {
+func pollEventsCmd(ctx context.Context, api *client, turnID uint64, runID string, after uint64) tea.Cmd {
 	return func() tea.Msg {
-		events, err := api.listEvents(ctx, conversationID, after)
+		events, err := api.listEvents(ctx, runID, after)
 		if err != nil {
 			return executionEventsMsg{turnID: turnID, after: after, err: err}
 		}
@@ -1010,17 +1010,17 @@ func pollEventsCmd(ctx context.Context, api *client, turnID uint64, conversation
 	}
 }
 
-func pollBackgroundEventsCmd(ctx context.Context, api *client, conversationID string, after uint64) tea.Cmd {
+func pollBackgroundEventsCmd(ctx context.Context, api *client, runID string, after uint64) tea.Cmd {
 	return func() tea.Msg {
 		timer := time.NewTimer(500 * time.Millisecond)
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			return backgroundEventsMsg{conversationID: conversationID, after: after, err: ctx.Err()}
+			return backgroundEventsMsg{runID: runID, after: after, err: ctx.Err()}
 		case <-timer.C:
 		}
-		events, err := api.listEvents(ctx, conversationID, after)
-		return backgroundEventsMsg{conversationID: conversationID, after: after, events: events, err: err}
+		events, err := api.listEvents(ctx, runID, after)
+		return backgroundEventsMsg{runID: runID, after: after, events: events, err: err}
 	}
 }
 

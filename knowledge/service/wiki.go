@@ -53,7 +53,7 @@ type Citation struct {
 }
 
 type CreateChangesetInput struct {
-	ConversationID  string            `json:"conversation_id"`
+	RunID           string            `json:"run_id"`
 	SessionID       string            `json:"session_id"`
 	SeasonSlug      string            `json:"season_slug"`
 	Type            string            `json:"type"`
@@ -154,8 +154,8 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 }
 
 func (s *WikiService) CreateChangeset(ctx context.Context, input CreateChangesetInput) (ChangesetDetails, error) {
-	if !identifier.IsValid(input.ConversationID, identifier.Conversation) || !identifier.IsValid(input.SessionID, identifier.Session) {
-		return ChangesetDetails{}, fmt.Errorf("%w: prefixed conversation_id and session_id are required", ErrInvalid)
+	if !identifier.IsValid(input.RunID, identifier.Run) || !identifier.IsValid(input.SessionID, identifier.Session) {
+		return ChangesetDetails{}, fmt.Errorf("%w: prefixed run_id and session_id are required", ErrInvalid)
 	}
 	return s.create(ctx, input, "agent")
 }
@@ -205,7 +205,7 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 			return ChangesetDetails{}, fmt.Errorf("%w: every upserted page must cite a supplied source record", ErrInvalid)
 		}
 	}
-	changeset := model.Changeset{ID: identifier.New(identifier.Changeset), Origin: origin, ConversationID: input.ConversationID, SessionID: input.SessionID,
+	changeset := model.Changeset{ID: identifier.New(identifier.Changeset), Origin: origin, RunID: input.RunID, SessionID: input.SessionID,
 		SeasonSlug: input.SeasonSlug, Type: input.Type, Status: model.ChangesetStatusProposed, Summary: input.Summary, BaseCommitSHA: *input.BaseCommitSHA}
 	files := make([]model.ChangesetFile, 0, len(input.Files))
 	for _, edit := range input.Files {
@@ -232,7 +232,7 @@ func (s *WikiService) create(ctx context.Context, input CreateChangesetInput, or
 		var docs []model.Document
 		query := tx.Where("id IN (SELECT document_id FROM knowledge_document_page WHERE source_record_id IN ? OR visual_source_record_id IN ?)", referencedSources, referencedSources)
 		if input.SessionID != "" {
-			query = query.Or("session_id = ? AND conversation_id = ?", input.SessionID, input.ConversationID)
+			query = query.Or("session_id = ? AND run_id = ?", input.SessionID, input.RunID)
 		}
 		if err := query.Order("id").Clauses(clause.Locking{Strength: "UPDATE"}).Find(&docs).Error; err != nil {
 			return err

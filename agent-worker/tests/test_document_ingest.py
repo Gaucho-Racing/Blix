@@ -25,7 +25,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         sources = [new_ulid("sourcerecord"), new_ulid("sourcerecord")]
         changeset_id = new_ulid("changeset")
         task = AgentTask(
-            conversation_id=new_ulid("conversation"), session_id=new_ulid("session"),
+            run_id=new_ulid("run"), session_id=new_ulid("session"),
             agent_id="knowledge_curator_v1", objective="Curate the relevant requirement.",
             input={"document_id": document_id, "source_record_ids": sources},
         )
@@ -40,7 +40,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
             messages.append(ModelMessage(
                 role=ModelMessageRole.CALL_OUTPUT, call_request_ref=reference,
                 content=ToolResult(
-                    conversation_id=task.conversation_id, parent_session_id=task.session_id,
+                    run_id=task.run_id, parent_session_id=task.session_id,
                     call_id=new_ulid("call"), status=ToolResultStatus.SUCCEEDED, output=output,
                 ).model_dump_json(),
             ))
@@ -50,7 +50,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
                     "chunks": [{"completed_at": "saved"}]}
         receipt("knowledge_document_read_v1", {"document_id": document_id}, manifest)
         receipt("knowledge_propose_v1", {}, {
-            "changeset": {"changeset_id": changeset_id, "conversation_id": task.conversation_id,
+            "changeset": {"changeset_id": changeset_id, "run_id": task.run_id,
                           "session_id": task.session_id, "status": "proposed"},
             "files": [{"path": "reference.md"}], "source_record_ids": [sources[0]],
         })
@@ -80,7 +80,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         document_id = new_ulid("document")
         sources = [new_ulid("sourcerecord"), new_ulid("sourcerecord")]
         task = AgentTask(
-            conversation_id=new_ulid("conversation"), session_id=new_ulid("session"),
+            run_id=new_ulid("run"), session_id=new_ulid("session"),
             parent_session_id=new_ulid("session"), agent_id="document_ingest_v1",
             objective="Preserve rule exceptions and distinguish roadmap guidance.",
             input={"document_id": document_id, "generation": 1},
@@ -151,7 +151,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
             async def run(self, curator_task, **kwargs):
                 curator_tasks.append(curator_task)
                 return AgentResult(
-                    conversation_id=task.conversation_id, session_id=task.session_id,
+                    run_id=task.run_id, session_id=task.session_id,
                     parent_session_id=task.parent_session_id, agent_id="knowledge_curator_v1",
                     status=AgentResultStatus.SUCCEEDED,
                     output={"outcome": "no_changes", "summary": "Existing wiki already covers these rules.",

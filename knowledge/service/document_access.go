@@ -25,7 +25,7 @@ func (s *DocumentService) ValidateQuestionDocument(ctx context.Context, id strin
 	return nil
 }
 
-func (s *DocumentService) AuthorizeAgentDocument(ctx context.Context, id, conversationID, sessionID string) error {
+func (s *DocumentService) AuthorizeAgentDocument(ctx context.Context, id, runID, sessionID string) error {
 	if !identifier.IsValid(id, identifier.Document) {
 		return ErrInvalid
 	}
@@ -39,7 +39,7 @@ func (s *DocumentService) AuthorizeAgentDocument(ctx context.Context, id, conver
 	if doc.ReviewStatus == model.DocumentReviewIngested {
 		return nil
 	}
-	access, err := s.agentDocumentContext(ctx, conversationID, sessionID)
+	access, err := s.agentDocumentContext(ctx, runID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (s *DocumentService) AuthorizeAgentDocument(ctx context.Context, id, conver
 	return nil
 }
 
-func (s *DocumentService) AuthorizeAgentSource(ctx context.Context, sourceID, conversationID, sessionID string) error {
+func (s *DocumentService) AuthorizeAgentSource(ctx context.Context, sourceID, runID, sessionID string) error {
 	if !identifier.IsValid(sourceID, identifier.Source) {
 		return ErrInvalid
 	}
@@ -58,14 +58,14 @@ func (s *DocumentService) AuthorizeAgentSource(ctx context.Context, sourceID, co
 		return err
 	}
 	for _, doc := range documents {
-		if err := s.AuthorizeAgentDocument(ctx, doc.ID, conversationID, sessionID); err != nil {
+		if err := s.AuthorizeAgentDocument(ctx, doc.ID, runID, sessionID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *DocumentService) AuthorizeAgentRecord(ctx context.Context, recordID, conversationID, sessionID string) error {
+func (s *DocumentService) AuthorizeAgentRecord(ctx context.Context, recordID, runID, sessionID string) error {
 	if !identifier.IsValid(recordID, identifier.SourceRecord) {
 		return ErrInvalid
 	}
@@ -73,5 +73,5 @@ func (s *DocumentService) AuthorizeAgentRecord(ctx context.Context, recordID, co
 	if err := s.db.WithContext(ctx).First(&record, "id = ?", recordID).Error; err != nil {
 		return mapDatabaseError(err)
 	}
-	return s.AuthorizeAgentSource(ctx, record.SourceID, conversationID, sessionID)
+	return s.AuthorizeAgentSource(ctx, record.SourceID, runID, sessionID)
 }

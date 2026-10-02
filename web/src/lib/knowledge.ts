@@ -7,7 +7,7 @@ export type ChangesetStatus =
 export interface WikiChangeset {
   changeset_id: string
   origin: string
-  conversation_id: string
+  run_id: string
   session_id: string
   season_slug: string
   type: string

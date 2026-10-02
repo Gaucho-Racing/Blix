@@ -97,23 +97,23 @@ type RetrievalContext struct {
 	ProfileID   string   `json:"profile_id"`
 }
 
-func (s *ExecutionService) RetrievalContext(ctx context.Context, conversationID, sessionID string) (RetrievalContext, error) {
-	if !identifier.IsValid(conversationID, identifier.Conversation) || !identifier.IsValid(sessionID, identifier.Session) {
+func (s *ExecutionService) RetrievalContext(ctx context.Context, runID, sessionID string) (RetrievalContext, error) {
+	if !identifier.IsValid(runID, identifier.Run) || !identifier.IsValid(sessionID, identifier.Session) {
 		return RetrievalContext{}, ErrInvalid
 	}
-	var conversation model.Conversation
-	if err := s.database.WithContext(ctx).First(&conversation, "id = ?", conversationID).Error; err != nil {
+	var run model.Run
+	if err := s.database.WithContext(ctx).First(&run, "id = ?", runID).Error; err != nil {
 		return RetrievalContext{}, mapDatabaseError(err)
 	}
 	var session model.AgentSession
-	if err := s.database.WithContext(ctx).First(&session, "id = ? AND conversation_id = ?", sessionID, conversationID).Error; err != nil {
+	if err := s.database.WithContext(ctx).First(&session, "id = ? AND run_id = ?", sessionID, runID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return RetrievalContext{}, ErrForbidden
 		}
 		return RetrievalContext{}, err
 	}
-	if conversation.CallerContext.Data().EntityType != model.EntityTypeUser {
+	if run.CallerContext.Data().EntityType != model.EntityTypeUser {
 		return RetrievalContext{}, ErrForbidden
 	}
-	return RetrievalContext{DocumentIDs: append([]string{}, conversation.DocumentIDs...), ProfileID: session.ProfileID}, nil
+	return RetrievalContext{DocumentIDs: append([]string{}, run.DocumentIDs...), ProfileID: session.ProfileID}, nil
 }

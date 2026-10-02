@@ -33,7 +33,7 @@ type CallerContext struct {
 	Groups           []string `json:"groups"`
 }
 
-func (c CallerContext) ConversationContext() model.CallerContext {
+func (c CallerContext) RunContext() model.CallerContext {
 	return model.CallerContext{
 		EntityID:         c.EntityID,
 		EntityType:       c.EntityType,

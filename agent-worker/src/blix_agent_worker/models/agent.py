@@ -6,7 +6,7 @@ from pydantic import Field, JsonValue, field_validator, model_validator
 from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
-    ConversationID,
+    RunID,
     Identifier,
     JsonObject,
     NonEmptyText,
@@ -55,7 +55,7 @@ class AgentDefinition(ContractModel):
 
 class AgentTask(ContractModel):
     schema_version: Literal[1] = 1
-    conversation_id: ConversationID
+    run_id: RunID
     session_id: SessionID
     parent_session_id: SessionID | None = None
     agent_id: VersionedIdentifier
@@ -144,7 +144,7 @@ class AgentSuspension(ContractModel):
 
 class AgentResult(ContractModel):
     schema_version: Literal[1] = 1
-    conversation_id: ConversationID
+    run_id: RunID
     session_id: SessionID
     parent_session_id: SessionID | None = None
     agent_id: VersionedIdentifier

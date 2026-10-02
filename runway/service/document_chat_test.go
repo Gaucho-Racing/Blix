@@ -29,18 +29,18 @@ func TestDocumentChatIsPrivateScopedAndUsesOnlyQuestionTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Conversation.Kind != model.ConversationKindInternal {
-		t.Fatalf("document question is not internal: %+v", created.Conversation)
+	if created.Run.Kind != model.RunKindInternal {
+		t.Fatalf("document question is not internal: %+v", created.Run)
 	}
 	again, err := f.s.CreateDocumentChat(f.ctx, documentID, f.owner)
-	if err != nil || again.Conversation.ID == created.Conversation.ID || again.Session.ID == created.Session.ID {
-		t.Fatalf("question reused a conversation or session: %+v %v", again, err)
+	if err != nil || again.Run.ID == created.Run.ID || again.Session.ID == created.Session.ID {
+		t.Fatalf("question reused a run or session: %+v %v", again, err)
 	}
 	latest, err := f.s.GetDocumentChat(f.ctx, documentID, f.owner.EntityID)
-	if err != nil || latest == nil || latest.ID != again.Conversation.ID {
+	if err != nil || latest == nil || latest.ID != again.Run.ID {
 		t.Fatalf("latest question was not selected: %+v %v", latest, err)
 	}
-	scope, err := f.s.RetrievalContext(f.ctx, created.Conversation.ID, created.Session.ID)
+	scope, err := f.s.RetrievalContext(f.ctx, created.Run.ID, created.Session.ID)
 	if err != nil || scope.ProfileID != "document_qa_v1" || !slices.Equal(scope.DocumentIDs, []string{documentID}) {
 		t.Fatalf("untrusted QA scope: %+v %v", scope, err)
 	}
@@ -56,33 +56,33 @@ func TestDocumentChatIsPrivateScopedAndUsesOnlyQuestionTools(t *testing.T) {
 		t.Fatalf("other user's chat leaked: %+v %v", chat, err)
 	}
 	separate, err := f.s.CreateDocumentChat(f.ctx, documentID, other)
-	if err != nil || separate.Conversation.ID == created.Conversation.ID {
+	if err != nil || separate.Run.ID == created.Run.ID {
 		t.Fatalf("histories were shared: %+v %v", separate, err)
 	}
 	for _, admin := range []bool{false, true} {
-		chats, err := f.s.ListConversations(f.ctx, f.owner.EntityID, admin)
-		if err != nil || slices.ContainsFunc(chats, func(c model.Conversation) bool { return c.ID == created.Conversation.ID }) {
+		chats, err := f.s.ListRuns(f.ctx, f.owner.EntityID, admin, model.RunKindChat)
+		if err != nil || slices.ContainsFunc(chats, func(c model.Run) bool { return c.ID == created.Run.ID }) {
 			t.Fatalf("document chat appeared in general history: %+v %v", chats, err)
 		}
 	}
-	appended, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "What does T.3.2 require?")
+	appended, err := f.s.AppendUserMessage(f.ctx, created.Run.ID, f.owner.EntityID, "What does T.3.2 require?")
 	if err != nil || appended.Turn.SessionID != created.Session.ID || appended.Turn.Policy.Data().DeadlineSeconds != 300 || appended.Turn.Policy.Data().ModelProfile != "document_qa" {
 		t.Fatalf("incorrect QA turn routing: %+v %v", appended, err)
 	}
-	if _, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "And what else?"); !errors.Is(err, ErrConflict) {
+	if _, err := f.s.AppendUserMessage(f.ctx, created.Run.ID, f.owner.EntityID, "And what else?"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("follow-up question accepted: %v", err)
 	}
 	if err := f.db.Model(&model.Turn{}).Where("id = ?", appended.Turn.ID).Update("status", model.StatusFailed).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "After failure"); !errors.Is(err, ErrConflict) {
+	if _, err := f.s.AppendUserMessage(f.ctx, created.Run.ID, f.owner.EntityID, "After failure"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("failed question allowed session reuse: %v", err)
 	}
-	if _, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, other.EntityID, "Foreign question"); !errors.Is(err, ErrForbidden) {
+	if _, err := f.s.AppendUserMessage(f.ctx, created.Run.ID, other.EntityID, "Foreign question"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign write accepted: %v", err)
 	}
 	validator.err = ErrNotFound
-	if _, err := f.s.AppendUserMessage(f.ctx, created.Conversation.ID, f.owner.EntityID, "After rejection"); !errors.Is(err, ErrNotFound) {
+	if _, err := f.s.AppendUserMessage(f.ctx, created.Run.ID, f.owner.EntityID, "After rejection"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rejected document accepted a question: %v", err)
 	}
 	if _, err := f.s.CreateDocumentChat(f.ctx, documentID, f.owner); !errors.Is(err, ErrNotFound) {
@@ -94,7 +94,7 @@ func TestDocumentChatIsPrivateScopedAndUsesOnlyQuestionTools(t *testing.T) {
 	}
 }
 
-func TestDocumentQuestionsCreateIndependentConversationsUnderConcurrentRequests(t *testing.T) {
+func TestDocumentQuestionsCreateIndependentRunsUnderConcurrentRequests(t *testing.T) {
 	f := setup(t)
 	f.s.SetDocumentScopeValidator(&questionValidator{})
 	id := identifier.New(identifier.Prefix("document"))
@@ -110,7 +110,7 @@ func TestDocumentQuestionsCreateIndependentConversationsUnderConcurrentRequests(
 				failures <- err
 				return
 			}
-			ids <- result.Conversation.ID
+			ids <- result.Run.ID
 		}()
 	}
 	group.Wait()
@@ -122,7 +122,7 @@ func TestDocumentQuestionsCreateIndependentConversationsUnderConcurrentRequests(
 	seen := map[string]bool{}
 	for id := range ids {
 		if seen[id] {
-			t.Fatal("concurrent questions shared a conversation")
+			t.Fatal("concurrent questions shared a run")
 		}
 		seen[id] = true
 	}
@@ -144,7 +144,7 @@ func TestDocumentQuestionAllowsOnlyOneConcurrentSubmission(t *testing.T) {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			_, err := f.s.AppendUserMessage(f.ctx, chat.Conversation.ID, f.owner.EntityID, "What are the requirements?")
+			_, err := f.s.AppendUserMessage(f.ctx, chat.Run.ID, f.owner.EntityID, "What are the requirements?")
 			results <- err
 		}()
 	}

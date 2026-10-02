@@ -6,15 +6,15 @@ import (
 )
 
 type Workspace struct {
-	ID             string     `json:"workspace_id" gorm:"primaryKey"`
-	ConversationID string     `json:"conversation_id" gorm:"index;not null"`
-	BackendKind    string     `json:"backend_kind" gorm:"not null"`
-	BackendRef     string     `json:"backend_ref"`
-	Status         string     `json:"status" gorm:"not null"`
-	SnapshotRef    string     `json:"snapshot_ref"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID          string     `json:"workspace_id" gorm:"primaryKey"`
+	RunID       string     `json:"run_id" gorm:"index;not null"`
+	BackendKind string     `json:"backend_kind" gorm:"not null"`
+	BackendRef  string     `json:"backend_ref"`
+	Status      string     `json:"status" gorm:"not null"`
+	SnapshotRef string     `json:"snapshot_ref"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 func (Workspace) TableName() string { return "runway_workspace" }
@@ -34,15 +34,15 @@ type WorkspaceRepository struct {
 func (WorkspaceRepository) TableName() string { return "runway_workspace_repository" }
 
 type Artifact struct {
-	ID             string         `json:"artifact_id" gorm:"primaryKey"`
-	ConversationID string         `json:"conversation_id" gorm:"index;not null"`
-	TaskID         *string        `json:"task_id,omitempty" gorm:"index"`
-	AttemptID      string         `json:"attempt_id" gorm:"index;not null"`
-	Kind           string         `json:"kind" gorm:"not null"`
-	Content        datatypes.JSON `json:"content" gorm:"type:jsonb;not null"`
-	StorageRef     string         `json:"storage_ref,omitempty"`
-	Metadata       datatypes.JSON `json:"metadata" gorm:"type:jsonb;not null;default:'{}'"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID         string         `json:"artifact_id" gorm:"primaryKey"`
+	RunID      string         `json:"run_id" gorm:"index;not null"`
+	TaskID     *string        `json:"task_id,omitempty" gorm:"index"`
+	AttemptID  string         `json:"attempt_id" gorm:"index;not null"`
+	Kind       string         `json:"kind" gorm:"not null"`
+	Content    datatypes.JSON `json:"content" gorm:"type:jsonb;not null"`
+	StorageRef string         `json:"storage_ref,omitempty"`
+	Metadata   datatypes.JSON `json:"metadata" gorm:"type:jsonb;not null;default:'{}'"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 func (Artifact) TableName() string { return "runway_artifact" }
@@ -50,7 +50,7 @@ func (Artifact) TableName() string { return "runway_artifact" }
 type Action struct {
 	ReplaySafe     bool           `json:"replay_safe" gorm:"not null"`
 	ID             string         `json:"action_id" gorm:"primaryKey"`
-	ConversationID string         `json:"conversation_id" gorm:"index;not null"`
+	RunID          string         `json:"run_id" gorm:"index;not null"`
 	TargetID       string         `json:"target_id" gorm:"uniqueIndex:idx_action_key,priority:1;not null"`
 	SessionID      string         `json:"session_id" gorm:"not null"`
 	AttemptID      string         `json:"attempt_id" gorm:"not null"`
@@ -67,21 +67,21 @@ type Action struct {
 func (Action) TableName() string { return "runway_action" }
 
 type CapabilityGrant struct {
-	ID             string         `json:"grant_id" gorm:"primaryKey"`
-	ConversationID string         `json:"conversation_id" gorm:"index;not null"`
-	SessionID      string         `json:"session_id" gorm:"index;not null;uniqueIndex:idx_session_tool,priority:1"`
-	ToolID         string         `json:"tool_id" gorm:"not null;uniqueIndex:idx_session_tool,priority:2"`
-	Scope          datatypes.JSON `json:"scope" gorm:"type:jsonb;not null;default:'{}'"`
-	ExpiresAt      *time.Time     `json:"expires_at,omitempty"`
-	RevokedAt      *time.Time     `json:"revoked_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID        string         `json:"grant_id" gorm:"primaryKey"`
+	RunID     string         `json:"run_id" gorm:"index;not null"`
+	SessionID string         `json:"session_id" gorm:"index;not null;uniqueIndex:idx_session_tool,priority:1"`
+	ToolID    string         `json:"tool_id" gorm:"not null;uniqueIndex:idx_session_tool,priority:2"`
+	Scope     datatypes.JSON `json:"scope" gorm:"type:jsonb;not null;default:'{}'"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 func (CapabilityGrant) TableName() string { return "runway_capability_grant" }
 
 type Approval struct {
 	ID                   string     `json:"approval_id" gorm:"primaryKey"`
-	ConversationID       string     `json:"conversation_id" gorm:"index;not null"`
+	RunID                string     `json:"run_id" gorm:"index;not null"`
 	ActionID             string     `json:"action_id" gorm:"uniqueIndex;not null"`
 	Status               string     `json:"status" gorm:"not null"`
 	RequestedBySessionID string     `json:"requested_by_session_id" gorm:"not null"`

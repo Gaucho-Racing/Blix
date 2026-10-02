@@ -31,7 +31,7 @@ func documentReviewFixture(t *testing.T, db *gorm.DB) (*DocumentService, Documen
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "ready", "session_id": identifier.New(identifier.Session), "conversation_id": identifier.New(identifier.Conversation), "generation": 1}).Error; err != nil {
+	if err := db.Model(&doc.Document).Updates(map[string]any{"status": "ready", "session_id": identifier.New(identifier.Session), "run_id": identifier.New(identifier.Run), "generation": 1}).Error; err != nil {
 		t.Fatal(err)
 	}
 	doc, err = s.Get(context.Background(), doc.Document.ID)
@@ -45,7 +45,7 @@ func documentChangesetFixture(t *testing.T, s *WikiService, doc DocumentDetails)
 	t.Helper()
 	head := strings.Repeat("a", 40)
 	source := doc.Pages[0].SourceRecordID
-	result, err := s.CreateChangeset(context.Background(), CreateChangesetInput{ConversationID: doc.Document.ConversationID, SessionID: doc.Document.SessionID, Type: model.ChangesetTypeContent, Summary: "Update braking requirements", BaseCommitSHA: &head, SourceRecordIDs: []string{source}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: "# Brakes\n\nTwo hydraulic circuits are required. " + source}}})
+	result, err := s.CreateChangeset(context.Background(), CreateChangesetInput{RunID: doc.Document.RunID, SessionID: doc.Document.SessionID, Type: model.ChangesetTypeContent, Summary: "Update braking requirements", BaseCommitSHA: &head, SourceRecordIDs: []string{source}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: "# Brakes\n\nTwo hydraulic circuits are required. " + source}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDocumentEntersReviewOnlyAfterSuccessfulIngestion(t *testing.T) {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
-				json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.Document.SessionID, "conversation_id": doc.Document.ConversationID, "attempt_number": 1, "input": map[string]any{"document_id": doc.Document.ID, "generation": doc.Document.Generation}})
+				json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.Document.SessionID, "run_id": doc.Document.RunID, "attempt_number": 1, "input": map[string]any{"document_id": doc.Document.ID, "generation": doc.Document.Generation}})
 			}))
 			t.Cleanup(runtime.Close)
 			s.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "internal"))
@@ -236,7 +236,7 @@ func TestDocumentRejectionCascadesAndPreservesEvidence(t *testing.T) {
 		}
 	}
 	head := strings.Repeat("a", 40)
-	if _, err := wiki.CreateChangeset(ctx, CreateChangesetInput{ConversationID: identifier.New(identifier.Conversation), SessionID: identifier.New(identifier.Session), Type: model.ChangesetTypeContent, Summary: "Reuse rejected evidence", BaseCommitSHA: &head, SourceRecordIDs: []string{record.ID}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: record.ID}}}); !errors.Is(err, ErrConflict) {
+	if _, err := wiki.CreateChangeset(ctx, CreateChangesetInput{RunID: identifier.New(identifier.Run), SessionID: identifier.New(identifier.Session), Type: model.ChangesetTypeContent, Summary: "Reuse rejected evidence", BaseCommitSHA: &head, SourceRecordIDs: []string{record.ID}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: record.ID}}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rejected evidence reused: %v", err)
 	}
 	if _, err := s.Control(ctx, doc.Document.ID, doc.Document.UploadedBy, "retry"); !errors.Is(err, ErrConflict) {
@@ -259,7 +259,7 @@ func TestChangesetPublicationAcceptsLinkedDocumentsOnlyAfterSuccess(t *testing.T
 	wiki := NewWikiService(db, repo)
 	head := strings.Repeat("a", 40)
 	sources := []string{first.Pages[0].SourceRecordID, second.Pages[0].SourceRecordID}
-	changeset, err := wiki.CreateChangeset(context.Background(), CreateChangesetInput{ConversationID: first.Document.ConversationID, SessionID: first.Document.SessionID, Type: model.ChangesetTypeContent, Summary: "Cross-reference requirements", BaseCommitSHA: &head, SourceRecordIDs: sources, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: strings.Join(sources, " ")}}})
+	changeset, err := wiki.CreateChangeset(context.Background(), CreateChangesetInput{RunID: first.Document.RunID, SessionID: first.Document.SessionID, Type: model.ChangesetTypeContent, Summary: "Cross-reference requirements", BaseCommitSHA: &head, SourceRecordIDs: sources, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: strings.Join(sources, " ")}}})
 	if err != nil || len(changeset.Documents) != 2 {
 		t.Fatalf("multi-document provenance: %+v %v", changeset.Documents, err)
 	}
@@ -418,7 +418,7 @@ func TestDocumentRejectionDuringSchedulingRetainsCancellationForRetry(t *testing
 		case r.URL.Path == "/internal/v1/document-ingestions":
 			close(started)
 			<-resume
-			json.NewEncoder(w).Encode(map[string]string{"task_id": task, "conversation_id": doc.Document.ConversationID})
+			json.NewEncoder(w).Encode(map[string]string{"task_id": task, "run_id": doc.Document.RunID})
 		case r.URL.Path == "/internal/v1/tasks/"+task+"/cancel":
 			if !allowCancel.Load() {
 				w.WriteHeader(503)
@@ -472,7 +472,7 @@ func TestChangesetTracksDocumentCitationsBeyondSuppliedEvidence(t *testing.T) {
 	}
 	wiki := NewWikiService(db, &publishingRepository{})
 	head := strings.Repeat("a", 40)
-	input := CreateChangesetInput{ConversationID: identifier.New(identifier.Conversation), SessionID: identifier.New(identifier.Session), Type: model.ChangesetTypeContent, Summary: "Retain earlier citations", BaseCommitSHA: &head, SourceRecordIDs: []string{accepted.Pages[0].SourceRecordID}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: accepted.Pages[0].SourceRecordID + " " + pending.Pages[0].SourceRecordID}}}
+	input := CreateChangesetInput{RunID: identifier.New(identifier.Run), SessionID: identifier.New(identifier.Session), Type: model.ChangesetTypeContent, Summary: "Retain earlier citations", BaseCommitSHA: &head, SourceRecordIDs: []string{accepted.Pages[0].SourceRecordID}, Files: []repository.Edit{{Operation: "upsert", Path: "brakes.md", Content: accepted.Pages[0].SourceRecordID + " " + pending.Pages[0].SourceRecordID}}}
 	changeset, err := wiki.CreateChangeset(ctx, input)
 	if err != nil || len(changeset.Documents) != 2 || len(changeset.Citations) != 2 {
 		t.Fatalf("retained citation not linked to its document: %+v %v", changeset, err)

@@ -16,7 +16,7 @@ const (
 	Changeset          Prefix = "changeset"
 	ChangesetFile      Prefix = "changesetfile"
 	Entity             Prefix = "ent"
-	Conversation       Prefix = "conversation"
+	Run                Prefix = "run"
 	Session            Prefix = "session"
 	Message            Prefix = "message"
 	User               Prefix = "usr"

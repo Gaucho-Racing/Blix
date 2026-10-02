@@ -77,7 +77,7 @@ func (h *Handler) ListSources(c *gin.Context) {
 }
 
 func (h *Handler) GetSource(c *gin.Context) {
-	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("run_id"), c.Query("session_id")); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -90,7 +90,7 @@ func (h *Handler) GetSource(c *gin.Context) {
 }
 
 func (h *Handler) ListSourceRecords(c *gin.Context) {
-	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+	if err := h.documents.AuthorizeAgentSource(c.Request.Context(), c.Param("sourceID"), c.Query("run_id"), c.Query("session_id")); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -180,7 +180,7 @@ func (h *Handler) IngestSourceRecord(c *gin.Context) {
 }
 
 func (h *Handler) GetSourceRecord(c *gin.Context) {
-	if err := h.documents.AuthorizeAgentRecord(c.Request.Context(), c.Param("sourceRecordID"), c.Query("conversation_id"), c.Query("session_id")); err != nil {
+	if err := h.documents.AuthorizeAgentRecord(c.Request.Context(), c.Param("sourceRecordID"), c.Query("run_id"), c.Query("session_id")); err != nil {
 		respondError(c, err)
 		return
 	}

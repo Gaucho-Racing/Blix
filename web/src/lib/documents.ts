@@ -47,7 +47,7 @@ export interface TeamDocument {
     | "imported"
   objective: string
   generation: number
-  conversation_id: string
+  run_id: string
   task_id: string
   error: string
   title: string

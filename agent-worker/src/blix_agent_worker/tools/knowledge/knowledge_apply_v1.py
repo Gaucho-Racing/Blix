@@ -32,7 +32,7 @@ class KnowledgeApplyV1Tool(KnowledgeTool):
                 "invalid_knowledge_response", "The knowledge service returned an invalid changeset."
             )
         if (
-            changeset.get("conversation_id") != call.conversation_id
+            changeset.get("run_id") != call.run_id
             or changeset.get("session_id") != call.parent_session_id
         ):
             raise KnowledgeClientError(

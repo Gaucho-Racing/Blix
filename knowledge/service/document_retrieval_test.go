@@ -97,7 +97,7 @@ func TestDocumentScopedRetrievalBeforeIngestionAndAfterRejection(t *testing.T) {
 			t.Fatalf("unapproved library page leaked: %v", err)
 		}
 		if len(search(libraryTerm, DocumentRetrievalScope{DocumentIDs: []string{first.Document.ID}}, "").Results) != 0 {
-			t.Fatal("ordinary conversation scope leaked unapproved evidence")
+			t.Fatal("ordinary run scope leaked unapproved evidence")
 		}
 		if len(search(libraryTerm, DocumentRetrievalScope{Team: true, AllowUnapproved: true}, "").Results) != 1 {
 			t.Fatal("team scope accepted an unapproved-access override")

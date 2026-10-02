@@ -16,12 +16,12 @@ import {
   activeStatus,
   appendMessage,
   controlTask,
-  createConversation,
+  createRun,
   decideApproval,
   errorMessage,
-  getConversation,
-  interruptConversation,
-  listConversations,
+  getRun,
+  interruptRun,
+  listChatRuns,
   liveOutputs,
   loadEvents,
 } from "@/lib/runtime"
@@ -150,44 +150,44 @@ function TaskCard({
 
 export function ChatPage() {
   const { runID = "" } = useParams()
-  return <ConversationChat key={runID || "new"} conversationID={runID} />
+  return <RunChat key={runID || "new"} runID={runID} />
 }
 
-function ConversationChat({ conversationID }: { conversationID: string }) {
+function RunChat({ runID }: { runID: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
   const cache = useQueryClient()
   const [draft, setDraft] = useState("")
-  const pendingConversation = useRef("")
+  const pendingRun = useRef("")
   const end = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
   const [follow, setFollow] = useState(true)
   const permitted =
     auth.isAuthenticated && (auth.user?.groups.includes("BlixUsers") ?? false)
   const recent = useQuery({
-    queryKey: ["conversations"],
-    queryFn: listConversations,
+    queryKey: ["runs"],
+    queryFn: listChatRuns,
     enabled: permitted,
     refetchInterval: 10_000,
   })
   const detail = useQuery({
-    queryKey: ["conversation", conversationID],
-    queryFn: ({ signal }) => getConversation(conversationID, signal),
-    enabled: permitted && !!conversationID,
+    queryKey: ["run", runID],
+    queryFn: ({ signal }) => getRun(runID, signal),
+    enabled: permitted && !!runID,
     refetchInterval: 1500,
   })
   const eventQuery = useQuery({
-    queryKey: ["conversation-events", conversationID],
+    queryKey: ["run-events", runID],
     queryFn: ({ signal }) =>
       loadEvents(
-        conversationID,
+        runID,
         cache.getQueryData<RuntimeEvent[]>([
-          "conversation-events",
-          conversationID,
+          "run-events",
+          runID,
         ]) ?? [],
         signal,
       ),
-    enabled: permitted && !!conversationID,
+    enabled: permitted && !!runID,
     refetchInterval: 1000,
   })
   const data = detail.data
@@ -196,31 +196,31 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
   const working = data?.turns.some((turn) => activeStatus(turn.status)) ?? false
   const refresh = async () => {
     await Promise.all([
-      cache.invalidateQueries({ queryKey: ["conversation", conversationID] }),
+      cache.invalidateQueries({ queryKey: ["run", runID] }),
       cache.invalidateQueries({
-        queryKey: ["conversation-events", conversationID],
+        queryKey: ["run-events", runID],
       }),
-      cache.invalidateQueries({ queryKey: ["conversations"] }),
+      cache.invalidateQueries({ queryKey: ["runs"] }),
     ])
   }
   const send = useMutation({
     mutationFn: async (content: string) => {
-      if (!conversationID && !pendingConversation.current) {
-        pendingConversation.current = (await createConversation()).conversation_id
+      if (!runID && !pendingRun.current) {
+        pendingRun.current = (await createRun()).run_id
       }
-      const id = conversationID || pendingConversation.current
+      const id = runID || pendingRun.current
       await appendMessage(id, content)
       return id
     },
     onSuccess: async (id) => {
       setDraft("")
-      await cache.invalidateQueries({ queryKey: ["conversation", id] })
-      await cache.invalidateQueries({ queryKey: ["conversations"] })
-      if (id !== conversationID) navigate(`/chat/${id}`)
+      await cache.invalidateQueries({ queryKey: ["run", id] })
+      await cache.invalidateQueries({ queryKey: ["runs"] })
+      if (id !== runID) navigate(`/chat/${id}`)
     },
   })
   const stop = useMutation({
-    mutationFn: () => interruptConversation(conversationID),
+    mutationFn: () => interruptRun(runID),
     onSuccess: refresh,
   })
   const approval = useMutation({
@@ -252,11 +252,11 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
       <header className="workspace-toolbar chat-toolbar">
         <div>
           <span className="workspace-kicker">BLIX WORKSPACE</span>
-          <h1>{data?.conversation.name || "What should we work on?"}</h1>
+          <h1>{data?.run.name || "What should we work on?"}</h1>
           <p>Quick answers. Research. Team knowledge.</p>
         </div>
         <Link className="secondary-button" to="/chat">
-          <Plus size={16} /> New conversation
+          <Plus size={16} /> New run
         </Link>
       </header>
       <div className="chat-layout">
@@ -287,13 +287,13 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
               <p role="alert">You need membership in BlixUsers to chat.</p>
             )}
             {(auth.isLoading ||
-              (permitted && conversationID && detail.isPending)) && (
+              (permitted && runID && detail.isPending)) && (
               <p>
                 <LoaderCircle className="spin" size={18} /> Loading
-                conversation…
+                run…
               </p>
             )}
-            {permitted && !conversationID && (
+            {permitted && !runID && (
               <section className="chat-welcome">
                 <div className="blix-spark">B</div>
                 <h2>Your team's work, connected.</h2>
@@ -376,7 +376,7 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
             <textarea
               aria-label="Message Blix"
               disabled={
-                !permitted || send.isPending || (!!conversationID && !data)
+                !permitted || send.isPending || (!!runID && !data)
               }
               placeholder="Ask Blix anything…"
               rows={3}
@@ -412,7 +412,7 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
                   !permitted ||
                   !draft.trim() ||
                   send.isPending ||
-                  (!!conversationID && !data)
+                  (!!runID && !data)
                 }
                 type="submit"
               >
@@ -527,14 +527,14 @@ function ConversationChat({ conversationID }: { conversationID: string }) {
             </details>
           )}
           <section>
-            <h2>Recent conversations</h2>
-            {recent.data?.slice(0, 12).map((conversation) => (
+            <h2>Recent runs</h2>
+            {recent.data?.slice(0, 12).map((run) => (
               <Link
-                className={`runtime-conversation ${conversationID === conversation.conversation_id ? "selected" : ""}`}
-                key={conversation.conversation_id}
-                to={`/chat/${conversation.conversation_id}`}
+                className={`runtime-run ${runID === run.run_id ? "selected" : ""}`}
+                key={run.run_id}
+                to={`/chat/${run.run_id}`}
               >
-                {conversation.name || "New conversation"}
+                {run.name || "New run"}
               </Link>
             ))}
             {recent.error && (

@@ -277,7 +277,7 @@ func TestBatchesKeepOrderAndIsolateMissingPages(t *testing.T) {
 func TestSectionRetrievalRetainsPageProvenance(t *testing.T) {
 	db, index, service, source := indexFixture(t)
 	captured, err := NewSourceService(db).IngestChatRecord(context.Background(), IngestChatRecordInput{
-		ConversationID: identifier.New(identifier.Conversation), SessionID: identifier.New(identifier.Session),
+		RunID: identifier.New(identifier.Run), SessionID: identifier.New(identifier.Session),
 		MessageID: identifier.New(identifier.Message), EntityID: identifier.New(identifier.Entity), UserID: identifier.New(identifier.User),
 		Content: "Pedal pressure was validated.", OccurredAt: time.Now().UTC(),
 	})

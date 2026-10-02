@@ -18,7 +18,7 @@ type CaptureSourceRecordInput struct {
 
 func (s *SourceService) CaptureSourceRecord(ctx context.Context, input CaptureSourceRecordInput) (IngestedSourceRecord, error) {
 	if (input.SourceID == "") == (input.Source == nil) ||
-		!identifier.IsValid(input.CaptureConversationID, identifier.Conversation) ||
+		!identifier.IsValid(input.CaptureRunID, identifier.Run) ||
 		!identifier.IsValid(input.CaptureSessionID, identifier.Session) ||
 		input.CaptureMethod != "agent_relay" ||
 		(input.EvidenceType != "quoted_source" && input.EvidenceType != "agent_summary") ||

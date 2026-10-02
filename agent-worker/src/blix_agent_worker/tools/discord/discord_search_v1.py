@@ -110,7 +110,7 @@ class DiscordSearchV1Tool:
         except ValidationError:
             return self._failure(call, "invalid_discord_response", "Discord returned an invalid search response.")
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -144,7 +144,7 @@ class DiscordSearchV1Tool:
         retryable: bool = False,
     ) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

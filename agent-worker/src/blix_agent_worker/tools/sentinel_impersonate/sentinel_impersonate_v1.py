@@ -99,7 +99,7 @@ class SentinelImpersonateV1Tool:
                 service_account_token=service_account_token,
                 user_id=self._caller_user_id,
                 application_id=tool_input.application_id,
-                conversation_id=call.conversation_id,
+                run_id=call.run_id,
                 session_id=call.parent_session_id,
             )
         except SentinelClientError as error:
@@ -121,7 +121,7 @@ class SentinelImpersonateV1Tool:
             expires_at=credential.expires_at,
         )
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -138,7 +138,7 @@ class SentinelImpersonateV1Tool:
         details: JsonObject | None = None,
     ) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,

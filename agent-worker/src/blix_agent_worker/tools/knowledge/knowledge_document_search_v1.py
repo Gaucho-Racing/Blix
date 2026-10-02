@@ -9,7 +9,7 @@ from blix_agent_worker.tools.knowledge._shared import KnowledgeTool
 
 class KnowledgeDocumentSearchV1Input(ContractModel):
     operation: Literal["search", "read_page", "read_page_image", "list_documents"]
-    scope: Literal["conversation", "team"] = "team"
+    scope: Literal["run", "team"] = "team"
     document_id: DocumentID | None = None
     query: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     page: Annotated[int, Field(ge=1, le=500)] | None = None
@@ -40,7 +40,7 @@ class KnowledgeDocumentSearchV1Tool(KnowledgeTool):
         id="knowledge_document_search_v1",
         description=(
             "Search approved PDF evidence or read a cited page. Team scope searches only Ingested documents. "
-            "Conversation scope limits retrieval to trusted document IDs; pending evidence is available only "
+            "Run scope limits retrieval to trusted document IDs; pending evidence is available only "
             "to the dedicated document Q&A profile, which is always restricted to its single document. "
             "list_documents returns IDs and search readiness. Search uses keywords; try alternate terms and "
             "preserve exact rule identifiers. Hits include original source IDs, PDF pages, UTF-8 offsets and "
@@ -57,7 +57,7 @@ class KnowledgeDocumentSearchV1Tool(KnowledgeTool):
 
     async def _execute(self, call: ToolCall, arguments: KnowledgeDocumentSearchV1Input, url: str) -> JsonObject:
         params: dict[str, str | int] = {
-            "conversation_id": call.conversation_id,
+            "run_id": call.run_id,
             "session_id": call.parent_session_id,
             "operation": arguments.operation,
             "scope": arguments.scope,

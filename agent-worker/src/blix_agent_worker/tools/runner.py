@@ -20,7 +20,7 @@ class ToolRunner:
     @staticmethod
     def failure(call: ToolCall, code: str, message: str) -> ToolResult:
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.FAILED,
@@ -43,7 +43,7 @@ class ToolRunner:
         except Exception:
             result = self.failure(call, "tool_execution_failed", f"Tool {call.tool_id!r} failed unexpectedly.")
         if (
-            result.conversation_id != call.conversation_id
+            result.run_id != call.run_id
             or result.call_id != call.call_id
             or result.parent_session_id != call.parent_session_id
         ):

@@ -44,7 +44,7 @@ class CurrentTimeV1Tool:
             tool_input = CurrentTimeV1Input.model_validate(call.arguments)
         except ValidationError as error:
             return ToolResult(
-                conversation_id=call.conversation_id,
+                run_id=call.run_id,
                 call_id=call.call_id,
                 parent_session_id=call.parent_session_id,
                 status=ToolResultStatus.FAILED,
@@ -59,7 +59,7 @@ class CurrentTimeV1Tool:
             timezone = ZoneInfo(tool_input.timezone)
         except ZoneInfoNotFoundError:
             return ToolResult(
-                conversation_id=call.conversation_id,
+                run_id=call.run_id,
                 call_id=call.call_id,
                 parent_session_id=call.parent_session_id,
                 status=ToolResultStatus.FAILED,
@@ -78,7 +78,7 @@ class CurrentTimeV1Tool:
             utc_offset_seconds=int(utc_offset.total_seconds()) if utc_offset is not None else 0,
         )
         return ToolResult(
-            conversation_id=call.conversation_id,
+            run_id=call.run_id,
             call_id=call.call_id,
             parent_session_id=call.parent_session_id,
             status=ToolResultStatus.SUCCEEDED,

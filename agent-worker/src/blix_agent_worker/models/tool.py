@@ -7,7 +7,7 @@ from blix_agent_worker.models.common import (
     CallID,
     ContractError,
     ContractModel,
-    ConversationID,
+    RunID,
     JobID,
     JsonObject,
     NonEmptyText,
@@ -49,7 +49,7 @@ class ToolCall(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False)
 
     schema_version: Literal[1] = 1
-    conversation_id: ConversationID
+    run_id: RunID
     call_id: CallID
     parent_session_id: SessionID
     tool_id: VersionedIdentifier
@@ -67,7 +67,7 @@ class ToolResult(ContractModel):
     model_config = ConfigDict(str_strip_whitespace=False)
 
     schema_version: Literal[1] = 1
-    conversation_id: ConversationID
+    run_id: RunID
     call_id: CallID
     parent_session_id: SessionID
     status: ToolResultStatus
