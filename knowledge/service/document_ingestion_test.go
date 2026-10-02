@@ -122,13 +122,10 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if prepared.Document.ReviewStatus != model.DocumentReviewPending {
 		t.Fatal("reading document entered review")
 	}
-	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic); !errors.Is(err, ErrConflict) {
-		t.Fatalf("metadata was accepted before complete reading: %v", err)
-	}
 	manualTitle := "Corrected document title"
 	manualTags := []string{"Team  Reference", "BRAKING", "braking"}
 	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("editing while processing was accepted: %v", err)
+		t.Fatalf("editing before identification was accepted: %v", err)
 	}
 	if len(prepared.Chunks) < 2 || len(prepared.Pages) != 3 || extractor.calls != 1 {
 		t.Fatalf("manifest: %+v", prepared)
@@ -139,8 +136,25 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 	}
 	extractionCompleted := *prepared.Document.Stages[1].CompletedAt
-	if prepared.Document.Stages[3].Status != "running" || prepared.Document.Stages[4].Status != "waiting" {
-		t.Fatal("reading and metadata phases are not distinct")
+	if prepared.Document.Stages[3].Status != "running" || prepared.Document.Stages[4].Status != "running" {
+		t.Fatal("reading and metadata did not start concurrently")
+	}
+	invalidMetadata := automatic
+	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
+	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, invalidMetadata); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invented metadata citation accepted: %v", err)
+	}
+	identifiedEarly, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
+	if err != nil || identifiedEarly.Document.Status != "reading" || !documentStageComplete(identifiedEarly.Document, "identifying_metadata") || identifiedEarly.Chunks[0].CompletedAt != nil || identifiedEarly.Document.ReviewStatus != model.DocumentReviewPending {
+		t.Fatalf("metadata did not complete independently of reading: %+v %v", identifiedEarly, err)
+	}
+	metadataCompleted := *identifiedEarly.Document.Stages[4].CompletedAt
+	editedEarly, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 1, Title: &manualTitle, Tags: &manualTags})
+	if err != nil || editedEarly.Document.Status != "reading" || editedEarly.Document.Title != manualTitle || editedEarly.Document.MetadataRevision != 2 {
+		t.Fatalf("identified details could not be edited during reading: %+v %v", editedEarly.Document, err)
+	}
+	if _, err := service.Reconcile(ctx, docID, execution); !errors.Is(err, ErrConflict) {
+		t.Fatalf("early metadata permitted premature reconciliation: %v", err)
 	}
 	first, err := service.ReadChunk(ctx, docID, 1)
 	if err != nil {
@@ -193,9 +207,6 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign metadata editor accepted: %v", err)
 	}
-	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := service.UpdateMetadata(ctx, docID, caller.EntityID, DocumentMetadataPatch{Revision: 0, Title: &manualTitle, Tags: &manualTags}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale metadata revision accepted: %v", err)
 	}
@@ -244,13 +255,8 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		}
 	}
 	readingComplete, err := service.Get(ctx, docID)
-	if err != nil || readingComplete.Document.Status != "identifying_metadata" || !documentStageComplete(readingComplete.Document, "reading") || readingComplete.Document.Stages[4].Status != "running" {
+	if err != nil || readingComplete.Document.Status != "reading" || !documentStageComplete(readingComplete.Document, "reading") || !readingComplete.Document.Stages[4].CompletedAt.Equal(metadataCompleted) {
 		t.Fatalf("metadata phase: %+v %v", readingComplete.Document, err)
-	}
-	invalidMetadata := automatic
-	invalidMetadata.SourceRecordIDs = []string{identifier.New(identifier.SourceRecord)}
-	if _, err := service.SaveExtractedMetadata(ctx, docID, execution, invalidMetadata); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("invented metadata citation accepted: %v", err)
 	}
 	identified, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
 	if err != nil {

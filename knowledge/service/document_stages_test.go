@@ -106,3 +106,22 @@ func TestDocumentIndexingFailureResumesWithoutRepeatingExtraction(t *testing.T) 
 		t.Fatalf("retry did not restore search: %+v %v", result, err)
 	}
 }
+
+func TestStoppingConcurrentDocumentStagesPreservesCompletedWork(t *testing.T) {
+	doc := model.Document{Generation: 1}
+	for _, name := range []string{"uploading", "extracting", "indexing"} {
+		setDocumentStage(&doc, name, "running")
+		setDocumentStage(&doc, name, "completed")
+	}
+	setDocumentStage(&doc, "reading", "running")
+	setDocumentStage(&doc, "identifying_metadata", "running")
+	stopDocumentStage(&doc, "cancelled")
+	if doc.Stages[3].Status != "cancelled" || doc.Stages[4].Status != "cancelled" || !documentStageComplete(doc, "indexing") || doc.Stages[5].Status != "waiting" {
+		t.Fatalf("concurrent stages were not stopped correctly: %+v", doc.Stages)
+	}
+	doc.Generation++
+	resetUnfinishedDocumentStages(&doc)
+	if doc.Stages[3].Status != "waiting" || doc.Stages[4].Status != "waiting" || !documentStageComplete(doc, "indexing") {
+		t.Fatalf("retry lost completed work: %+v", doc.Stages)
+	}
+}

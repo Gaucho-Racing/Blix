@@ -39,7 +39,8 @@ export function DocumentIngestionTimeline({
           <li
             key={name}
             className={`timeline-step-${status}`}
-            aria-current={status === "running" ? "step" : undefined}
+            aria-current={status === "running" && document.status === name ? "step" : undefined}
+            aria-busy={status === "running" || undefined}
           >
             <span className="timeline-icon" aria-hidden="true">
               <span className="timeline-glyph timeline-waiting">

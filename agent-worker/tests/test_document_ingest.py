@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import unittest
@@ -128,7 +129,7 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
 
             async def complete(self, request):
                 requests.append(request)
-                body = json.loads(request.messages[-1].content)
+                body, _ = json.JSONDecoder().raw_decode(request.messages[-1].content)
                 if request.output_format.id == "document_metadata_v1":
                     return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
                         "title": "Formula SAE Rules", "publisher": "SAE", "version": "1",
@@ -184,6 +185,129 @@ class DocumentIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(curator_tasks[0].context["document"]["tags"], ["formula sae", "braking"])
         self.assertTrue(all(call[2]["revision"] == i for i, call in enumerate(
             [call for call in calls if call[0] == "POST" and "/chunks/" in call[1]])))
+
+    async def test_metadata_is_saved_and_editable_before_reading_finishes(self):
+        agent, task, details, calls, _, curator_tasks = self.fixture()
+        metadata_saved = asyncio.Event()
+        reading_started = asyncio.Event()
+        original_complete = agent.model.complete
+        original_request = agent.client.request
+
+        async def complete(request):
+            if request.output_format.id == "document_chunk_reading_v1":
+                reading_started.set()
+                await metadata_saved.wait()
+            else:
+                await reading_started.wait()
+            return await original_complete(request)
+
+        async def request(url, method, path, **kwargs):
+            response = await original_request(url, method, path, **kwargs)
+            if path.endswith("/metadata"):
+                self.assertTrue(all(chunk["completed_at"] is None for chunk in details["chunks"]))
+                details["document"]["title"] = "User corrected early title"
+                metadata_saved.set()
+            return response
+
+        agent.model.complete = complete
+        agent.client.request = request
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await asyncio.wait_for(agent.run(task), timeout=1)
+        self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
+        self.assertTrue(metadata_saved.is_set())
+        self.assertEqual(curator_tasks[0].context["document"]["title"], "User corrected early title")
+        metadata_index = next(i for i, call in enumerate(calls) if call[1].endswith("/metadata"))
+        first_save = next(i for i, call in enumerate(calls) if call[0] == "POST" and "/chunks/" in call[1])
+        self.assertLess(metadata_index, first_save)
+
+    async def test_reading_failure_cancels_and_awaits_metadata_task(self):
+        agent, task, _, calls, _, curator_tasks = self.fixture(fail_after_save=True)
+        metadata_started = asyncio.Event()
+        metadata_stopped = asyncio.Event()
+        original_complete = agent.model.complete
+
+        async def complete(request):
+            if request.output_format.id == "document_metadata_v1":
+                metadata_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    metadata_stopped.set()
+            await metadata_started.wait()
+            return await original_complete(request)
+
+        agent.model.complete = complete
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await asyncio.wait_for(agent.run(task), timeout=1)
+        self.assertEqual(result.status, AgentResultStatus.FAILED)
+        self.assertTrue(metadata_stopped.is_set())
+        self.assertFalse(any(path.endswith("/metadata") for _, path, _ in calls))
+        self.assertFalse(curator_tasks)
+
+    async def test_cancelling_ingestion_stops_both_concurrent_model_calls(self):
+        agent, task, _, calls, _, curator_tasks = self.fixture()
+        both_started = asyncio.Event()
+        started = set()
+        stopped = set()
+
+        async def complete(request):
+            phase = request.output_format.id
+            started.add(phase)
+            if len(started) == 2:
+                both_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.add(phase)
+
+        agent.model.complete = complete
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            execution = asyncio.create_task(agent.run(task))
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            execution.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await execution
+        self.assertEqual(started, stopped)
+        self.assertFalse(curator_tasks)
+        self.assertFalse(any(path.endswith("/metadata") for _, path, _ in calls))
+
+    async def test_early_metadata_cannot_cite_pages_outside_its_supplied_evidence(self):
+        agent, task, details, _, requests, _ = self.fixture()
+        unexamined_source = new_ulid("sourcerecord")
+        details["pages"].insert(1, {"page_number": 2, "source_record_id": unexamined_source})
+        original_complete = agent.model.complete
+
+        async def complete(request):
+            response = await original_complete(request)
+            metadata = json.loads(response.message.content)
+            metadata["source_record_ids"] = [unexamined_source]
+            return response.model_copy(update={"message": ModelMessage(
+                role=ModelMessageRole.ASSISTANT, content=json.dumps(metadata),
+            )})
+
+        agent.model.complete = complete
+        with self.assertRaisesRegex(ValueError, "valid result after three attempts"):
+            await agent.extract_metadata(task, details, "http://knowledge", "documents/test")
+        self.assertEqual(len(requests), 3)
+        self.assertNotIn(unexamined_source, json.loads(requests[0].messages[-1].content)["actual_page_ids"])
+
+    async def test_metadata_failure_preserves_completed_reading_for_retry(self):
+        agent, task, details, _, _, curator_tasks = self.fixture()
+        original_complete = agent.model.complete
+
+        async def complete(request):
+            if request.output_format.id == "document_metadata_v1":
+                raise KnowledgeClientError("knowledge_unavailable", "Metadata unavailable.", retryable=True)
+            await asyncio.sleep(0)
+            return await original_complete(request)
+
+        agent.model.complete = complete
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await agent.run(task)
+        self.assertEqual(result.status, AgentResultStatus.FAILED)
+        self.assertTrue(result.error.retryable)
+        self.assertTrue(all(chunk["completed_at"] is not None for chunk in details["chunks"]))
+        self.assertFalse(curator_tasks)
 
     async def test_resume_skips_completed_chunk_and_reuses_saved_notebook(self):
         agent, task, _, calls, requests, _ = self.fixture(first_completed=True)

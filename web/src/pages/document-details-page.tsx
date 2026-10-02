@@ -270,7 +270,9 @@ function ingestionStage({ document, chunks }: DocumentDetails): string {
     case "reading":
       return chunks.length > 0 &&
         chunks.every((chunk) => chunk.completed_at !== null)
-        ? "Blix has finished reading and is identifying the document details."
+        ? document.extracted_metadata
+          ? "Blix has finished reading and is preparing to draft wiki updates."
+          : "Blix has finished reading and is identifying the document details."
         : "Blix is reading the document and saving what it learns."
     case "identifying_metadata":
       return "Blix has finished reading and is identifying the document details."

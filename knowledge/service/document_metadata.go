@@ -123,19 +123,12 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 		if len(doc.ExtractedMetadata) > 0 {
 			return nil
 		}
-		var total, remaining int64
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ?", id).Count(&total).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
-			return err
-		}
-		if total == 0 || remaining > 0 {
-			return ErrConflict
-		}
 		var pages []model.DocumentPage
 		if err := tx.Where("document_id = ?", id).Find(&pages).Error; err != nil {
 			return err
+		}
+		if len(pages) == 0 {
+			return ErrConflict
 		}
 		allowed := map[string]bool{}
 		for _, page := range pages {
@@ -231,7 +224,7 @@ func (s *DocumentService) UpdateMetadata(ctx context.Context, id, owner string, 
 		if doc.UploadedBy != owner {
 			return ErrForbidden
 		}
-		if doc.ReviewStatus == model.DocumentReviewRejected || documentIsProcessing(doc.Status) || doc.Status == "uploading" || doc.MetadataRevision != patch.Revision {
+		if doc.ReviewStatus == model.DocumentReviewRejected || doc.Status == "uploading" || (documentIsProcessing(doc.Status) && len(doc.ExtractedMetadata) == 0) || doc.MetadataRevision != patch.Revision {
 			return ErrConflict
 		}
 		overrides := map[string]bool{}

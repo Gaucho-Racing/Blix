@@ -398,6 +398,74 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(str(question.message_id), model.requests[0].messages[-1].content)
         self.assertTrue(any(op == "checkpoint" for op, _ in operations))
 
+    async def test_concurrent_document_model_streams_keep_their_call_ids_and_text(self):
+        from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
+        from blix_agent_worker.clients.sentinel import SentinelUser
+        from blix_agent_worker.models.llm import ModelRequest
+        from blix_agent_worker.worker import ApiRuntime
+
+        task = lead_task().model_copy(update={"agent_id": "document_ingest_v1"})
+        execution = self.context(task)
+        caller = SentinelUser.model_construct(
+            id=execution.conversation.caller_context.user_id,
+            entity_id=execution.conversation.caller_context.entity_id,
+            first_name="Test", last_name="User", username="test", avatar_url="", groups=("BlixUsers",),
+        )
+
+        class Runtime(ApiRuntime):
+            async def resolve_caller(self, execution):
+                return caller
+
+        events = []
+
+        class Lease:
+            async def post(self, operation, payload=None):
+                return {"commands": []}
+
+            async def events(self, batch):
+                events.extend(batch)
+                await asyncio.sleep(0)
+
+        both_started = asyncio.Event()
+
+        class Model:
+            model = "test-document"
+            started = 0
+
+            async def complete(self, request, *, on_text_delta):
+                self.started += 1
+                if self.started == 2:
+                    both_started.set()
+                await both_started.wait()
+                await on_text_delta(str(request.sequence) * 600)
+                await asyncio.sleep(0)
+                await on_text_delta(str(request.sequence) * 180)
+                return ModelResponse(message=assistant("Saved"))
+
+        async def run(agent, invocation, **kwargs):
+            async def complete(sequence):
+                request = ModelRequest(sequence=sequence, messages=(assistant("Read"),))
+                response = await agent.model.complete(await agent.model.prepare(request))
+                await agent.on_response(sequence, response)
+            await asyncio.gather(complete(1), complete(2))
+            return AgentResult(
+                conversation_id=invocation.conversation_id, session_id=invocation.session_id,
+                agent_id=invocation.agent_id, status=AgentResultStatus.SUCCEEDED, output={},
+            )
+
+        with patch.object(DocumentIngestV1Agent, "run", run):
+            await asyncio.wait_for(
+                Runtime({"research": Model()}, None, None, None, None, None).execute(execution, Lease()),
+                timeout=1,
+            )
+        calls = {event["entity_id"]: event["payload"]["sequence"]
+                 for event in events if event["type"] == "model.call_v1"}
+        self.assertEqual(len(calls), 2)
+        for call_id, sequence in calls.items():
+            streamed = "".join(event["payload"]["delta"] for event in events
+                               if event["type"] == "model.output.delta_v1" and event["entity_id"] == call_id)
+            self.assertEqual(streamed, str(sequence) * 780)
+
     async def test_compaction_preserves_late_replies_before_queued_questions(self):
         from blix_agent_worker.worker import ApiRuntime
 

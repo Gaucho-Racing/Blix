@@ -65,11 +65,15 @@ func startDocumentStage(tx *gorm.DB, doc *model.Document, name string) error {
 
 func stopDocumentStage(doc *model.Document, status string) {
 	initializeDocumentStages(doc)
+	stopped := false
 	for _, stage := range doc.Stages {
 		if stage.Status == "running" {
 			setDocumentStage(doc, stage.Name, status)
-			return
+			stopped = true
 		}
+	}
+	if stopped {
+		return
 	}
 	for _, stage := range doc.Stages {
 		if stage.Status != "completed" {

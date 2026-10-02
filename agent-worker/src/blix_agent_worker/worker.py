@@ -203,8 +203,9 @@ class ApiRuntime:
         delta_buffer = ""
         delta_call: str | None = None
         last_delta_at = 0.0
+        delta_lock = asyncio.Lock()
 
-        async def flush_delta() -> None:
+        async def flush_delta_unlocked() -> None:
             nonlocal delta_buffer, last_delta_at
             if delta_buffer and delta_call is not None:
                 await lease.events(
@@ -213,14 +214,19 @@ class ApiRuntime:
                 delta_buffer = ""
                 last_delta_at = asyncio.get_running_loop().time()
 
+        async def flush_delta() -> None:
+            async with delta_lock:
+                await flush_delta_unlocked()
+
         async def record_delta(call_id: str, sequence: int, attempt: int, delta: str) -> None:
             nonlocal delta_buffer, delta_call
-            if delta_call != call_id:
-                await flush_delta()
-                delta_call = call_id
-            delta_buffer += delta
-            if len(delta_buffer) >= 512 or asyncio.get_running_loop().time() - last_delta_at >= 0.15:
-                await flush_delta()
+            async with delta_lock:
+                if delta_call != call_id:
+                    await flush_delta_unlocked()
+                    delta_call = call_id
+                delta_buffer += delta
+                if len(delta_buffer) >= 512 or asyncio.get_running_loop().time() - last_delta_at >= 0.15:
+                    await flush_delta_unlocked()
 
         async def record_attempt(event: ModelAttemptEvent) -> None:
             await flush_delta()

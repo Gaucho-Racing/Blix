@@ -467,6 +467,9 @@ func (s *DocumentService) prepareSearch(ctx context.Context, id string, e Docume
 		if err := tx.Model(&model.DocumentChunk{}).Where("document_id = ? AND completed_at IS NULL", id).Count(&remaining).Error; err != nil {
 			return err
 		}
+		if len(doc.ExtractedMetadata) == 0 {
+			setDocumentStage(&doc, "identifying_metadata", "running")
+		}
 		if remaining > 0 {
 			setDocumentStage(&doc, "reading", "running")
 			return saveDocumentProgress(tx, &doc, map[string]any{"status": "reading", "error": ""})
@@ -590,7 +593,10 @@ func (s *DocumentService) SaveChunk(ctx context.Context, id string, number int, 
 		}
 		if completed+1 == total {
 			setDocumentStage(&doc, "reading", "completed")
-			return startDocumentStage(tx, &doc, "identifying_metadata")
+			if len(doc.ExtractedMetadata) == 0 {
+				return startDocumentStage(tx, &doc, "identifying_metadata")
+			}
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "reading", "error": ""})
 		}
 		return startDocumentStage(tx, &doc, "reading")
 	})
