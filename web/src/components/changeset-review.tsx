@@ -6,7 +6,6 @@ import {
   GitCommitHorizontal,
   LoaderCircle,
   RefreshCw,
-  ShieldCheck,
   X,
 } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -131,6 +130,40 @@ export function ChangesetReview({
           <StatusBadge status={changeset.status} />
         </div>
       </header>
+      {changeset.reviewed_by && (
+        <section
+          className={`panel knowledge-review-audit ${changeset.review_decision === "rejected" ? "is-rejected" : "is-approved"}`}
+          aria-label="Changeset review decision"
+        >
+          <span className="knowledge-review-decision-icon" aria-hidden="true">
+            {changeset.review_decision === "rejected" ? (
+              <X size={24} />
+            ) : (
+              <Check size={24} />
+            )}
+          </span>
+          <div>
+            <span className="workspace-kicker">CHANGESET DECISION</span>
+            <h2>
+              {changeset.review_decision === "rejected"
+                ? "Rejected"
+                : changeset.status === "committed"
+                  ? "Approved and published"
+                  : "Approved for publication"}
+            </h2>
+            {changeset.rejected_document_id && (
+              <small>Rejected with its source document</small>
+            )}
+            {changeset.reviewed_at && (
+              <time dateTime={changeset.reviewed_at}>
+                {formatTimestamp(changeset.reviewed_at)}
+              </time>
+            )}
+            <code>{changeset.reviewed_by}</code>
+            {changeset.review_note && <p>{changeset.review_note}</p>}
+          </div>
+        </section>
+      )}
       <section className="panel knowledge-review-context">
         <div>
           <span>Scope</span>
@@ -174,24 +207,6 @@ export function ChangesetReview({
             force-publish is performed.
           </small>
         </div>
-      )}
-      {changeset.reviewed_by && (
-        <section className="panel knowledge-review-audit">
-          <ShieldCheck size={19} />
-          <div>
-            <strong>
-              {changeset.rejected_document_id
-                ? "Rejected with its source document"
-                : changeset.review_decision === "rejected"
-                  ? "Rejected"
-                  : "Approved for publication"}
-              {changeset.reviewed_at &&
-                ` · ${formatTimestamp(changeset.reviewed_at)}`}
-            </strong>
-            <code>{changeset.reviewed_by}</code>
-            {changeset.review_note && <p>{changeset.review_note}</p>}
-          </div>
-        </section>
       )}
       {changeset.status === "committed" && (
         <div className="knowledge-review-published">
