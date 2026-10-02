@@ -21,6 +21,7 @@ import { DocumentMetadata } from "@/components/document-metadata"
 import { DocumentPDFPreview } from "@/components/document-pdf-preview"
 import { DocumentReadingNotes } from "@/components/document-reading-notes"
 import { DocumentChangesets } from "@/components/document-changesets"
+import { DocumentSources } from "@/components/document-sources"
 import { ProgressBar } from "@/components/progress-bar"
 import { errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
@@ -75,6 +76,7 @@ export function DocumentDetailsPage() {
             key={`${documentID}:${query.data.document.metadata_revision}`}
           />
           <DocumentReadingNotes details={query.data} key={documentID} />
+          <DocumentSources details={query.data} key={`sources:${documentID}`} />
           {query.data.document.size_bytes > 0 && (
             <DocumentPDFPreview
               document={query.data.document}

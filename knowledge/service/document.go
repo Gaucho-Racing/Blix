@@ -289,7 +289,11 @@ func (s *DocumentService) Page(ctx context.Context, id string, number int) (Sour
 	if err := s.db.WithContext(ctx).First(&page, "document_id = ? AND number = ?", id, number).Error; err != nil {
 		return SourceRecordDetail{}, mapDatabaseError(err)
 	}
-	return NewSourceService(s.db).ReadSourceRecord(ctx, page.SourceRecordID)
+	var record model.SourceRecord
+	if err := s.db.WithContext(ctx).First(&record, "id = ? AND source_id IN (SELECT source_id FROM knowledge_document WHERE id = ?)", page.SourceRecordID, id).Error; err != nil {
+		return SourceRecordDetail{}, mapDatabaseError(err)
+	}
+	return SourceRecordDetail{SourceRecord: record}, nil
 }
 func (s *DocumentService) File(ctx context.Context, id string) (string, string, error) {
 	details, err := s.Get(ctx, id)

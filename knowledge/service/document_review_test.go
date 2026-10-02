@@ -222,6 +222,10 @@ func TestDocumentRejectionCascadesAndPreservesEvidence(t *testing.T) {
 	if _, err := NewSourceService(db).GetSourceRecord(ctx, record.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rejected source available to agent evidence reads: %v", err)
 	}
+	retained, err := s.Page(ctx, doc.Document.ID, doc.Pages[0].Number)
+	if err != nil || retained.Content != record.Content || retained.ID != record.ID {
+		t.Fatalf("rejected document evidence unavailable for review: %+v %v", retained, err)
+	}
 	sources, err := NewSourceService(db).FindSources(ctx, SourceQuery{ExternalID: doc.Document.SHA256, Limit: 5})
 	if err != nil || len(sources) != 0 {
 		t.Fatal("rejected document discoverable as team knowledge")

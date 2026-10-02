@@ -922,3 +922,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .knowledge-review-audit .identity-display { margin-top: 14px; }
 .knowledge-review-audit .identity-copy strong, .document-review-audit .identity-copy strong { font-size: 13px; }
 .document-review-audit .identity-display { margin: 6px 0; }
+.document-sources { margin-top: 24px; padding: 24px; }
+.document-sources > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+.document-sources h2 { margin: 0; font-size: 18px; font-weight: 500; letter-spacing: -.025em; }
+.document-sources > header > span { color: var(--muted); font-size: 12px; }
+.document-source-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.document-source-selector { width: min(360px, 100%); }
+.document-source-buttons { display: flex; gap: 8px; }
+.document-source-buttons .secondary-button { min-width: 40px; padding: 0 10px; }
+.document-source-content { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.document-source-content pre { min-height: 180px; max-height: 560px; margin: 0; padding: 20px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.8; }
+.document-source-content .loading-state { min-height: 180px; margin: 0; }
+.document-source-content .runtime-error, .document-source-empty { padding: 20px; margin: 0; font-size: 13px; line-height: 1.6; }
+.document-source-empty { color: var(--muted); }
