@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { LoaderCircle, Pencil } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth"
 import { documentProcessing, updateDocumentMetadata } from "@/lib/documents"
 import type { DocumentDetails, DocumentMetadataFields } from "@/lib/documents"
@@ -37,13 +36,6 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
     documentProcessing(document.status) || document.status === "uploading"
   const canEdit = auth.user?.entity_id === document.uploaded_by && !active
   const extracted = document.extracted_metadata
-  const missing =
-    extracted &&
-    (!extracted.title ||
-      !extracted.publisher ||
-      !extracted.version ||
-      !extracted.kind ||
-      !extracted.published_at)
   const save = useMutation({
     mutationFn: () =>
       updateDocumentMetadata(
@@ -59,17 +51,8 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
   })
   return (
     <section className="panel document-metadata-panel">
-      <header className="content-heading">
-        <div>
-          <h2>Document details</h2>
-          <span>
-            {extracted
-              ? "Identified by Blix. Review or correct any field."
-              : active
-                ? "Blix will identify these after reading the document."
-                : "Document details have not been identified yet."}
-          </span>
-        </div>
+      <header className="document-metadata-heading">
+        <h2>Document details</h2>
         {canEdit && !editing && (
           <button
             className="secondary-button"
@@ -80,17 +63,6 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
           </button>
         )}
       </header>
-      {missing && (
-        <p className="document-help">
-          Some details could not be established. Unknown fields are left blank
-          for review.
-        </p>
-      )}
-      {extracted?.warnings?.map((warning, index) => (
-        <p className="document-help" key={index}>
-          {warning}
-        </p>
-      ))}
       {editing ? (
         <form
           className="document-form"
@@ -145,9 +117,8 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
               )}
             </div>
             <p className="document-help">
-              Corrections update this document’s details. Existing wiki drafts
-              retain their original content; review them separately or ask Blix
-              to revise them.
+              These edits update document details. To revise a wiki draft,
+              discuss it with Blix.
             </p>
             {save.error && (
               <p className="runtime-error" role="alert">
@@ -192,23 +163,17 @@ export function DocumentMetadata({ details }: { details: DocumentDetails }) {
           )}
         </dl>
       ) : null}
-      {!!extracted?.source_record_ids?.length && (
-        <div className="document-metadata-sources">
-          <span>Identified from: </span>
-          {extracted.source_record_ids.map((id) => {
-            const page = details.pages.find(
-              (page) => page.source_record_id === id,
-            )
-            return page ? (
-              <Link
-                key={id}
-                to={`/knowledge/documents/${document.document_id}?page=${page.page_number}`}
-              >
-                PDF page {page.page_number}
-              </Link>
-            ) : null
-          })}
-        </div>
+      {!!extracted?.warnings?.length && (
+        <details className="document-metadata-caveats">
+          <summary>
+            Notes on document details · {extracted.warnings.length}
+          </summary>
+          <ul>
+            {extracted.warnings.map((warning, index) => (
+              <li key={index}>{warning}</li>
+            ))}
+          </ul>
+        </details>
       )}
     </section>
   )

@@ -1,6 +1,6 @@
 import axios from "axios"
 import { api } from "@/lib/api"
-import type { WikiChangesetDetails } from "@/lib/knowledge"
+import type { WikiChangeset, WikiChangesetDetails } from "@/lib/knowledge"
 
 export interface TeamDocument {
   document_id: string
@@ -67,7 +67,7 @@ export interface DocumentChunk {
 export interface DocumentDetails {
   chunks: DocumentChunk[]
   notes: { revision: number; notes: string; created_at: string } | null
-  changesets: { changeset_id: string; summary: string; status: string }[]
+  changesets: WikiChangeset[]
   document: TeamDocument
   pages: {
     page_number: number
