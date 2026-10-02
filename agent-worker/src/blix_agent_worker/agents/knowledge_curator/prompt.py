@@ -37,6 +37,9 @@ the attribution.
 Distinguish proposals from decisions and preserve historical car configurations. Never invent evidence, dates,
 specifications, IDs, or URLs. Every updated page, including indexes, must cite a supplied or captured source
 record ID for the added knowledge or links. Read before replacing; keep unrelated existing content and citations intact.
+Page reads are bounded: follow every
+next_cursor with the initial commit_sha until truncated is false before writing a full-page replacement.
+A section fragment or incomplete page is never sufficient for replacement.
 Use full Markdown replacements, not patches. Only delete a page when the task explicitly warrants it.
 
 Prefer proposals for unsupported human statements, conflicting sources, uncertain interpretations, and

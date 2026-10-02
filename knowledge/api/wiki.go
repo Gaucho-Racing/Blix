@@ -9,7 +9,7 @@ import (
 )
 
 func (h *Handler) ListWikiPages(c *gin.Context) {
-	result, err := h.wiki.Pages(c.Request.Context(), "", c.Query("prefix"))
+	result, err := h.pages.ListIndexedPages(c.Request.Context(), c.Query("prefix"), c.Query("after"))
 	if err != nil {
 		respondError(c, err)
 		return
@@ -22,7 +22,26 @@ func (h *Handler) ReadWikiPage(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.pages.ReadPage(c.Request.Context(), c.Query("path"))
+	options := service.WikiReadOptions{CommitSHA: c.Query("commit_sha")}
+	for name, target := range map[string]*int{"cursor": &options.Cursor, "max_bytes": &options.MaxBytes} {
+		if c.Query(name) != "" {
+			value, err := strconv.Atoi(c.Query(name))
+			if err != nil {
+				respondError(c, service.ErrInvalid)
+				return
+			}
+			*target = value
+		}
+	}
+	if c.Query("section") != "" {
+		value, err := strconv.Atoi(c.Query("section"))
+		if err != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		options.Section = &value
+	}
+	result, err := h.pages.ReadIndexedPage(c.Request.Context(), c.Query("path"), options)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -36,7 +55,7 @@ func (h *Handler) SearchWiki(c *gin.Context) {
 		respondError(c, service.ErrInvalid)
 		return
 	}
-	result, err := h.pages.Search(c.Request.Context(), c.Query("q"), limit)
+	result, err := h.pages.SearchIndexed(c.Request.Context(), service.WikiSearchOptions{Query: c.Query("q"), Limit: limit, Season: c.Query("season"), Prefix: c.Query("prefix")})
 	if err != nil {
 		respondError(c, err)
 		return

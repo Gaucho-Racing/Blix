@@ -40,6 +40,14 @@ func run(configuration config.Config) error {
 	}
 	sources := service.NewSourceService(db)
 	pages := service.NewWikiService(db, wiki)
+	index := service.NewWikiIndex(db, wiki)
+	pages.SetIndex(index)
+	indexDone := make(chan struct{})
+	go func() {
+		defer close(indexDone)
+		index.Run(ctx, func(err error) { logger.SugarLogger.Warnf("wiki index: %v", err) })
+	}()
+	defer func() { stop(); <-indexDone }()
 	sentinelClient := sentinel.NewClient(configuration.SentinelURL, configuration.SentinelClientID)
 	if sentinelClient.Configured() {
 		if err := sentinelClient.InitializeSigningKeys(ctx); err != nil {

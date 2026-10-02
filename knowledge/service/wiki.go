@@ -28,11 +28,11 @@ type WikiService struct {
 	database *gorm.DB
 	wiki     wikiRepository
 	writer   sync.Mutex
+	index    *WikiIndex
 }
 
 type wikiRepository interface {
 	Pages(context.Context, string, string) (repository.Snapshot, error)
-	Search(context.Context, string, int) (repository.SearchResults, error)
 	Prepare(context.Context, string, string, string, []repository.Edit, time.Time) (string, error)
 	Publish(context.Context, string, string) error
 	Refresh(context.Context) (string, error)
@@ -46,18 +46,8 @@ type Citation struct {
 	Author         string    `json:"author,omitempty"`
 	AuthorEntityID string    `json:"author_entity_id,omitempty"`
 	OccurredAt     time.Time `json:"occurred_at"`
-}
-
-type WikiPageResult struct {
-	CommitSHA string              `json:"commit_sha"`
-	Page      repository.Page     `json:"page"`
-	Citations map[string]Citation `json:"citations"`
-}
-
-type WikiSearchResult struct {
-	CommitSHA string                    `json:"commit_sha"`
-	Results   []repository.SearchResult `json:"results"`
-	Citations map[string]Citation       `json:"citations"`
+	EvidenceType   string    `json:"evidence_type"`
+	CaptureMethod  string    `json:"capture_method"`
 }
 
 type CreateChangesetInput struct {
@@ -81,31 +71,6 @@ func NewWikiService(database *gorm.DB, wiki wikiRepository) *WikiService {
 	return &WikiService{database: database, wiki: wiki}
 }
 
-func (s *WikiService) ReadPage(ctx context.Context, path string) (WikiPageResult, error) {
-	snapshot, err := s.wiki.Pages(ctx, path, "")
-	if err != nil {
-		return WikiPageResult{}, err
-	}
-	if len(snapshot.Pages) != 1 {
-		return WikiPageResult{}, ErrNotFound
-	}
-	citations, err := s.resolveCitations(ctx, []string{snapshot.Pages[0].Content})
-	return WikiPageResult{CommitSHA: snapshot.CommitSHA, Page: snapshot.Pages[0], Citations: citations}, err
-}
-
-func (s *WikiService) Search(ctx context.Context, query string, limit int) (WikiSearchResult, error) {
-	results, err := s.wiki.Search(ctx, query, limit)
-	if err != nil {
-		return WikiSearchResult{}, err
-	}
-	contents := make([]string, 0, len(results.Results))
-	for _, result := range results.Results {
-		contents = append(contents, result.PageContent)
-	}
-	citations, err := s.resolveCitations(ctx, contents)
-	return WikiSearchResult{CommitSHA: results.CommitSHA, Results: results.Results, Citations: citations}, err
-}
-
 func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (map[string]Citation, error) {
 	ids := make([]string, 0)
 	seen := map[string]struct{}{}
@@ -122,7 +87,7 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 		return citations, nil
 	}
 	var records []model.SourceRecord
-	if err := s.database.WithContext(ctx).Where("id IN ?", ids).Find(&records).Error; err != nil {
+	if err := s.database.WithContext(ctx).Omit("content", "metadata").Where("id IN ?", ids).Find(&records).Error; err != nil {
 		return nil, err
 	}
 	sourceIDs := make([]string, 0, len(records))
@@ -153,7 +118,7 @@ func (s *WikiService) resolveCitations(ctx context.Context, contents []string) (
 	}
 	for _, record := range records {
 		citation := Citation{SourceRecordID: record.ID, SourceName: sourceNames[record.SourceID], RecordType: record.RecordType,
-			ExternalURL: record.ExternalURL, OccurredAt: record.OccurredAt}
+			ExternalURL: record.ExternalURL, OccurredAt: record.OccurredAt, EvidenceType: record.EvidenceType, CaptureMethod: record.CaptureMethod}
 		if record.AuthorSourceIdentityID != nil {
 			identity := authors[*record.AuthorSourceIdentityID]
 			citation.Author = identity.DisplayName

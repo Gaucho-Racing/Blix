@@ -37,6 +37,9 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 	if err := db.AutoMigrate(
+		&model.WikiIndexState{},
+		&model.WikiPage{},
+		&model.WikiSection{},
 		&model.Source{},
 		&model.SourceIdentity{},
 		&model.SourceRecord{},
@@ -48,6 +51,9 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.ChangesetSourceRecord{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate database: %w", err)
+	}
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_wiki_search ON knowledge_wiki_section USING GIN (search_vector)`).Error; err != nil {
+		return nil, fmt.Errorf("create wiki search index: %w", err)
 	}
 	return db, nil
 }
