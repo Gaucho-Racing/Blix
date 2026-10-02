@@ -42,6 +42,12 @@ from blix_agent_worker.tools import ToolRunner
 from blix_agent_worker.tools.registry import ToolRegistryError
 
 
+class AgentOutputValidationError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ToolAgent:
     definition: ClassVar[AgentDefinition]
     input_model: ClassVar[type[ContractModel]]
@@ -145,6 +151,8 @@ class ToolAgent:
                         details=validation_error_details(error),
                         usage=usage,
                     )
+                except AgentOutputValidationError as error:
+                    return self._failure(task, error.code, str(error), usage=usage)
                 except ValueError as error:
                     return self._failure(task, "invalid_agent_output", str(error), usage=usage)
                 return AgentResult(

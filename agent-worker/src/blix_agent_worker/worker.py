@@ -406,11 +406,18 @@ class ApiRuntime:
             )
             agent = registry.resolve(task.agent_id)
         else:
-            messages = (
-                execution.messages
-                if latest_state is not None
-                else await self.compact_history(execution, lease, base_model)
-            )
+            if execution.profile.profile_id == "document_qa_v1":
+                question_id = execution.turn.get("input_message_id") if execution.turn else None
+                messages = tuple(message for message in execution.messages
+                                 if message.message_id == question_id and message.role == "user")
+                if len(messages) != 1:
+                    raise ValueError("Document Q&A requires exactly one standalone user question.")
+            else:
+                messages = (
+                    execution.messages
+                    if latest_state is not None
+                    else await self.compact_history(execution, lease, base_model)
+                )
             agent_input = BlixV1Input(
                 messages=messages,
                 notifications=execution.notifications,

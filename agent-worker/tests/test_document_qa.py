@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 from blix_agent_worker.agents.document_qa.document_qa_v1 import DocumentQAV1Agent
+from blix_agent_worker.clients.knowledge import KnowledgeClientError
 from blix_agent_worker.models.agent import AgentResultStatus, AgentTask
 from blix_agent_worker.models.common import new_ulid
 from blix_agent_worker.models.llm import ModelCallRequest, ModelMessage, ModelMessageRole, ModelResponse
@@ -13,7 +14,7 @@ from blix_agent_worker.tools.knowledge.knowledge_document_search_v1 import Knowl
 
 
 class DocumentQATests(unittest.IsolatedAsyncioTestCase):
-    def fixture(self, *, no_hits=False, foreign_evidence=False):
+    def fixture(self, *, no_hits=False, foreign_evidence=False, search_fails=False):
         document_id = new_ulid("document")
         conversation_id, session_id = new_ulid("conversation"), new_ulid("session")
         citation = f"/knowledge/documents/{document_id}?preview=1&page=2"
@@ -32,6 +33,8 @@ class DocumentQATests(unittest.IsolatedAsyncioTestCase):
         class Client:
             async def request(self, url, method, path, **kwargs):
                 calls.append((path, kwargs["params"]))
+                if search_fails:
+                    raise KnowledgeClientError("knowledge_unavailable", "Search service unavailable.")
                 evidence = {"document_id": new_ulid("document") if foreign_evidence else document_id,
                             "pdf_page": 2, "source_record_id": new_ulid("sourcerecord"),
                             "content": "T.3.2 requires two independent circuits.", "citation_url": citation,
@@ -78,15 +81,19 @@ class DocumentQATests(unittest.IsolatedAsyncioTestCase):
         model.messages = [self.answer("Unverified remembered requirement.")]
         result = await agent.run(task)
         self.assertEqual(result.status, AgentResultStatus.FAILED)
-        self.assertIn("must search", result.error.message)
+        self.assertEqual(result.error.code, "invalid_document_question")
+        self.assertIn("current document", result.error.message)
 
-    async def test_greeting_or_clarification_does_not_require_document_search(self):
+    async def test_greeting_or_follow_up_is_rejected_with_actionable_validation_error(self):
         agent, model, task, _, _, calls = self.fixture()
         model.messages = [ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
-            "message": "Hi! What would you like to know about this document?", "response_kind": "clarification",
+            "message": "Ask a standalone question.", "response_kind": "invalid_question",
         }))]
         result = await agent.run(task)
-        self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
+        self.assertEqual(result.status, AgentResultStatus.FAILED)
+        self.assertIn("standalone question", result.error.message)
+        self.assertEqual(result.error.code, "invalid_document_question")
+        self.assertIn("greetings and follow-ups", result.error.message)
         self.assertFalse(calls)
 
     async def test_no_hits_can_produce_an_honest_no_answer(self):
@@ -95,6 +102,15 @@ class DocumentQATests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
             result = await agent.run(task)
         self.assertEqual(result.status, AgentResultStatus.SUCCEEDED)
+
+    async def test_search_outage_is_not_reported_as_an_invalid_question(self):
+        agent, model, task, _, _, _ = self.fixture(search_fails=True)
+        model.messages = [self.tool_call(task, "search", query="brakes"), self.answer("Unable to search.")]
+        with patch.dict("os.environ", {"KNOWLEDGE_URL": "http://knowledge"}):
+            result = await agent.run(task)
+        self.assertEqual(result.status, AgentResultStatus.FAILED)
+        self.assertEqual(result.error.code, "invalid_agent_output")
+        self.assertIn("couldn’t search", result.error.message)
 
     async def test_rejects_invented_citations_and_foreign_document_evidence(self):
         for foreign in (False, True):

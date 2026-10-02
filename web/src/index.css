@@ -999,4 +999,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-chat-composer { margin: 0; }
 .document-chat-composer textarea { min-height: 64px; }
 .document-chat-panel > .runtime-error { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.document-question-error { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid var(--red); border-radius: 10px; color: var(--red); background: var(--red-soft); font-size: 14px; line-height: 1.6; }
+.document-question-error > svg { flex-shrink: 0; margin-top: 2px; }
+.document-question-error p { margin: 4px 0 0; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .document-chat-messages { scroll-behavior: auto; } }

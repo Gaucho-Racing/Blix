@@ -32,7 +32,7 @@ func (s *ExecutionService) GetDocumentChat(ctx context.Context, documentID, owne
 		return nil, ErrInvalid
 	}
 	var conversation model.Conversation
-	err := documentChatQuery(s.database.WithContext(ctx), documentID, owner).First(&conversation).Error
+	err := documentChatQuery(s.database.WithContext(ctx), documentID, owner).Order("created_at DESC, id DESC").Take(&conversation).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -51,20 +51,6 @@ func (s *ExecutionService) CreateDocumentChat(ctx context.Context, documentID st
 	}
 	var result CreatedConversation
 	err := s.transaction(ctx, func(tx *gorm.DB) error {
-		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", "document-chat:"+caller.EntityID+":"+documentID).Error; err != nil {
-			return err
-		}
-		var existing model.Conversation
-		if err := documentChatQuery(tx, documentID, caller.EntityID).First(&existing).Error; err == nil {
-			var session model.AgentSession
-			if err := tx.First(&session, "id = ?", existing.LeadSessionID).Error; err != nil {
-				return err
-			}
-			result = CreatedConversation{Conversation: existing, Session: session}
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
 		conversation := model.Conversation{ID: identifier.New(identifier.Conversation), CallerEntityID: caller.EntityID, CallerContext: datatypes.NewJSONType(caller), Status: "active", DocumentIDs: datatypes.NewJSONSlice([]string{documentID})}
 		session, err := s.createSession(tx, conversation.ID, nil, profiles["document_qa_v1"], "")
 		if err != nil {

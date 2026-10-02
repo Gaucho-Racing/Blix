@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowUp, LoaderCircle, Square } from "lucide-react"
+import { AlertCircle, ArrowUp, LoaderCircle, Square } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
-import { createDocumentChat, getDocumentChat } from "@/lib/document-chat"
+import { createDocumentChat, documentQuestionFailure, getDocumentChat } from "@/lib/document-chat"
 import type { DocumentDetails } from "@/lib/documents"
 import {
   activeStatus, appendMessage, errorMessage, getConversation,
@@ -51,7 +51,8 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
   const send = useMutation({
     mutationFn: async (question: string) => {
       follow.current = true
-      const chat = lookup.data ?? await createDocumentChat(document.document_id)
+      await cache.cancelQueries({ queryKey: lookupKey })
+      const chat = await createDocumentChat(document.document_id)
       cache.setQueryData(lookupKey, chat)
       await appendMessage(chat.conversation_id, question)
       await Promise.all([
@@ -66,6 +67,13 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
     onSuccess: refresh,
   })
   const latestTurn = conversation.data?.turns.at(-1)
+  const failure = documentQuestionFailure(latestTurn, events.data ?? [])
+  const turnStatus = latestTurn?.status
+  useEffect(() => {
+    if (conversationID && turnStatus && !activeStatus(turnStatus)) {
+      void cache.invalidateQueries({ queryKey: ["conversation-events", conversationID] })
+    }
+  }, [cache, conversationID, turnStatus])
   const messages = conversation.data?.messages ?? []
   const disabled = working || send.isPending || lookup.isPending || lookup.isError ||
     (!!conversationID && !conversation.data)
@@ -96,10 +104,11 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
         {!messages.length && !lookup.isPending && (
           <p className="document-chat-empty">Test our document extraction. Answers use only this document and don’t have access to other resources.</p>
         )}
-        {latestTurn && ["failed", "expired", "cancelled"].includes(latestTurn.status) && (
-          <p className="runtime-error" role="status">
-            {latestTurn.status === "cancelled" ? "Answer stopped." : "Blix couldn’t finish answering. You can send the question again."}
-          </p>
+        {failure && (
+          <div className="document-question-error" role="alert">
+            <AlertCircle size={18} aria-hidden="true" />
+            <div><strong>{failure.title}</strong><p>{failure.message}</p></div>
+          </div>
         )}
       </div>
       {(lookup.error || conversation.error || events.error || send.error || stop.error) && (
@@ -124,7 +133,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
             }
           }} />
         <div>
-          <span>Enter to send · Shift + Enter for a new line</span>
+          <span>Each question starts fresh.</span>
           {working && <button className="secondary-button" type="button" disabled={stop.isPending}
             onClick={() => stop.mutate()}><Square size={13} /> Stop</button>}
           <button className="primary-button" type="submit" aria-label="Send document question" disabled={disabled || !draft.trim()}>

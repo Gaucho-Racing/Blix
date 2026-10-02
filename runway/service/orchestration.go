@@ -224,6 +224,15 @@ func (s *ExecutionService) AppendUserMessageWithDisplay(ctx context.Context, cid
 		if !ok {
 			return ErrInvalid
 		}
+		if session.ProfileID == "document_qa_v1" {
+			var turns int64
+			if err := tx.Model(&model.Turn{}).Where("conversation_id = ?", cid).Count(&turns).Error; err != nil {
+				return err
+			}
+			if turns != 0 {
+				return fmt.Errorf("%w: document questions require a new conversation", ErrConflict)
+			}
+		}
 		policy := profile.Policy
 		turn := model.Turn{ID: identifier.New(identifier.Turn), ConversationID: c.ID, SessionID: c.LeadSessionID, Status: model.StatusQueued, Policy: datatypes.NewJSONType(policy), DeadlineAt: time.Now().UTC().Add(time.Duration(policy.DeadlineSeconds) * time.Second), Notifications: encoded([]any{})}
 		msg := model.Message{ID: identifier.New(identifier.Message), ConversationID: cid, TurnID: turn.ID, SessionID: c.LeadSessionID, Role: "user", Content: content, DisplayContent: displayContent}

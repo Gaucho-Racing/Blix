@@ -2,7 +2,7 @@ import json
 import re
 from typing import Literal
 
-from blix_agent_worker.agents.tool_agent import ToolAgent
+from blix_agent_worker.agents.tool_agent import AgentOutputValidationError, ToolAgent
 from blix_agent_worker.models.agent import AgentDefinition, AgentKind, AgentTask
 from blix_agent_worker.models.common import ContractModel, DocumentID, NonEmptyText
 from blix_agent_worker.models.llm import ModelMessage, ModelMessageRole
@@ -17,7 +17,7 @@ class DocumentQAV1Input(ContractModel):
 
 class DocumentQAV1Output(ContractModel):
     message: NonEmptyText
-    response_kind: Literal["document_answer", "clarification"] = "document_answer"
+    response_kind: Literal["document_answer", "invalid_question"] = "document_answer"
 
 
 class DocumentQAV1Agent(ToolAgent):
@@ -41,9 +41,11 @@ class DocumentQAV1Agent(ToolAgent):
             "Be concise for quick questions, and take additional searches when the question warrants it. "
             "You cannot approve, reject, publish, edit, or research outside this document."
             " Use response_kind=document_answer for document answers, including insufficient-evidence answers; "
-            "these require a successful search in this turn. For greetings or requests to clarify the user's "
-            "question, use response_kind=clarification; no search is needed, but include no factual claims "
-            "about this or any other document and no outside knowledge."
+            "these require a successful search in this turn. Only standalone document questions are supported. "
+            "There is no conversation history and no follow-up dialogue. For greetings, unrelated requests, "
+            "or questions requiring a prior exchange to understand, use response_kind=invalid_question. "
+            "Do not greet the user or invite conversational follow-ups; ask them to submit a standalone "
+            "question about this document. A clear request to summarize or explain document content is valid."
         ),
         input_schema=DocumentQAV1Input.model_json_schema(),
         output_schema=DocumentQAV1Output.model_json_schema(),
@@ -59,16 +61,20 @@ class DocumentQAV1Agent(ToolAgent):
         ]
 
     def validate_output(self, task: AgentTask, output: DocumentQAV1Output, messages: list[ModelMessage]) -> None:
+        if output.response_kind == "invalid_question":
+            raise AgentOutputValidationError("invalid_document_question", "You can only ask questions about the current document. Ask a standalone question; greetings and follow-ups aren’t supported.")
         document_id = DocumentQAV1Input.model_validate(task.input).document_id
         requests = {request.ref: request for message in messages for request in message.call_requests}
         citations = set()
         searched = False
+        attempted_search = False
         for message in messages:
             if message.role is not ModelMessageRole.CALL_OUTPUT or message.call_request_ref not in requests:
                 continue
             request = requests[message.call_request_ref]
             if request.callable_id != "knowledge_document_search_v1":
                 continue
+            attempted_search = attempted_search or request.arguments.get("operation") == "search"
             result = ToolResult.model_validate_json(message.content)
             if result.status is not ToolResultStatus.SUCCEEDED:
                 continue
@@ -84,8 +90,10 @@ class DocumentQAV1Agent(ToolAgent):
                     raise ValueError("Document Q&A received evidence outside its document scope.")
                 if passage.get("citation_url"):
                     citations.add(passage["citation_url"])
-        if output.response_kind == "document_answer" and not searched:
-            raise ValueError("Document Q&A must search original document evidence before answering.")
+        if not searched:
+            if attempted_search:
+                raise ValueError("Blix couldn’t search this document. Try your question again.")
+            raise AgentOutputValidationError("invalid_document_question", "You can only ask questions about the current document. Ask a standalone question; greetings and follow-ups aren’t supported.")
         links = set(re.findall(r"\]\(([^\s)]+)\)", output.message))
         if not links.issubset(citations):
             raise ValueError("Document Q&A may cite only URLs returned by its document retrieval tools.")

@@ -478,6 +478,12 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             execution.profile.profile_id = "document_qa_v1"
             execution.session.profile_id = "document_qa_v1"
             execution.allowed_tool_ids = ("knowledge_document_search_v1",)
+            template = execution.messages[0]
+            execution.messages = (
+                template.model_copy(update={"message_id": new_ulid("message"), "role": "assistant", "content": "Prior answer must not enter this query."}),
+                *execution.messages,
+                template.model_copy(update={"message_id": new_ulid("message"), "content": "Other question must not enter this query."}),
+            )
             caller = SentinelUser.model_construct(
                 id=execution.conversation.caller_context.user_id,
                 entity_id=execution.conversation.caller_context.entity_id,
@@ -528,6 +534,9 @@ class ApiRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(access_checks), 2)
             self.assertTrue(all(check == {"document_ids": [document_id], "mode": "questions"} for check in access_checks))
             self.assertTrue(all(request.output_format.id == "document_qa_v1" for request in model.requests))
+            prompt = " ".join(message.content or "" for message in model.requests[0].messages)
+            self.assertNotIn("Prior answer", prompt)
+            self.assertNotIn("Other question", prompt)
             completed = [payload for operation, payload in operations if operation == "complete"]
             self.assertEqual(len(completed), 0 if rejected else 1)
 
