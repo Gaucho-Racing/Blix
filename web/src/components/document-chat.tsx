@@ -134,7 +134,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
         event.preventDefault()
         if (!disabled && draft.trim()) send.mutate(draft.trim())
       }}>
-        <textarea aria-label="Ask about this document" placeholder="Ask a question about this document…"
+        <textarea aria-label="Ask about this document" placeholder="Ask about this document…"
           ref={input} rows={1} value={draft} maxLength={16000} disabled={disabled}
           onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -143,11 +143,16 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
             }
           }} />
         <div>
-          {working && <button className="secondary-button" type="button" disabled={stop.isPending}
-            onClick={() => stop.mutate()}><Square size={13} /> Stop</button>}
-          <button className="primary-button" type="submit" aria-label="Send document question" disabled={disabled || !draft.trim()}>
-            {send.isPending ? <LoaderCircle className="spin" size={16} /> : <ArrowUp size={16} />}
-          </button>
+          {working ? (
+            <button className="secondary-button" type="button" aria-label="Stop answering" title="Stop answering"
+              disabled={stop.isPending} onClick={() => stop.mutate()}>
+              {stop.isPending ? <LoaderCircle className="spin" size={14} /> : <Square size={12} />}
+            </button>
+          ) : (
+            <button className="primary-button" type="submit" aria-label="Send document question" disabled={disabled || !draft.trim()}>
+              {send.isPending ? <LoaderCircle className="spin" size={14} /> : <ArrowUp size={14} />}
+            </button>
+          )}
         </div>
       </form>
     </section>
