@@ -579,7 +579,7 @@ func sessionMetadata(current *createdConversation, caller *callerContext, endpoi
 	if caller != nil {
 		callerID = caller.EntityID
 	}
-	labelStyle := lipgloss.NewStyle().Foreground(muted).Width(11)
+	labelStyle := lipgloss.NewStyle().Foreground(muted).Width(14)
 	valueStyle := lipgloss.NewStyle().Bold(true).Foreground(white)
 	rows := []struct {
 		label string
@@ -587,8 +587,8 @@ func sessionMetadata(current *createdConversation, caller *callerContext, endpoi
 	}{
 		{label: "agent", value: agentID},
 		{label: "caller", value: callerID},
-		{label: "run", value: conversationID},
-		{label: "execution", value: sessionID},
+		{label: "conversation", value: conversationID},
+		{label: "session", value: sessionID},
 		{label: "endpoint", value: endpoint},
 	}
 	lines := make([]string, 0, len(rows))
