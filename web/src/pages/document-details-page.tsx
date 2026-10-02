@@ -7,6 +7,7 @@ import {
   LoaderCircle,
 } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
+import { useState } from "react"
 import {
   controlDocument,
   documentProcessing,
@@ -30,6 +31,9 @@ import { DocumentTags } from "@/components/document-tags"
 
 export function DocumentDetailsPage() {
   const { documentID = "" } = useParams()
+  const [previewDocumentID, setPreviewDocumentID] = useState<string | null>(
+    null,
+  )
   const query = useQuery({
     queryKey: ["document", documentID],
     queryFn: ({ signal }) => getDocument(documentID, signal),
@@ -73,16 +77,19 @@ export function DocumentDetailsPage() {
           )}
           <DocumentMetadata
             details={query.data}
+            onPreview={() => setPreviewDocumentID(documentID)}
             key={`${documentID}:${query.data.document.metadata_revision}`}
           />
           <DocumentReadingNotes details={query.data} key={documentID} />
           <DocumentSources details={query.data} key={`sources:${documentID}`} />
-          {query.data.document.size_bytes > 0 && (
-            <DocumentPDFPreview
-              document={query.data.document}
-              key={documentID}
-            />
-          )}
+          {previewDocumentID === documentID &&
+            query.data.document.size_bytes > 0 && (
+              <DocumentPDFPreview
+                document={query.data.document}
+                onClose={() => setPreviewDocumentID(null)}
+                key={documentID}
+              />
+            )}
         </>
       )}
     </div>

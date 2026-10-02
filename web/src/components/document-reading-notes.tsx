@@ -46,7 +46,7 @@ export function DocumentReadingNotes({
   return (
     <section className="panel document-reading-notes">
       <header>
-        <h2>Reading notes</h2>
+        <h2>Blix's notes</h2>
       </header>
       {notes && (
         <details className="ingestion-notes">
