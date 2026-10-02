@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, ArrowUp, LoaderCircle, Square } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
 import { createDocumentChat, documentQuestionFailure } from "@/lib/document-chat"
@@ -18,6 +18,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
   const [draft, setDraft] = useState("")
   const [conversationID, setConversationID] = useState("")
   const transcript = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLTextAreaElement>(null)
   const follow = useRef(true)
   const conversation = useQuery({
     queryKey: ["conversation", conversationID],
@@ -77,12 +78,30 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
     transcript.current?.scrollTo({ top: transcript.current.scrollHeight, behavior: reducedMotion ? "instant" : "smooth" })
   }, [messages.length, liveText])
+  useLayoutEffect(() => {
+    const element = input.current
+    if (!element) return
+    let width = element.clientWidth
+    const resize = () => {
+      element.style.height = "auto"
+      element.style.height = `${element.scrollHeight}px`
+    }
+    resize()
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return
+      width = element.clientWidth
+      resize()
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [draft])
 
   return (
     <section className="panel document-chat-panel">
       <header className="document-metadata-heading">
         <h2>Ask about this document</h2>
       </header>
+      <p className="document-chat-description">Test our document extraction. Answers use only this document and don’t have access to other resources.</p>
       <div className="document-chat-messages" ref={transcript} onScroll={(event) => {
         const element = event.currentTarget
         follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 56
@@ -94,9 +113,6 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
         {live.map(([id, content]) => <ChatMessage key={id} role="assistant" content={content} />)}
         {working && !live.length && (
           <p className="document-chat-working" role="status"><LoaderCircle className="spin" size={15} /> Searching this document…</p>
-        )}
-        {!messages.length && (
-          <p className="document-chat-empty">Test our document extraction. Answers use only this document and don’t have access to other resources.</p>
         )}
         {failure && (
           <div className="document-question-error" role="alert">
@@ -119,7 +135,7 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
         if (!disabled && draft.trim()) send.mutate(draft.trim())
       }}>
         <textarea aria-label="Ask about this document" placeholder="Ask a question about this document…"
-          rows={2} value={draft} maxLength={16000} disabled={disabled}
+          ref={input} rows={1} value={draft} maxLength={16000} disabled={disabled}
           onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
@@ -127,7 +143,6 @@ export function DocumentChat({ details }: { details: DocumentDetails }) {
             }
           }} />
         <div>
-          <span>Each question starts fresh.</span>
           {working && <button className="secondary-button" type="button" disabled={stop.isPending}
             onClick={() => stop.mutate()}><Square size={13} /> Stop</button>}
           <button className="primary-button" type="submit" aria-label="Send document question" disabled={disabled || !draft.trim()}>

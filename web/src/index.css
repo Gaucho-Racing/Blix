@@ -990,14 +990,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-info-layout.with-document-chat { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 .document-info-layout > .panel { min-width: 0; }
 .document-chat-panel { display: flex; flex-direction: column; padding: 1.5rem; }
+.document-chat-panel > .document-metadata-heading { margin-bottom: 12px; }
+.document-chat-description { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 @media (max-width: 1100px) { .document-info-layout.with-document-chat { grid-template-columns: minmax(0, 1fr); } }
 .document-chat-messages { flex: 1; min-height: 80px; max-height: 420px; overflow-y: auto; overscroll-behavior: contain; margin: 1.25rem 0; scroll-behavior: smooth; }
 .document-chat-messages .chat-message { padding: 16px 0; }
 .document-chat-messages .chat-message-body { font-size: 14px; }
-.document-chat-empty, .document-chat-working { margin: 0; padding: 8px 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.document-chat-working { margin: 0; padding: 8px 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .document-chat-working { display: flex; align-items: center; gap: 8px; }
-.document-chat-composer { margin: 0; }
-.document-chat-composer textarea { min-height: 64px; }
+.document-chat-composer { display: flex; align-items: flex-end; gap: 10px; margin: 0; padding: 10px 12px; }
+.document-chat-composer textarea { display: block; flex: 1; min-width: 0; width: auto; min-height: 0; padding: 5px 0; resize: none; overflow-y: auto; }
+.document-chat-composer > div { flex-shrink: 0; margin-top: 0; gap: 8px; }
 .document-chat-panel > .runtime-error { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .document-question-error { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid var(--red); border-radius: 10px; color: var(--red); background: var(--red-soft); font-size: 14px; line-height: 1.6; }
 .document-question-error > svg { flex-shrink: 0; margin-top: 2px; }
