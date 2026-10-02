@@ -13,6 +13,7 @@ import { Link } from "react-router-dom"
 import { ReviewConfirmationDialog } from "@/components/review-confirmation-dialog"
 import { WikiMarkdown } from "@/components/wiki-markdown"
 import { StatusBadge } from "@/components/status-badge"
+import { IdentityDisplay } from "@/components/identity-display"
 import { formatTimestamp } from "@/lib/format"
 import {
   getChangesetBase,
@@ -159,7 +160,7 @@ export function ChangesetReview({
                 {formatTimestamp(changeset.reviewed_at)}
               </time>
             )}
-            <code>{changeset.reviewed_by}</code>
+            <IdentityDisplay entityID={changeset.reviewed_by} />
             {changeset.review_note && <p>{changeset.review_note}</p>}
           </div>
         </section>

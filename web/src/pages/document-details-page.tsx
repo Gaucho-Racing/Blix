@@ -6,7 +6,6 @@ import {
   GitPullRequest,
   LoaderCircle,
 } from "lucide-react"
-import { useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import {
   controlDocument,
@@ -14,20 +13,18 @@ import {
   documentStatusLabel,
   downloadDocument,
   getDocument,
-  getDocumentChunk,
 } from "@/lib/documents"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import type { DocumentDetails } from "@/lib/documents"
 import { useAuth } from "@/lib/auth"
 import { DocumentReview } from "@/components/document-review"
 import { DocumentMetadata } from "@/components/document-metadata"
 import { DocumentPDFPreview } from "@/components/document-pdf-preview"
+import { DocumentReadingNotes } from "@/components/document-reading-notes"
+import { DocumentChangesets } from "@/components/document-changesets"
 import { ProgressBar } from "@/components/progress-bar"
 import { errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
 import { StatusBadge } from "@/components/status-badge"
-import { ThemedSelect } from "@/components/themed-select"
 import { DocumentTags } from "@/components/document-tags"
 
 export function DocumentDetailsPage() {
@@ -40,6 +37,10 @@ export function DocumentDetailsPage() {
         ? 2000
         : ["pending", "in_review"].includes(
               query.state.data?.document.review_status ?? "",
+            ) ||
+            query.state.data?.changesets.some(
+              (changeset) =>
+                !["committed", "rejected"].includes(changeset.status),
             )
           ? 5000
           : false,
@@ -64,11 +65,16 @@ export function DocumentDetailsPage() {
         <>
           <DocumentHeader details={query.data} />
           <DocumentReview details={query.data} />
-          <DocumentIngestion details={query.data} />
+          {query.data.document.review_status === "ingested" ? (
+            <DocumentChangesets changesets={query.data.changesets} />
+          ) : (
+            <DocumentIngestion details={query.data} />
+          )}
           <DocumentMetadata
             details={query.data}
             key={`${documentID}:${query.data.document.metadata_revision}`}
           />
+          <DocumentReadingNotes details={query.data} key={documentID} />
           {query.data.document.size_bytes > 0 && (
             <DocumentPDFPreview
               document={query.data.document}
@@ -82,17 +88,13 @@ export function DocumentDetailsPage() {
 }
 
 function DocumentIngestion({ details }: { details: DocumentDetails }) {
-  const { document, chunks, notes, changesets } = details
+  const { document, chunks, changesets } = details
   const cache = useQueryClient()
   const auth = useAuth()
   const canControl =
     auth.user?.entity_id === document.uploaded_by &&
     document.review_status !== "rejected"
-  const [selectedChunk, setSelectedChunk] = useState<number | null>(null)
   const completed = chunks.filter((chunk) => chunk.completed_at !== null)
-  const currentChunk =
-    completed.find((chunk) => chunk.number === selectedChunk)?.number ??
-    completed[0]?.number
   const active = documentProcessing(document.status)
   const control = useMutation({
     mutationFn: (operation: "cancel" | "retry" | "complete") =>
@@ -102,24 +104,6 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
       void cache.invalidateQueries({ queryKey: ["documents"] })
     },
   })
-  const reading = useQuery({
-    queryKey: ["document-chunk", document.document_id, currentChunk],
-    queryFn: ({ signal }) =>
-      getDocumentChunk(document.document_id, currentChunk!, signal),
-    enabled: currentChunk !== undefined,
-    refetchInterval: active ? 5000 : false,
-  })
-  const pageLabel = (id: string) => {
-    const page = details.pages.find((page) => page.source_record_id === id)
-    return page ? `PDF page ${page.page_number}` : id
-  }
-  const citedNotes = (content: string) =>
-    content
-      .replace(
-        /\[([^\]]+)\]\((sourcerecord_[0-9a-z]{26})\)/g,
-        (_, label: string, id: string) => `${label} (${pageLabel(id)})`,
-      )
-      .replace(/sourcerecord_[0-9a-z]{26}/g, pageLabel)
   return (
     <section className="panel ingestion-panel">
       <header className="workspace-toolbar">
@@ -220,49 +204,6 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
             </Link>
           ))}
         </div>
-      )}
-      {notes && (
-        <details className="ingestion-notes">
-          <summary>Working notes · revision {notes.revision}</summary>
-          <div className="wiki-markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {citedNotes(notes.notes)}
-            </ReactMarkdown>
-          </div>
-        </details>
-      )}
-      {completed.length > 0 && (
-        <details className="ingestion-notes">
-          <summary>Saved section findings</summary>
-          <div className="ingestion-section-selector">
-            <ThemedSelect
-              label="Reading section"
-              value={String(currentChunk)}
-              onValueChange={(value) => setSelectedChunk(Number(value))}
-              options={completed.map((chunk) => ({
-                value: String(chunk.number),
-                label: `Chunk ${chunk.number} · PDF pages ${chunk.first_page}–${chunk.last_page}`,
-              }))}
-            />
-          </div>
-          {reading.isPending && (
-            <p className="loading-state">
-              <LoaderCircle className="spin" size={16} /> Loading section…
-            </p>
-          )}
-          {reading.error && (
-            <p role="alert" className="runtime-error">
-              {errorMessage(reading.error)}
-            </p>
-          )}
-          {reading.data && (
-            <div className="wiki-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {citedNotes(reading.data.chunk.findings)}
-              </ReactMarkdown>
-            </div>
-          )}
-        </details>
       )}
     </section>
   )

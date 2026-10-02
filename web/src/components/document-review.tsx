@@ -3,6 +3,7 @@ import { Check, X } from "lucide-react"
 import { useState } from "react"
 import { ReviewConfirmationDialog } from "@/components/review-confirmation-dialog"
 import { StatusBadge } from "@/components/status-badge"
+import { IdentityDisplay } from "@/components/identity-display"
 import { useAuth } from "@/lib/auth"
 import {
   documentProcessingComplete,
@@ -88,7 +89,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
             {document.reviewed_at &&
               ` · ${formatTimestamp(document.reviewed_at)}`}
           </strong>
-          <code>{document.reviewed_by}</code>
+          <IdentityDisplay entityID={document.reviewed_by} />
           {document.review_note && <p>{document.review_note}</p>}
         </div>
       )}

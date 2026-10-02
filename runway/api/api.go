@@ -92,7 +92,7 @@ func InitializeRoutes(
 	router.POST("/v1/auth/login", handler.LoginWithSentinel)
 	router.GET("/v1/auth/session", RequireAuthentication(auth), handler.GetSession)
 	router.GET("/auth/users/@me", RequireAuthentication(auth), handler.GetCurrentUser)
-	router.POST("/identities/resolve", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ResolveIdentities)
+	router.POST("/identities/resolve", RequireAuthentication(auth), RequireGroup("BlixUsers", adminGroup), handler.ResolveIdentities)
 	router.POST("/v1/auth/refresh", handler.RefreshSession)
 	router.POST("/v1/auth/logout", handler.Logout)
 	router.GET("/v1/events/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamAllEvents)
