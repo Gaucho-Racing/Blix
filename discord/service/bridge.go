@@ -93,7 +93,7 @@ func (b *Bridge) ProcessInbox(ctx context.Context) (bool, error) {
 			content = "This Blix run belongs to the person who started it. Mention me in a new message to start your own run."
 		}
 		if upstream.Code == "empty_question" {
-			content = "Mention me with a question. Import documents from the Knowledge page in Blix."
+			content = "Hey! How can I help?"
 		}
 		if upstream.Code == "unsupported_channel" {
 			content = "Mention me in a text channel or a public thread."
