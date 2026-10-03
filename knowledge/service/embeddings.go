@@ -21,6 +21,7 @@ type EmbeddingService struct {
 	db         *gorm.DB
 	provider   Embedder
 	namespace  string
+	model      string
 	dimensions int
 	queries    chan struct{}
 	cacheMu    sync.Mutex
@@ -32,7 +33,11 @@ type queryEmbedding struct {
 }
 
 func NewEmbeddingService(db *gorm.DB, provider Embedder, namespace string, dimensions int) *EmbeddingService {
-	return &EmbeddingService{db: db, provider: provider, namespace: namespace, dimensions: dimensions, queries: make(chan struct{}, 8), cache: map[string]queryEmbedding{}}
+	s := &EmbeddingService{db: db, provider: provider, namespace: namespace, dimensions: dimensions, queries: make(chan struct{}, 8), cache: map[string]queryEmbedding{}}
+	if named, ok := provider.(interface{ ModelName() string }); ok {
+		s.model = named.ModelName()
+	}
+	return s
 }
 
 func wikiEmbeddingText(title, heading, content string) string {

@@ -5,6 +5,8 @@ import {
   controlDocument,
   documentProcessing,
   documentIngestionProgress,
+  documentEmbeddingsPending,
+  documentEmbeddingStep,
   type DocumentDetails,
   documentStatusLabel,
   importDocument,
@@ -140,5 +142,32 @@ describe("document preparation progress", () => {
     expect(documentIngestionProgress(details)).toEqual({
       value: 5, max: 5, label: "5 / 5 steps completed",
     })
+  })
+})
+
+
+describe("embedding generation progress", () => {
+  it("keeps polling and reports retries while keyword search stays available", () => {
+    const details = {
+      document: { status: "ready", stages: [] }, pages: [],
+      search_index: { status: "retry", total: 10, ready: 6, retrying: 4 },
+    } as unknown as DocumentDetails
+    expect(documentEmbeddingsPending(details)).toBe(true)
+    expect(documentEmbeddingStep(details.search_index)).toEqual({ status: "running", detail: "6 / 10 chunks ready · retrying 4" })
+    expect(documentIngestionProgress(details)).toEqual({ value: 5.6, max: 6, label: "5 / 6 steps completed" })
+    details.search_index.status = "ready"
+    details.search_index.ready = 10
+    expect(documentEmbeddingsPending(details)).toBe(false)
+    expect(documentIngestionProgress(details)).toEqual({ value: 6, max: 6, label: "6 / 6 steps completed" })
+    expect(documentEmbeddingStep(details.search_index).status).toBe("completed")
+  })
+
+  it("does not imply disabled or excluded generation is still running", () => {
+    const details = { search_index: { status: "disabled", ready: 0, total: 10 } } as DocumentDetails
+    expect(documentEmbeddingsPending(details)).toBe(false)
+    expect(documentEmbeddingStep(details.search_index).detail).toContain("Not configured")
+    details.search_index.status = "excluded"
+    expect(documentEmbeddingsPending(details)).toBe(false)
+    expect(documentEmbeddingStep(details.search_index).status).toBe("cancelled")
   })
 })

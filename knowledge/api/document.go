@@ -27,6 +27,25 @@ func (h *Handler) GetDocument(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) GetDocumentIndexes(c *gin.Context) {
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		respondError(c, service.ErrInvalid)
+		return
+	}
+	result, err := h.documents.IndexDetails(c.Request.Context(), c.Param("documentID"), offset, limit)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
 func (h *Handler) GetDocumentPage(c *gin.Context) {
 	number, err := strconv.Atoi(c.Param("number"))
 	if err != nil {

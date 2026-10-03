@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react"
+import { DocumentSearchIndexes } from "@/components/document-search-indexes"
 import { DocumentPageImage } from "@/components/document-page-image"
 import { useState } from "react"
 import { getDocumentPage, type DocumentDetails } from "@/lib/documents"
@@ -8,7 +9,7 @@ import { formatTimestamp } from "@/lib/format"
 
 export function DocumentSources({ details }: { details: DocumentDetails }) {
   const { document, pages } = details
-  const [view, setView] = useState<"text" | "visual">("text")
+  const [view, setView] = useState<"text" | "visual" | "chunks" | "embeddings">("text")
   const visualPages = pages.filter((page) => page.visual_source_record_id)
   const records = view === "visual" ? visualPages : pages
   const [selectedPage, setSelectedPage] = useState<number | null>(null)
@@ -27,7 +28,7 @@ export function DocumentSources({ details }: { details: DocumentDetails }) {
     ],
     queryFn: ({ signal }) =>
       getDocumentPage(document.document_id, page!.page_number, signal),
-    enabled: !!page,
+    enabled: !!page && (view === "text" || view === "visual"),
     staleTime: Infinity,
   })
 
@@ -52,8 +53,16 @@ export function DocumentSources({ details }: { details: DocumentDetails }) {
         <button type="button" aria-pressed={view === "visual"} onClick={() => setView("visual")}>
           Visual extractions · {visualPages.length}
         </button>
+        <button type="button" aria-pressed={view === "chunks"} onClick={() => setView("chunks")}>
+          Text chunks · {details.search_index?.total ?? 0}
+        </button>
+        <button type="button" aria-pressed={view === "embeddings"} onClick={() => setView("embeddings")}>
+          Embeddings · {details.search_index?.ready ?? 0} / {details.search_index?.total ?? 0}
+        </button>
       </div>
-      {!page ? (
+      {view === "chunks" || view === "embeddings" ? (
+        <DocumentSearchIndexes details={details} view={view} onSource={(number, kind) => { setSelectedPage(number); setView(kind) }} />
+      ) : !page ? (
         <p className="document-source-empty" role="status">
           {analyzed === pages.length
             ? "No visual evidence was identified in this document."

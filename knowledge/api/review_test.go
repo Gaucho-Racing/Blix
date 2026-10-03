@@ -42,6 +42,10 @@ func TestChangesetRoutesEnforceReviewRoles(t *testing.T) {
 		groups                         []string
 		status                         int
 	}{
+		{"anonymous document indexes", "GET", "/v1/documents/invalid/indexes", "", nil, 401},
+		{"nonmember document indexes", "GET", "/v1/documents/invalid/indexes", "USER", nil, 403},
+		{"user document indexes", "GET", "/v1/documents/invalid/indexes", "USER", []string{"BlixUsers"}, 400},
+		{"invalid index limit", "GET", "/v1/documents/invalid/indexes?limit=nope", "USER", []string{"BlixUsers"}, 400},
 		{"anonymous document rejection", "POST", "/v1/documents/invalid/review/reject", "", nil, 401},
 		{"nonmember document rejection", "POST", "/v1/documents/invalid/review/reject", "USER", nil, 403},
 		{"user document rejection", "POST", "/v1/documents/invalid/review/reject", "USER", []string{"BlixUsers"}, 400},

@@ -10,6 +10,7 @@ import { useState } from "react"
 import {
   controlDocument,
   documentProcessing,
+  documentEmbeddingsPending,
   documentIngestionProgress,
   documentStatusLabel,
   downloadDocument,
@@ -46,7 +47,7 @@ export function DocumentDetailsPage() {
     queryKey: ["document", documentID],
     queryFn: ({ signal }) => getDocument(documentID, signal),
     refetchInterval: (query) =>
-      query.state.data && documentProcessing(query.state.data.document.status)
+      query.state.data && (documentProcessing(query.state.data.document.status) || documentEmbeddingsPending(query.state.data))
         ? 2000
         : ["pending", "in_review"].includes(
               query.state.data?.document.review_status ?? "",
@@ -226,13 +227,13 @@ function DocumentIngestion({ details }: { details: DocumentDetails }) {
             </p>
           )}
         </div>
-        <DocumentIngestionTimeline document={document} />
+        <DocumentIngestionTimeline details={details} />
       </div>
     </section>
   )
 }
 
-function ingestionStage({ document }: DocumentDetails): string {
+function ingestionStage({ document, search_index }: DocumentDetails): string {
   if (document.review_status === "rejected")
     return "This document was rejected. Its saved evidence is retained for the review record."
   switch (document.status) {
@@ -251,7 +252,9 @@ function ingestionStage({ document }: DocumentDetails): string {
     case "identifying_metadata":
       return "Blix is identifying the document details."
     case "ready":
-      return "Text, visual evidence, and document details are ready for your review."
+      return search_index && ["waiting", "running", "retry"].includes(search_index.status)
+        ? "Document evidence and details are ready for review. Embeddings are generating in the background; keyword search is available."
+        : "Text, visual evidence, and document details are ready for your review."
     case "partial":
       return "Processing finished with some coverage gaps. Review the saved source evidence below."
     case "no_changes":

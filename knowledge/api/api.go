@@ -72,6 +72,7 @@ func InitializeRoutes(router *gin.Engine, sources *service.SourceService, wiki *
 	uploads.POST("/:documentID/ingestion/:operation", handler.ControlDocument)
 	uploads.GET("/:documentID/chunks/:number", handler.ReadDocumentChunk)
 	uploads.GET("/:documentID", handler.GetDocument)
+	uploads.GET("/:documentID/indexes", handler.GetDocumentIndexes)
 	uploads.PATCH("/:documentID/metadata", handler.UpdateDocumentMetadata)
 	uploads.GET("/:documentID/pages/:number", handler.GetDocumentPage)
 	uploads.GET("/:documentID/pages/:number/image", handler.GetDocumentPageImage)

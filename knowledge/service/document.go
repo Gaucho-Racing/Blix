@@ -38,6 +38,7 @@ type DocumentMetadata struct {
 }
 
 type DocumentDetails struct {
+	SearchIndex       DocumentSearchIndex          `json:"search_index"`
 	ReadyForQuestions bool                         `json:"ready_for_questions"`
 	Document          model.Document               `json:"document"`
 	Pages             []model.DocumentPage         `json:"pages"`
@@ -227,6 +228,11 @@ func (s *DocumentService) Get(ctx context.Context, id string) (DocumentDetails, 
 			return err
 		}
 		result.ReadyForQuestions = result.Document.ReviewStatus != model.DocumentReviewRejected && result.Document.PageCount > 0 && indexed == int64(result.Document.PageCount)
+		var err error
+		result.SearchIndex, err = s.documentSearchIndex(tx, result.Document)
+		if err != nil {
+			return err
+		}
 		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err

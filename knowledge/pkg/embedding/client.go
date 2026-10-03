@@ -22,6 +22,8 @@ type Client struct {
 	HTTP           *http.Client
 }
 
+func (c *Client) ModelName() string { return c.Model }
+
 func New(endpoint, key, model string, dimensions int) *Client {
 	return &Client{Endpoint: strings.TrimRight(endpoint, "/"), APIKey: key, Model: model, Dimensions: dimensions, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }

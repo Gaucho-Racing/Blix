@@ -88,6 +88,7 @@ export interface DocumentChunk {
   findings: string
 }
 export interface DocumentDetails {
+  search_index: DocumentSearchIndex
   ready_for_questions: boolean
   review_blocked: boolean
   chunks: DocumentChunk[]
@@ -102,6 +103,71 @@ export interface DocumentDetails {
     image_sha256?: string
     visual_analyzed_at?: string | null
   }[]
+}
+
+export interface DocumentSearchIndex {
+  status: "waiting" | "running" | "ready" | "retry" | "disabled" | "excluded"
+  model: string
+  dimensions: number
+  namespace: string
+  total: number
+  ready: number
+  pending: number
+  processing: number
+  retrying: number
+  text_chunks: number
+  visual_chunks: number
+  source_records: number
+  indexed_records: number
+}
+
+export interface DocumentIndexChunk {
+  source_chunk_id: string
+  source_record_id: string
+  pdf_page: number
+  kind: "text" | "visual"
+  ordinal: number
+  chunker_version: number
+  start_offset: number
+  end_offset: number
+  content: string
+  content_hash: string
+  rule_ids: string[]
+  indexed_at: string | null
+  embedding_status: "pending" | "processing" | "ready" | "retry" | "disabled"
+  embedding_attempts: number
+  embedding_updated_at: string | null
+  embedding_available_at: string | null
+  embedding_error: string
+}
+
+export interface DocumentIndexDetails {
+  search_index: DocumentSearchIndex
+  chunks: DocumentIndexChunk[]
+  offset: number
+  next_offset: number | null
+}
+
+export async function getDocumentIndexes(id: string, offset: number, signal?: AbortSignal) {
+  return (await api.get<DocumentIndexDetails>(`${root}/documents/${id}/indexes`, {
+    params: { offset, limit: 25 }, signal,
+  })).data
+}
+
+export function documentEmbeddingsPending(details: DocumentDetails) {
+  return ["waiting", "running", "retry"].includes(details.search_index?.status)
+}
+
+export function documentEmbeddingStep(index: DocumentSearchIndex): { status: DocumentStage["status"]; detail: string } {
+  const count = `${index.ready} / ${index.total} chunks ready`
+  switch (index.status) {
+    case "ready": return { status: "completed", detail: count }
+    case "disabled": return { status: "cancelled", detail: "Not configured · keyword search available" }
+    case "excluded": return { status: "cancelled", detail: `${count} · excluded from search` }
+    case "retry": return { status: "running", detail: `${count} · retrying ${index.retrying}` }
+    case "running": return { status: "running", detail: count }
+    case "waiting": return { status: "waiting", detail: "Waiting for text chunks" }
+  }
 }
 export interface DocumentPage {
   visual_record?: DocumentPage
@@ -328,21 +394,24 @@ export const documentIngestionSteps: { name: DocumentStage["name"]; label: strin
   { name: "identifying_metadata", label: "Identify document details" },
 ]
 
-export function documentIngestionProgress({ document, pages }: DocumentDetails) {
+export function documentIngestionProgress({ document, pages, search_index }: DocumentDetails) {
   const finished = documentProcessingComplete(document.status)
   const visualPages = pages.filter((page) => page.image_sha256)
   const analyzed = visualPages.filter((page) => page.visual_analyzed_at).length
-  const value = documentIngestionSteps.reduce((total, { name }) => {
+  let value = documentIngestionSteps.reduce((total, { name }) => {
     const stage = document.stages.find((stage) => stage.name === name)
     if (finished || stage?.status === "completed") return total + 1
     if (name === "analyzing_visuals" && visualPages.length) return total + analyzed / visualPages.length
     return total
   }, 0)
+  const embeddingsEnabled = search_index && !["disabled", "excluded"].includes(search_index.status)
+  const max = documentIngestionSteps.length + (embeddingsEnabled ? 1 : 0)
+  if (embeddingsEnabled) value += search_index.status === "ready" ? 1 : search_index.total ? Math.min(search_index.ready / search_index.total, .99) : 0
   return {
     value,
-    max: documentIngestionSteps.length,
+    max,
     label: document.status === "analyzing_visuals"
       ? `${analyzed} / ${visualPages.length} page images analyzed`
-      : `${Math.floor(value)} / ${documentIngestionSteps.length} steps completed`,
+      : `${Math.floor(value)} / ${max} steps completed`,
   }
 }

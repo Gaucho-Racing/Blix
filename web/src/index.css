@@ -1023,3 +1023,15 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-visual-sections { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .document-visual-sections span { padding: 5px 9px; color: var(--pink-strong); background: var(--pink-soft); border-radius: 7px; font-size: 14px; }
 @media (max-width: 1100px) { .document-visual-evidence { grid-template-columns: minmax(0, 1fr); } }
+
+.timeline-step-detail { display: block; font-size: 12px; font-weight: 400; line-height: 18px; color: var(--muted); }
+.document-source-views { flex-wrap: wrap; }
+.document-index-summary { display: grid; gap: 6px; margin: 0 0 20px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.document-source-record-list button > span { color: var(--muted); font-size: 13px; }
+.document-index-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 20px; color: var(--muted); font-size: 14px; }
+.document-embedding-state { display: flex; align-items: center; gap: 6px; }
+.embedding-ready { color: var(--green); }
+.embedding-processing, .embedding-retry { color: var(--pink-strong); }
+.document-index-identifiers { margin-bottom: 20px; font-size: 14px; }
+.document-index-identifiers summary { cursor: pointer; color: var(--muted); }
+.document-index-identifiers dl { margin-top: 12px; }
