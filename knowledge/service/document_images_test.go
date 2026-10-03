@@ -85,7 +85,7 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	}
 	metadata := ExtractedDocumentMetadata{Title: "Rules", SourceRecordIDs: []string{page.ID}}
 	identified, err := service.SaveExtractedMetadata(ctx, id, execution, metadata)
-	if err != nil || !documentStageComplete(identified.Document, "identifying_metadata") || identified.Document.ReviewStatus != model.DocumentReviewPending || identified.Document.Status != "analyzing_visuals" {
+	if err != nil || !documentStageComplete(identified.Document, "identifying_metadata") || identified.Document.ReviewStatus != model.DocumentReviewInReview || identified.Document.Status != "analyzing_visuals" {
 		t.Fatalf("metadata did not complete independently of visual analysis: %+v %v", identified, err)
 	}
 	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}

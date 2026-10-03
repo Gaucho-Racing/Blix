@@ -7,6 +7,8 @@ import {
   documentIngestionProgress,
   documentEmbeddingsPending,
   documentEmbeddingStep,
+  documentReadyForReview,
+  documentIngestionVisible,
   type DocumentDetails,
   documentStatusLabel,
   importDocument,
@@ -169,5 +171,30 @@ describe("embedding generation progress", () => {
     details.search_index.status = "excluded"
     expect(documentEmbeddingsPending(details)).toBe(false)
     expect(documentEmbeddingStep(details.search_index).status).toBe("cancelled")
+  })
+})
+
+describe("early document review", () => {
+  it("enables review after metadata and keeps unfinished approved ingestion visible", () => {
+    const details = {
+      document: { status: "analyzing_visuals", review_status: "pending", extracted_metadata: null, stages: [
+        { name: "identifying_metadata", status: "running" },
+        { name: "analyzing_visuals", status: "running" },
+      ] },
+      search_index: { status: "running" },
+    } as DocumentDetails
+    expect(documentReadyForReview(details.document)).toBe(false)
+    details.document.extracted_metadata = {} as DocumentDetails["document"]["extracted_metadata"]
+    details.document.stages[0].status = "completed"
+    details.document.review_status = "in_review"
+    expect(documentReadyForReview(details.document)).toBe(true)
+    details.document.review_status = "ingested"
+    expect(documentIngestionVisible(details)).toBe(true)
+    details.document.status = "ready"
+    expect(documentIngestionVisible(details)).toBe(true)
+    details.search_index.status = "ready"
+    expect(documentIngestionVisible(details)).toBe(false)
+    details.document.status = "failed"
+    expect(documentIngestionVisible(details)).toBe(true)
   })
 })

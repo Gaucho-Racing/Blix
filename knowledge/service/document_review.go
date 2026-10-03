@@ -35,6 +35,10 @@ func documentProcessingComplete(status string) bool {
 	return status == "ready" || status == "partial" || status == "no_changes" || status == "imported"
 }
 
+func documentReadyForReview(doc model.Document) bool {
+	return documentProcessingComplete(doc.Status) || (len(doc.ExtractedMetadata) > 0 && documentStageComplete(doc, "identifying_metadata"))
+}
+
 func documentPublicationStarted(changeset model.Changeset) bool {
 	return changeset.Status == model.ChangesetStatusCommitted || changeset.Status == model.ChangesetStatusPrepared || changeset.ResultCommitSHA != "" ||
 		(changeset.PublicationLeaseUntil != nil && changeset.PublicationLeaseUntil.After(time.Now()))
@@ -63,8 +67,8 @@ func (s *DocumentService) Review(ctx context.Context, id, decision string, input
 			return fmt.Errorf("%w: document review is already complete", ErrConflict)
 		}
 		if decision == "approve" {
-			if doc.ReviewStatus != model.DocumentReviewInReview || !documentProcessingComplete(doc.Status) {
-				return fmt.Errorf("%w: document processing must finish before approval", ErrConflict)
+			if doc.ReviewStatus != model.DocumentReviewInReview || !documentReadyForReview(doc) {
+				return fmt.Errorf("%w: document details must be identified before approval", ErrConflict)
 			}
 			return tx.Model(&doc).Updates(documentApprovalUpdates(input)).Error
 		}

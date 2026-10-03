@@ -12,6 +12,7 @@ import {
   documentProcessing,
   documentEmbeddingsPending,
   documentIngestionProgress,
+  documentIngestionVisible,
   documentStatusLabel,
   downloadDocument,
   getDocument,
@@ -82,11 +83,10 @@ export function DocumentDetailsPage() {
             onPreview={() => setPreviewDocumentID(documentID)}
           />
           <DocumentReview details={query.data} />
-          {query.data.document.review_status === "ingested" ? (
+          {query.data.document.review_status === "ingested" && (
             <DocumentChangesets changesets={query.data.changesets} />
-          ) : (
-            <DocumentIngestion details={query.data} />
           )}
+          {documentIngestionVisible(query.data) && <DocumentIngestion details={query.data} />}
           <div className={
             query.data.ready_for_questions &&
             query.data.document.review_status !== "rejected" &&

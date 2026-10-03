@@ -457,14 +457,14 @@ func (s *WikiService) applyReviewed(ctx context.Context, id string, review *Revi
 				return fmt.Errorf("%w: rejected document evidence cannot be published", ErrConflict)
 			}
 			if doc.ReviewStatus == model.DocumentReviewPending {
-				return fmt.Errorf("%w: document ingestion must finish before publishing its changeset", ErrConflict)
+				return fmt.Errorf("%w: document details must be identified before publishing its changeset", ErrConflict)
 			}
 			if doc.ReviewStatus == model.DocumentReviewInReview {
 				if review == nil {
 					return fmt.Errorf("%w: documents in review require BlixAdmin approval", ErrForbidden)
 				}
-				if !documentProcessingComplete(doc.Status) {
-					return fmt.Errorf("%w: document processing must finish before publishing its changeset", ErrConflict)
+				if !documentReadyForReview(doc) {
+					return fmt.Errorf("%w: document details must be identified before publishing its changeset", ErrConflict)
 				}
 			}
 		}

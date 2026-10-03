@@ -415,3 +415,17 @@ export function documentIngestionProgress({ document, pages, search_index }: Doc
       : `${Math.floor(value)} / ${max} steps completed`,
   }
 }
+
+export function documentReadyForReview(document: TeamDocument) {
+  return documentProcessingComplete(document.status) ||
+    (!!document.extracted_metadata && document.stages.some(
+      (stage) => stage.name === "identifying_metadata" && stage.status === "completed",
+    ))
+}
+
+export function documentIngestionVisible(details: DocumentDetails) {
+  return details.document.review_status !== "ingested" ||
+    documentProcessing(details.document.status) ||
+    documentEmbeddingsPending(details) ||
+    ["failed", "cancelled"].includes(details.document.status)
+}

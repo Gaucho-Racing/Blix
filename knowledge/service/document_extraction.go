@@ -55,7 +55,7 @@ func (s *DocumentService) lockedExtraction(ctx context.Context, tx *gorm.DB, id 
 	if s.runtime == nil {
 		return doc, ErrUnavailable
 	}
-	if doc.Generation != execution.Generation || doc.ReviewStatus != model.DocumentReviewPending || !documentIsProcessing(doc.Status) || doc.Status == "cancelling" {
+	if doc.Generation != execution.Generation || doc.ReviewStatus == model.DocumentReviewRejected || !documentIsProcessing(doc.Status) || doc.Status == "cancelling" {
 		return doc, ErrConflict
 	}
 	access, err := s.runtime.validate(ctx, id, execution)

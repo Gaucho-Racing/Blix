@@ -177,6 +177,9 @@ func (s *DocumentService) SaveExtractedMetadata(ctx context.Context, id string, 
 			}
 		}
 		setDocumentStage(&doc, "identifying_metadata", "completed")
+		if doc.ReviewStatus == model.DocumentReviewPending {
+			updates["review_status"] = model.DocumentReviewInReview
+		}
 		return saveDocumentProgress(tx, &doc, updates)
 	})
 	if err != nil {

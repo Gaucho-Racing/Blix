@@ -23,7 +23,7 @@ import {
 } from "@/lib/knowledge"
 import { useAuth } from "@/lib/auth"
 import { errorMessage } from "@/lib/runtime"
-import { documentProcessingComplete } from "@/lib/documents"
+import { documentProcessing, documentReadyForReview } from "@/lib/documents"
 import type { DocumentCitation, TeamDocument } from "@/lib/documents"
 
 export function ChangesetReview({
@@ -101,7 +101,7 @@ export function ChangesetReview({
         document.review_status !== "rejected" &&
         (document.review_status === "ingested" ||
           (document.review_status === "in_review" &&
-            documentProcessingComplete(document.status))),
+            documentReadyForReview(document))),
     )
   const canReject =
     canReview &&
@@ -419,6 +419,9 @@ export function ChangesetReview({
                     . Their other changesets will still need separate approval.
                   </p>
                 )}
+              {decision === "approve" && documents.some((document) => documentProcessing(document.status)) && (
+                <p>Remaining document processing will continue in the background.</p>
+              )}
               <p>
                 Your identity, review note, and decision time will be recorded.
               </p>

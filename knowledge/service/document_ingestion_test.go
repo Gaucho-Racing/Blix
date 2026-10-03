@@ -181,8 +181,8 @@ func TestAsyncDocumentLifecycleRetainsWorkAndVerifiesOriginal(t *testing.T) {
 		t.Fatalf("stale attempt accepted: %v", err)
 	}
 	identified, err := service.SaveExtractedMetadata(ctx, docID, execution, automatic)
-	if err != nil || identified.Document.ReviewStatus != model.DocumentReviewPending || !documentStageComplete(identified.Document, "identifying_metadata") {
-		t.Fatalf("metadata completion entered review early: %+v %v", identified, err)
+	if err != nil || identified.Document.ReviewStatus != model.DocumentReviewInReview || !documentStageComplete(identified.Document, "identifying_metadata") {
+		t.Fatalf("metadata completion did not enable review: %+v %v", identified, err)
 	}
 	if _, err := service.UpdateMetadata(ctx, docID, identifier.New(identifier.Entity), DocumentMetadataPatch{Revision: 1, Title: &manualTitle}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("foreign editor accepted: %v", err)

@@ -245,6 +245,11 @@ func TestChangesetPublicationAcceptsLinkedDocumentsOnlyAfterSuccess(t *testing.T
 	db, _, _, _ := indexFixture(t)
 	s, first := documentReviewFixture(t, db)
 	_, second := documentReviewFixture(t, db)
+	setDocumentStage(&first.Document, "identifying_metadata", "completed")
+	setDocumentStage(&first.Document, "analyzing_visuals", "running")
+	if err := saveDocumentProgress(db, &first.Document, map[string]any{"status": "analyzing_visuals", "extracted_metadata": datatypes.JSON([]byte("{}"))}); err != nil {
+		t.Fatal(err)
+	}
 	repo := &publishingRepository{publishErr: errors.New("publication failed")}
 	wiki := NewWikiService(db, repo)
 	head := strings.Repeat("a", 40)
@@ -275,6 +280,9 @@ func TestChangesetPublicationAcceptsLinkedDocumentsOnlyAfterSuccess(t *testing.T
 	for _, doc := range published.Documents {
 		if doc.ReviewStatus != model.DocumentReviewIngested || doc.ReviewedBy != admin.EntityID || doc.ReviewNote != "Verified requirements." || doc.ReviewedAt == nil {
 			t.Fatal("publication did not atomically accept its source documents")
+		}
+		if doc.ID == first.Document.ID && doc.Status != "analyzing_visuals" {
+			t.Fatal("publication changed unfinished background processing")
 		}
 	}
 }
@@ -479,5 +487,101 @@ func TestChangesetTracksDocumentCitationsBeyondSuppliedEvidence(t *testing.T) {
 	}
 	if _, err := wiki.CreateChangeset(ctx, input); !errors.Is(err, ErrConflict) {
 		t.Fatalf("retained rejected citation reused: %v", err)
+	}
+}
+
+func TestMetadataEnablesReviewAndApprovalSurvivesBackgroundWork(t *testing.T) {
+	db, _, _, _ := indexFixture(t)
+	s, details := documentReviewFixture(t, db)
+	ctx := context.Background()
+	doc := details.Document
+	doc.Stages = nil
+	for _, stage := range []string{"uploading", "extracting", "indexing"} {
+		setDocumentStage(&doc, stage, "completed")
+	}
+	setDocumentStage(&doc, "identifying_metadata", "running")
+	setDocumentStage(&doc, "analyzing_visuals", "running")
+	if err := saveDocumentProgress(db, &doc, map[string]any{"status": "analyzing_visuals", "review_status": model.DocumentReviewPending}); err != nil {
+		t.Fatal(err)
+	}
+	taskID := identifier.New(identifier.Prefix("task"))
+	retryTask := identifier.New(identifier.Prefix("task"))
+	runtime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/internal/v1/document-attempts/validate":
+			var request DocumentExecution
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			task := taskID
+			if request.Generation > 1 {
+				task = retryTask
+			}
+			json.NewEncoder(w).Encode(map[string]any{"task_id": task, "session_id": doc.SessionID, "run_id": doc.RunID, "profile_id": "document_ingest_v1", "attempt_number": 1, "input": map[string]any{"document_id": doc.ID, "generation": request.Generation}})
+		case "/internal/v1/document-ingestions":
+			var request struct {
+				DocumentID string `json:"document_id"`
+			}
+			json.NewDecoder(r.Body).Decode(&request)
+			if request.DocumentID != doc.ID {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"task_id": retryTask, "run_id": doc.RunID, "extraction_task_id": identifier.New(identifier.Prefix("task"))})
+		default:
+			json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+		}
+	}))
+	defer runtime.Close()
+	s.SetIntegration(nil, NewDocumentRuntimeClient(runtime.URL, "internal"))
+	execution := DocumentExecution{Generation: doc.Generation}
+	if _, err := s.Review(ctx, doc.ID, "approve", ReviewInput{Caller: reviewCaller(true)}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("accepted before details: %v", err)
+	}
+	identified, err := s.SaveExtractedMetadata(ctx, doc.ID, execution, ExtractedDocumentMetadata{Title: "Identified rules", SourceRecordIDs: []string{details.Pages[0].SourceRecordID}})
+	if err != nil || identified.Document.ReviewStatus != model.DocumentReviewInReview || identified.Document.Status != "analyzing_visuals" {
+		t.Fatalf("early review: %+v %v", identified.Document, err)
+	}
+	admin := reviewCaller(true)
+	approved, err := s.Review(ctx, doc.ID, "approve", ReviewInput{Caller: admin, Note: "Verified the original PDF."})
+	if err != nil || approved.Document.ReviewStatus != model.DocumentReviewIngested || documentStageComplete(approved.Document, "analyzing_visuals") {
+		t.Fatalf("early approval: %+v %v", approved.Document, err)
+	}
+	if err := db.Model(&model.Document{}).Where("id=?", doc.ID).Update("status", "failed").Error; err != nil {
+		t.Fatal(err)
+	}
+	retried, err := s.Control(ctx, doc.ID, doc.UploadedBy, "retry")
+	if err != nil || retried.Document.ReviewStatus != model.DocumentReviewIngested || retried.Document.ReviewedBy != admin.EntityID || !documentStageComplete(retried.Document, "identifying_metadata") {
+		t.Fatalf("retry lost approval: %+v %v", retried.Document, err)
+	}
+	if err := s.dispatchDocuments(ctx); err != nil {
+		t.Fatal(err)
+	}
+	scheduled, err := s.Get(ctx, doc.ID)
+	if err != nil || scheduled.Document.TaskID != retryTask || scheduled.Document.ReviewStatus != model.DocumentReviewIngested {
+		t.Fatalf("approved retry not scheduled: %+v %v", scheduled.Document, err)
+	}
+	execution.Generation = retried.Document.Generation
+	sha := strings.Repeat("e", 64)
+	if err := db.Create(&model.DocumentPageImage{DocumentID: doc.ID, Number: 1, SHA256: sha}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.DocumentPage{}).Where("document_id=? AND number=1", doc.ID).Update("image_sha256", sha).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Document{}).Where("id=?", doc.ID).Update("status", "analyzing_visuals").Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.SaveVisualAnalysis(ctx, doc.ID, 1, SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: sha, Model: "fixture", Finding: &VisualFinding{Page: 1, Description: "The diagram shows hydraulic circuits."}})
+	if err != nil {
+		t.Fatalf("approved document blocked visual work: %v", err)
+	}
+	hits, err := s.SearchSources(ctx, DocumentSearchOptions{Query: "diagram", DocumentID: doc.ID, Limit: 8}, DocumentRetrievalScope{Team: true})
+	if err != nil || len(hits.Results) != 1 || hits.Results[0].CaptureMethod != "document_vision" {
+		t.Fatalf("new visual index not available: %+v %v", hits, err)
+	}
+	finished, err := s.Finish(ctx, doc.ID, execution)
+	if err != nil || finished.Document.Status != "ready" || finished.Document.ReviewStatus != model.DocumentReviewIngested || finished.Document.ReviewedBy != admin.EntityID || finished.Document.ReviewNote != approved.Document.ReviewNote || !finished.Document.ReviewedAt.Equal(*approved.Document.ReviewedAt) {
+		t.Fatalf("finish lost approval: %+v %v", finished.Document, err)
 	}
 }

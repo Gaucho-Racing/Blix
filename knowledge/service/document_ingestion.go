@@ -149,7 +149,7 @@ func (s *DocumentService) dispatchDocuments(ctx context.Context) error {
 				_ = s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND status = ?", doc.ID, doc.Generation, "queued").Update("error", "Waiting for runtime scheduling").Error
 				continue
 			}
-			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status = ?", doc.ID, doc.Generation, model.DocumentReviewPending).Updates(map[string]any{"task_id": run.TaskID, "extraction_task_id": run.ExtractionTaskID, "run_id": run.RunID, "error": ""})
+			saved := s.db.WithContext(ctx).Model(&model.Document{}).Where("id = ? AND generation = ? AND task_id = '' AND review_status <> ?", doc.ID, doc.Generation, model.DocumentReviewRejected).Updates(map[string]any{"task_id": run.TaskID, "extraction_task_id": run.ExtractionTaskID, "run_id": run.RunID, "error": ""})
 			if saved.Error != nil {
 				return saved.Error
 			}
@@ -245,7 +245,7 @@ func (s *DocumentService) Control(ctx context.Context, id, owner, operation stri
 				return ErrConflict
 			}
 			resetUnfinishedDocumentStages(&doc)
-			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "review_status": model.DocumentReviewPending, "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "extraction_task_id": "", "extraction_attempt_number": 0, "run_id": "", "error": ""})
+			return saveDocumentProgress(tx, &doc, map[string]any{"status": "queued", "generation": doc.Generation + 1, "task_id": "", "session_id": "", "attempt_number": 0, "extraction_task_id": "", "extraction_attempt_number": 0, "run_id": "", "error": ""})
 		default:
 			return ErrInvalid
 		}
@@ -506,7 +506,11 @@ func (s *DocumentService) Finish(ctx context.Context, id string, e DocumentExecu
 			status = "partial"
 			message = fmt.Sprintf("%d pages have little or no readable text after extraction and OCR. See their saved visual findings for available evidence.", lowText)
 		}
-		return saveDocumentProgress(tx, &doc, map[string]any{"status": status, "error": message, "review_status": model.DocumentReviewInReview})
+		updates := map[string]any{"status": status, "error": message}
+		if doc.ReviewStatus == model.DocumentReviewPending {
+			updates["review_status"] = model.DocumentReviewInReview
+		}
+		return saveDocumentProgress(tx, &doc, updates)
 	})
 	if err != nil {
 		return DocumentDetails{}, err

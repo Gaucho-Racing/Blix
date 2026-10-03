@@ -6,7 +6,8 @@ import { StatusBadge } from "@/components/status-badge"
 import { IdentityDisplay } from "@/components/identity-display"
 import { useAuth } from "@/lib/auth"
 import {
-  documentProcessingComplete,
+  documentReadyForReview,
+  documentProcessing,
   documentReviewLabel,
   reviewDocument,
   type DocumentDetails,
@@ -29,7 +30,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
     member &&
     auth.isAdmin &&
     document.review_status === "in_review" &&
-    documentProcessingComplete(document.status)
+    documentReadyForReview(document)
   const openChangesets = changesets.filter(
     (changeset) => !["committed", "rejected"].includes(changeset.status),
   )
@@ -64,7 +65,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
   if (
     document.review_status !== "rejected" &&
     (document.review_status !== "in_review" ||
-      !documentProcessingComplete(document.status))
+      !documentReadyForReview(document))
   )
     return null
 
@@ -80,7 +81,9 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
       <p>
         {document.review_status === "rejected"
           ? "This document is excluded from team knowledge. Its open changesets were rejected, and its original PDF and source evidence are retained for the review record."
-          : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
+          : documentProcessing(document.status)
+            ? "Document details are ready for review. A BlixAdmin can approve it while visual extraction and search indexing continue in the background."
+            : "A BlixAdmin can accept this document directly or by approving a linked changeset. Rejecting the document also rejects all of its open changesets."}
       </p>
       {document.reviewed_by && (
         <div className="document-review-audit">
@@ -148,6 +151,9 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
                   ? `All ${openChangesets.length} open ${openChangesets.length === 1 ? "changeset" : "changesets"} linked to this document will also be rejected. Further processing will stop.`
                   : "This does not approve or publish any wiki changesets. Review those separately when you are ready."}
               </p>
+              {decision === "approve" && documentProcessing(document.status) && (
+                <p>Remaining processing will continue in the background. Completed search indexes will become available to Blix.</p>
+              )}
               {decision === "reject" && (
                 <p>
                   The original PDF and source evidence will be retained for the
