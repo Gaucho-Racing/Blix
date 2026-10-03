@@ -15,18 +15,19 @@ from blix_agent_worker.models.llm import (
 )
 
 
+RuleSectionID = Annotated[str, Field(pattern=r"^[A-Z]{1,4}\.[0-9]+(?:\.[0-9]+)*(?:\.[a-zA-Z])?$")]
+
+
 class VisualFinding(ContractModel):
     page: Annotated[int, Field(ge=1, le=500)]
     description: Annotated[str, Field(min_length=1, max_length=8000)]
-    section_ids: Annotated[tuple[str, ...], Field(max_length=20)]
+    section_ids: Annotated[tuple[RuleSectionID, ...], Field(max_length=20)]
 
     @model_validator(mode="after")
     def validate_description(self) -> Self:
         if len(self.description.encode()) > 8000 or "\x00" in self.description:
             raise ValueError("visual descriptions must fit their UTF-8 budget")
-        if len(set(self.section_ids)) != len(self.section_ids) or any(
-            not re.fullmatch(r"[A-Z]{1,4}\.\d+(?:\.\d+)*", section) for section in self.section_ids
-        ):
+        if len(set(self.section_ids)) != len(self.section_ids):
             raise ValueError("section IDs must be unique exact rule identifiers")
         return self
 
@@ -93,7 +94,8 @@ class DocumentVisualExtractor:
                         "relationships. Distinguish similar figures and views. Do not infer measurements from drawn "
                         "proportions or invent unreadable values. State uncertainty when needed. Keep descriptions "
                         "focused, normally under 250 words; preserve essential table values even if more text is needed. "
-                        "section_ids must contain only exact rule identifiers visible on this page, or []. "
+                        "section_ids must contain only exact rule identifiers visible on this page, including "
+                        "lettered subsections such as IC.2.4.2.b, or []. "
                         "The finding page must equal the supplied PDF page. Descriptions are interpretations, not "
                         "quotations. Do not cite other pages or source IDs."
                     )),
@@ -120,10 +122,17 @@ class DocumentVisualExtractor:
                         raise ValueError("visual findings cannot cite another page's source record")
                 break
             except (ValidationError, ValueError) as error:
+                reason = (
+                    "; ".join(
+                        f"{'.'.join(str(part) for part in item['loc']) or 'finding'}: {item['msg']}"
+                        for item in error.errors(include_input=False, include_url=False)[:4]
+                    ) if isinstance(error, ValidationError) else str(error)
+                )
                 if attempt == 2:
-                    raise KnowledgeClientError("invalid_visual_analysis", "Blix could not extract valid visual evidence.",
+                    raise KnowledgeClientError("invalid_visual_analysis",
+                                               f"Visual extraction failed on PDF page {number}: {reason[:1000]}",
                                                retryable=True) from error
-                correction = "\nCorrect the previous extraction: " + str(error)[:2000]
+                correction = "\nCorrect the previous extraction: " + reason[:2000]
         await self.client.request(base_url, "POST", f"{path}/pages/{number}/visual-analysis", payload={
             **ownership, "image_sha256": image.sha256,
             "finding": analysis.finding.model_dump(mode="json") if analysis.finding else None,

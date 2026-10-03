@@ -88,7 +88,14 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err != nil || !documentStageComplete(identified.Document, "identifying_metadata") || identified.Document.ReviewStatus != model.DocumentReviewInReview || identified.Document.Status != "analyzing_visuals" {
 		t.Fatalf("metadata did not complete independently of visual analysis: %+v %v", identified, err)
 	}
-	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}
+	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13", "IC.2.4.2.b"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}
+	for _, section := range []string{"IC.2.4.2.invalid", "IC.2.4.2.b trailing", "IC.2.4.2.b\n"} {
+		invalid := visual
+		invalid.Finding = &VisualFinding{Page: 1, SectionIDs: []string{section}, Description: "Invalid section reference."}
+		if _, err := service.SaveVisualAnalysis(ctx, id, 1, invalid); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("invalid section %q accepted: %v", section, err)
+		}
+	}
 	wrongHash := visual
 	wrongHash.ImageSHA256 = strings.Repeat("0", 64)
 	if _, err := service.SaveVisualAnalysis(ctx, id, 1, wrongHash); !errors.Is(err, ErrConflict) {
@@ -125,6 +132,12 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	record, err := NewSourceService(db).GetSourceRecord(ctx, visualID)
 	if err != nil || record.EvidenceType != "agent_summary" || record.CaptureMethod != "document_vision" || record.ParentExternalID != "page:1" {
 		t.Fatalf("visual provenance: %+v %v", record, err)
+	}
+	var provenance struct {
+		SectionIDs []string `json:"section_ids"`
+	}
+	if err := json.Unmarshal(record.Metadata, &provenance); err != nil || strings.Join(provenance.SectionIDs, ",") != "F.1.13,IC.2.4.2.b" {
+		t.Fatalf("lettered section lost: %s %v", record.Metadata, err)
 	}
 	scope := DocumentRetrievalScope{DocumentIDs: []string{id}, AllowUnapproved: true}
 	hits, err := service.SearchSources(ctx, DocumentSearchOptions{Query: "dashed", Limit: 8}, scope)

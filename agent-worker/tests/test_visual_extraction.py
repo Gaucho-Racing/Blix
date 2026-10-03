@@ -111,5 +111,40 @@ class VisualExtractionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(KnowledgeClientError) as error:
             await extractor.extract(task, details, "http://knowledge", "documents/doc", {})
         self.assertEqual(error.exception.code, "invalid_visual_analysis")
+        self.assertIn("PDF page 1", str(error.exception))
+        self.assertIn("attached PDF page", str(error.exception))
         self.assertEqual(attempts, 3)
+        self.assertFalse(any(call[0] == "POST" for call in calls))
+
+    async def test_lettered_rule_subsections_are_saved_without_retry(self):
+        extractor, task, details, calls, _ = self.fixture(pages=1)
+        attempts = 0
+
+        async def complete(request):
+            nonlocal attempts
+            attempts += 1
+            return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
+                "finding": {"page": 1, "description": "Boosted intake diagram under IC.2.4.2.b",
+                            "section_ids": ["IC.2.4.2.b", "IC.2.5.2"]},
+            })))
+
+        extractor.model.complete = complete
+        await extractor.extract(task, details, "http://knowledge", "documents/doc", {})
+        self.assertEqual(attempts, 1)
+        saved = next(call for call in calls if call[0] == "POST")
+        self.assertEqual(saved[2]["payload"]["finding"]["section_ids"], ["IC.2.4.2.b", "IC.2.5.2"])
+
+    async def test_invalid_rule_identifier_reports_field_and_page_without_saving(self):
+        extractor, task, details, calls, _ = self.fixture(pages=1)
+
+        async def complete(request):
+            return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
+                "finding": {"page": 1, "description": "A diagram", "section_ids": ["IC.2.4.2.invalid"]},
+            })))
+
+        extractor.model.complete = complete
+        with self.assertRaises(KnowledgeClientError) as error:
+            await extractor.extract(task, details, "http://knowledge", "documents/doc", {})
+        self.assertIn("PDF page 1", str(error.exception))
+        self.assertIn("finding.section_ids.0", str(error.exception))
         self.assertFalse(any(call[0] == "POST" for call in calls))
