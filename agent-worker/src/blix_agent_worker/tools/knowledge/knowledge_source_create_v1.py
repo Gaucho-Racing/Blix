@@ -15,7 +15,7 @@ class KnowledgeSourceCreateV1Tool(KnowledgeTool):
             "Create or reuse a source container by kind + external_id. Use kind=discord with a channel ID, "
             "google_drive with a document ID, or another stable origin kind/ID. Not one source per provider, "
             "topic, or arbitrary capture batch. Existing names/metadata are preserved; disabled sources cannot "
-            "be reactivated here. This stores no evidence and makes no wiki changes. Safe to retry."
+            "be reactivated here. This stores no evidence and makes no permanent memory changes. Safe to retry."
         ),
         input_schema=SourceDefinition.model_json_schema(),
         impact=ToolImpact.MUTATING,

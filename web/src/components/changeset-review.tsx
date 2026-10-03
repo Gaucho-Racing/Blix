@@ -214,7 +214,7 @@ export function ChangesetReview({
           <GitCommitHorizontal size={19} />
           <div>
             <strong>
-              Published to the wiki
+              Saved to permanent memory
               {changeset.committed_at &&
                 ` · ${formatTimestamp(changeset.committed_at)}`}
             </strong>
@@ -277,7 +277,7 @@ export function ChangesetReview({
           <div>
             <h2>Proposed files</h2>
             <span>
-              Compare with the exact base revision, not the current wiki.
+              Compare with the exact base revision, not current memory.
             </span>
           </div>
           <div className="knowledge-comparison-controls">
@@ -399,7 +399,7 @@ export function ChangesetReview({
               <p>
                 {decision === "reject"
                   ? "This changeset will be rejected and cannot be published. Its source documents and other changesets will keep their current status."
-                  : `This will publish ${files.length} ${files.length === 1 ? "file change" : "file changes"} to the wiki. Existing files may be replaced or deleted.`}
+                  : `This will publish ${files.length} ${files.length === 1 ? "file change" : "file changes"} to Blix's memory. Existing files may be replaced or deleted.`}
               </p>
               {decision === "approve" &&
                 documents.some(
@@ -509,7 +509,7 @@ function FileComparison({
         </header>
         {file.operation === "delete" ? (
           <div className="knowledge-file-absent">
-            This file will be removed from the wiki.
+            This file will be removed from Blix's memory.
           </div>
         ) : view === "markdown" ? (
           <pre>{file.content || "(empty file)"}</pre>

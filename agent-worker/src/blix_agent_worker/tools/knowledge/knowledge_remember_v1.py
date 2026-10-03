@@ -38,7 +38,7 @@ class KnowledgeRememberV1Tool(KnowledgeTool):
             "knowledge. Supply message_id from the run message index to capture an earlier message, "
             "or omit it for the latest message. Call once per source message when remembering multiple messages. "
             "Text, caller, timestamp, run and execution IDs come from the runtime, not model-supplied content. "
-            "Stores a source record only, not a wiki update. Delegate its returned source_record_id to "
+            "Stores a source record only, not a permanent memory update. Delegate its returned source_record_id to "
             "knowledge_curator_v1, normally in propose mode for unsupported human claims. Do not capture secrets "
             "or sensitive personal information into the shared knowledge store. Safe to retry."
         ),

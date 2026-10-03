@@ -53,8 +53,8 @@ class KnowledgeProposeV1Tool(KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_propose_v1",
         description=(
-            "Persist a wiki changeset without publishing. Read relevant pages first and supply their base "
-            "commit SHA (empty only for an empty wiki). Files are complete Markdown upserts or deletes. "
+            "Persist a permanent memory changeset without publishing. Read relevant pages first and supply their base "
+            "commit SHA (empty only for empty permanent memory). Files are complete Markdown upserts or deletes. "
             "Cite source record IDs in updated pages; records are checked before proposing. Leave "
             "season_slug empty for shared services, administration, or cross-season changes. "
             "Run and execution provenance is attached by the runtime. Use knowledge_apply_v1 to publish."

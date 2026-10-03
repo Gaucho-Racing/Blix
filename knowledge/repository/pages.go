@@ -20,10 +20,10 @@ import (
 )
 
 var (
-	ErrInvalid      = errors.New("invalid wiki request")
-	ErrConflict     = errors.New("wiki revision conflict")
-	ErrNotFound     = errors.New("wiki page not found")
-	ErrUnavailable  = errors.New("wiki unavailable")
+	ErrInvalid      = errors.New("invalid memory request")
+	ErrConflict     = errors.New("memory revision conflict")
+	ErrNotFound     = errors.New("memory page not found")
+	ErrUnavailable  = errors.New("Blix memory unavailable")
 	pagePathPattern = regexp.MustCompile(`^[a-zA-Z0-9_/-][a-zA-Z0-9_./-]*\.md$`)
 	commitPattern   = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )

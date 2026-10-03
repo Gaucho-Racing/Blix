@@ -74,7 +74,7 @@ export function AppShell() {
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/knowledge">
                 <GitPullRequest size={17} />
-                Wiki changes
+                Memory changes
                 {!auth.isAdmin && <LockKeyhole className="nav-lock" size={13} />}
               </NavLink>
               <NavLink className={(state) => `${navClassName(state)}${auth.isAdmin ? "" : " locked"}`} to="/admin/tools">

@@ -134,12 +134,12 @@ func (i *WikiIndex) Refresh(ctx context.Context) error {
 	defer cancel()
 	snapshot, err := i.source.Snapshot(refreshCtx)
 	if err != nil {
-		updateErr := i.db.WithContext(ctx).Model(&model.WikiIndexState{}).Where("id = ?", "wiki").Updates(map[string]any{"last_error": "Wiki refresh failed; serving the last indexed revision."}).Error
+		updateErr := i.db.WithContext(ctx).Model(&model.WikiIndexState{}).Where("id = ?", "wiki").Updates(map[string]any{"last_error": "Memory refresh failed; serving the last indexed revision."}).Error
 		return errors.Join(fmt.Errorf("refresh wiki: %w", err), updateErr)
 	}
 	err = i.install(ctx, snapshot)
 	if err != nil {
-		updateErr := i.db.WithContext(ctx).Model(&model.WikiIndexState{}).Where("id = ?", "wiki").Update("last_error", "Wiki indexing failed; serving the last indexed revision.").Error
+		updateErr := i.db.WithContext(ctx).Model(&model.WikiIndexState{}).Where("id = ?", "wiki").Update("last_error", "Memory indexing failed; serving the last indexed revision.").Error
 		return errors.Join(err, updateErr)
 	}
 	return nil

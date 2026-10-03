@@ -51,7 +51,7 @@ export function KnowledgeReviewsPage() {
       <header className="page-header">
         <div>
           <div className="eyebrow">ADMIN · KNOWLEDGE</div>
-          <h1>Wiki changes</h1>
+          <h1>Memory changes</h1>
           <p>
             Review what Blix has learned before it becomes shared team
             knowledge.
@@ -73,7 +73,7 @@ export function KnowledgeReviewsPage() {
           <strong>A second set of eyes</strong>
           <p>
             Approve to publish the exact proposed files. Reject to keep them out
-            of the wiki. Blix can still publish supported updates directly.
+            of Blix's memory. Blix can still publish supported updates directly.
           </p>
         </div>
       </div>
@@ -95,7 +95,7 @@ export function KnowledgeReviewsPage() {
           ))}
         </div>
         {query.isPending ? (
-          <Loading label="Loading wiki changes" />
+          <Loading label="Loading memory changes" />
         ) : (
           <>
             {query.isError && (
@@ -112,7 +112,7 @@ export function KnowledgeReviewsPage() {
                     : "No changes here yet"}
                 </h2>
                 <p>
-                  Ask Blix to remember something about the team. Proposed wiki
+                  Ask Blix to remember something about the team. Proposed memory
                   updates will appear here.
                 </p>
               </div>

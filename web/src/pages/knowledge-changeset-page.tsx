@@ -41,7 +41,7 @@ function ChangesetPage({ admin }: { admin: boolean }) {
         className="knowledge-review-back"
         to={admin ? "/admin/knowledge" : "/knowledge"}
       >
-        <ArrowLeft size={15} /> {admin ? "Wiki changes" : "Team knowledge"}
+        <ArrowLeft size={15} /> {admin ? "Memory changes" : "Team knowledge"}
       </Link>
       {auth.isLoading || (allowed && query.isPending) ? (
         <div className="loading-state">

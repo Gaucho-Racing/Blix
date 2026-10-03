@@ -303,7 +303,7 @@ func validateDiscordAttribution(tx *gorm.DB, sourceRecordIDs []string, edits []r
 		}
 		reference := identity.DisplayName + " (" + *identity.EntityID + ")"
 		if !strings.Contains(content, reference) {
-			return fmt.Errorf("%w: wiki changes must cite Discord authors as %s", ErrInvalid, reference)
+			return fmt.Errorf("%w: memory changes must cite Discord authors as %s", ErrInvalid, reference)
 		}
 	}
 	return nil
@@ -589,7 +589,7 @@ func (s *WikiService) Seed(ctx context.Context) (ChangesetDetails, error) {
 	if err != nil {
 		return ChangesetDetails{}, err
 	}
-	result, err := s.create(ctx, CreateChangesetInput{Type: model.ChangesetTypeStructural, Summary: "docs: seed Blix knowledge wiki", BaseCommitSHA: &head, Files: edits}, "bootstrap")
+	result, err := s.create(ctx, CreateChangesetInput{Type: model.ChangesetTypeStructural, Summary: "docs: seed Blix permanent memory", BaseCommitSHA: &head, Files: edits}, "bootstrap")
 	if err != nil {
 		return result, err
 	}

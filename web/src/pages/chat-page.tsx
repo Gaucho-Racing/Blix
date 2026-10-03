@@ -117,7 +117,7 @@ function TaskCard({
           key={change.changeset_id}
           to={`/knowledge/proposals/${change.changeset_id}`}
         >
-          View wiki proposal · {change.status}
+          View memory proposal · {change.status}
         </Link>
       ))}
       {Array.isArray(output?.warnings) && output.warnings.length > 0 && (
@@ -437,7 +437,7 @@ function RunChat({ runID }: { runID: string }) {
                   <article className="runtime-task" key={item.approval_id}>
                     <strong>
                       {action?.tool_id === "knowledge_apply_v1"
-                        ? "Publish wiki changes"
+                        ? "Publish memory changes"
                         : "Approve an action"}
                     </strong>
                     {typeof action?.arguments.changeset_id === "string" && (

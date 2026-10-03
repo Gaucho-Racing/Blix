@@ -84,7 +84,7 @@ class KnowledgeReadV1Tool(KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_read_v1",
         description=(
-            "Search Blix's indexed Git wiki using keywords and semantic matches when available. Search returns relevant sections and evidence citations; use them "
+            "Search Blix's permanent memory using keywords and semantic matches when available. Search returns relevant sections and evidence citations; use them "
             "directly when sufficient. Use search_batch for up to six related queries or read_pages for up to ten "
             "pages in one call, sharing a bounded context budget. Results preserve input order and report individual "
             "errors. Filter by season or path prefix when appropriate. Read a page for its "

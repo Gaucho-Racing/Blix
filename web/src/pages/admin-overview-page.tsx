@@ -3,10 +3,10 @@ import { Link } from "react-router-dom"
 
 const destinations = [
   {
-    description: "Review proposed wiki edits, publish approved changes, and reject unsupported claims.",
+    description: "Review proposed memory edits, publish approved changes, and reject unsupported claims.",
     href: "/admin/knowledge",
     icon: GitPullRequest,
-    label: "Wiki changes",
+    label: "Memory changes",
     status: "Live",
   },
   {

@@ -149,7 +149,7 @@ export function DocumentReview({ details }: { details: DocumentDetails }) {
               <p>
                 {decision === "reject"
                   ? `All ${openChangesets.length} open ${openChangesets.length === 1 ? "changeset" : "changesets"} linked to this document will also be rejected. Further processing will stop.`
-                  : "This does not approve or publish any wiki changesets. Review those separately when you are ready."}
+                  : "This does not approve or publish any memory changesets. Review those separately when you are ready."}
               </p>
               {decision === "approve" && documentProcessing(document.status) && (
                 <p>Remaining processing will continue in the background. Completed search indexes will become available to Blix.</p>

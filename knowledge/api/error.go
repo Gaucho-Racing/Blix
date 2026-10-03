@@ -35,7 +35,7 @@ func respondError(c *gin.Context, err error) {
 		message = err.Error()
 	case errors.Is(err, repository.ErrUnavailable):
 		status = http.StatusServiceUnavailable
-		message = "wiki repository unavailable"
+		message = "Blix memory unavailable"
 		logger.SugarLogger.Errorf("wiki unavailable: %v", err)
 	default:
 		logger.SugarLogger.Errorf("request failed: %v", err)

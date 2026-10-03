@@ -13,7 +13,7 @@ class KnowledgeApplyV1Tool(KnowledgeTool):
     definition = ToolDefinition(
         id="knowledge_apply_v1",
         description=(
-            "Publish a previously proposed wiki changeset from this run and agent execution. "
+            "Publish a previously proposed permanent memory changeset from this run and agent execution. "
             "May replace or delete pages. On conflict reread and propose again; never force writes. "
             "Retry the same changeset ID after transient failures to avoid duplicate commits."
         ),

@@ -93,7 +93,7 @@ class DocumentIngestV1Agent:
         id="document_ingest_v1",
         kind=AgentKind.SPECIALIST,
         description="Prepare searchable page evidence, visual interpretations, and document metadata for review.",
-        instructions="Enrich extracted document evidence and identify its metadata without updating the wiki.",
+        instructions="Enrich extracted document evidence and identify its metadata without updating permanent memory.",
         input_schema=DocumentIngestV1Input.model_json_schema(),
         output_schema=DocumentIngestV1Output.model_json_schema(),
         model_profile="knowledge_curator",

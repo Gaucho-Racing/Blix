@@ -76,7 +76,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         id="knowledge_curator_v1",
         kind=AgentKind.SPECIALIST,
         description=(
-            "Curate stored source records into Blix's Markdown wiki with citations. Supports shared services, "
+            "Curate stored source records into Blix's permanent memory with citations. Supports shared services, "
             "administration, and car-specific knowledge without requiring a season. Pass existing "
             "sourcerecord_ IDs or source_material containing text and attribution already read by the caller. "
             "Can capture supplied material without fetching providers. Defaults to propose-only; "

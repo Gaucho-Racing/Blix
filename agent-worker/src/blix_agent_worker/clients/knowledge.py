@@ -74,7 +74,7 @@ class KnowledgeClient:
                         "a changeset whose publication outcome is unresolved."
                     )
                 else:
-                    message += " Read the latest wiki revision; do not force the write."
+                    message += " Read the latest memory revision; do not force the write."
             raise KnowledgeClientError(
                 code, message, retryable=response.status_code == 429 or response.status_code >= 500
             )

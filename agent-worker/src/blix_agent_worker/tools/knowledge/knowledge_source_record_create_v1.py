@@ -26,7 +26,7 @@ class KnowledgeSourceRecordCreateV1Tool(KnowledgeTool):
             "Discord authors are resolved to canonical Sentinel identity by the runtime; unlinked authors cannot "
             "be captured. "
             "For Blix user chat use knowledge_remember_v1 when available. Do not store secrets or unnecessary "
-            "personal data. Returns source_record_id for the curator; capturing alone does not update the wiki."
+            "personal data. Returns source_record_id for the curator; capturing alone does not update permanent memory."
         ),
         input_schema=SourceRecordCapture.model_json_schema(),
         impact=ToolImpact.MUTATING,

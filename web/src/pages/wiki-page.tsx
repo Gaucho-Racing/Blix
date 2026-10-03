@@ -58,8 +58,8 @@ export function WikiPage() {
       </Link>
       <header className="workspace-toolbar">
         <div>
-          <span className="workspace-kicker">PUBLISHED WIKI</span>
-          <h1>{query.data?.pages[0]?.title || path || "Select a wiki page"}</h1>
+          <span className="workspace-kicker">BLIX'S MEMORY</span>
+          <h1>{query.data?.pages[0]?.title || path || "Select a memory page"}</h1>
           <p>{path}</p>
         </div>
       </header>
