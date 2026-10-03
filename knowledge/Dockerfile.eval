@@ -1,0 +1,5 @@
+FROM golang:1.26-alpine
+
+RUN apk --no-cache add ca-certificates git poppler-utils
+
+WORKDIR /app

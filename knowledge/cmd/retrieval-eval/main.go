@@ -29,14 +29,15 @@ type document struct {
 	Hash     string `json:"sha256"`
 }
 type question struct {
-	ID       string   `json:"id"`
-	Document string   `json:"document"`
-	Category string   `json:"category"`
-	Query    string   `json:"query"`
-	Pages    []int    `json:"expected_pages"`
-	Patterns []string `json:"answer_patterns"`
-	Image    bool     `json:"requires_image"`
-	Abstain  bool     `json:"expect_abstention"`
+	ID       string          `json:"id"`
+	Document string          `json:"document"`
+	Category string          `json:"category"`
+	Query    string          `json:"query"`
+	Pages    []int           `json:"expected_pages"`
+	Patterns []string        `json:"answer_patterns"`
+	Image    bool            `json:"requires_image"`
+	Abstain  bool            `json:"expect_abstention"`
+	Evidence json.RawMessage `json:"evidence_groups"`
 }
 type suite struct {
 	Version   int        `json:"version"`
@@ -106,7 +107,7 @@ func run() error {
 	if err = json.Unmarshal(data, &cases); err != nil {
 		return err
 	}
-	if cases.Version != 1 || len(cases.Questions) == 0 {
+	if cases.Version != 2 || len(cases.Questions) == 0 {
 		return fmt.Errorf("invalid evaluation suite")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

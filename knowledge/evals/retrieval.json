@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "documents": [
     {
       "key": "sae",
@@ -36,7 +36,28 @@
         "cannot|not.*reset"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "driver-reset",
+          "claim": "The driver must not be able to reset the BOTS.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 66,
+                  "quote": "T.3.3.4   The driver must not be able to reset the BOTS",
+                  "start_offset": 1622,
+                  "end_offset": 1677,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-02",
@@ -50,7 +71,28 @@
         "90"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "precharge-threshold",
+          "claim": "Precharge to at least 90% before closing the second relay.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 98,
+                  "quote": "Be able to charge the Intermediate Circuit to minimum 90% of the Tractive System\n               voltage before closing the second Isolation Relay",
+                  "start_offset": 1318,
+                  "end_offset": 1463,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-03",
@@ -65,7 +107,28 @@
         "lower|whichever|minimum"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "temperature-limit",
+          "claim": "Stay below the lower of the datasheet maximum and 60 degrees C.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 108,
+                  "quote": "Temperatures (considering measurement accuracy) must stay below the lower of the two:\n          •    The maximum cell temperature limit stated in the cell data sheet\n          •    60°C",
+                  "start_offset": 9,
+                  "end_offset": 199,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-04",
@@ -79,7 +142,28 @@
         "0[.]5|half"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "trip-duration",
+          "claim": "Both conditions must persist for more than 0.5 seconds.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 109,
+                  "quote": "The BSPD must Open the Shutdown Circuit EV.8.2.2 when the two of these exist for more\n         than 0.5 sec:",
+                  "start_offset": 355,
+                  "end_offset": 463,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-05",
@@ -93,7 +177,28 @@
         "no|not|analog"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "analog-only",
+          "claim": "The BOTS circuit uses analog components rather than digital controllers.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 66,
+                  "quote": "The BOTS circuit must be implemented with analog components, not using programmable\n          logic controllers, engine control units, or similar functioning digital controllers",
+                  "start_offset": 1688,
+                  "end_offset": 1865,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-06",
@@ -108,7 +213,28 @@
         "high.current|monitor"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "soldering-exception",
+          "claim": "Voltage monitoring wires may be soldered; high-current connections may not.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 97,
+                  "quote": "Soldering electrical connections in the high current path is prohibited\n          Soldering wires to cells for the voltage monitoring input of the BMS is permitted, these wires\n          are not part of the high current path",
+                  "start_offset": 436,
+                  "end_offset": 660,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-07",
@@ -122,7 +248,28 @@
         "no|not"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "physical-separation",
+          "claim": "Contactors or switches are not acceptable maintenance plugs.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 97,
+                  "quote": "Require the physical removal or separation of a component. Contactors or switches are\n               not acceptable Maintenance Plugs",
+                  "start_offset": 1143,
+                  "end_offset": 1276,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-08",
@@ -136,7 +283,28 @@
         "10"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "msd-time",
+          "claim": "An untrained person can operate it in 10 seconds or less.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 98,
+                  "quote": "Operable in 10 seconds or less by an untrained person",
+                  "start_offset": 590,
+                  "end_offset": 643,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-09",
@@ -150,7 +318,28 @@
         "250"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "relay-hold-time",
+          "claim": "A capacitor can hold the relays closed for at most 250 ms.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 98,
+                  "quote": "A capacitor may be used to hold the Isolation Relays closed for maximum 250 ms after the\n         Shutdown Circuit Opens EV.8.2.2",
+                  "start_offset": 9,
+                  "end_offset": 138,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-10",
@@ -164,7 +353,28 @@
         "20"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "monitored-cell-share",
+          "claim": "At least 20% of lithium cells must have their temperature monitored.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 108,
+                  "quote": "For lithium based cells,\n          a.   The temperature of a minimum of 20% of the cells must be monitored by the BMS",
+                  "start_offset": 573,
+                  "end_offset": 690,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-11",
@@ -178,7 +388,54 @@
         "rear.*plane|rear.*main.hoop"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "rear-plane-exception",
+          "claim": "Without aft triangulated members, the envelope ends at the main hoop rear plane.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "sae",
+                  "page": 24,
+                  "quote": "* If there are no Triangulated Structural members aft of the Main Hoop, the Rollover\n         Protection Envelope ends at the rear plane of the Main Hoop",
+                  "start_offset": 283,
+                  "end_offset": 436,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "rollover-figure",
+          "claim": "Inspect the rollover protection envelope diagram.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "sae",
+                  "page": 24,
+                  "label": "F.1.13 rollover protection envelope",
+                  "region": [
+                    0.25,
+                    0.21,
+                    0.83,
+                    0.33
+                  ],
+                  "description_patterns": [
+                    "rollover|F\\.1\\.13",
+                    "main hoop"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-12",
@@ -192,7 +449,35 @@
         "350"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "component-height",
+          "claim": "The component envelope diagram marks a height of 350 mm.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "sae",
+                  "page": 24,
+                  "label": "F.1.15 component envelope 350 mm dimension",
+                  "region": [
+                    0.24,
+                    0.61,
+                    0.84,
+                    0.74
+                  ],
+                  "description_patterns": [
+                    "component envelope|F\\.1\\.15",
+                    "350\\s*mm"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-13",
@@ -206,7 +491,35 @@
         "isolation|\\bIR"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "isolation-relays",
+          "claim": "The two IR symbols disconnect the battery poles from the tractive system.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "sae",
+                  "page": 106,
+                  "label": "EV.8.1 shutdown circuit IR symbols",
+                  "region": [
+                    0.22,
+                    0.35,
+                    0.79,
+                    0.62
+                  ],
+                  "description_patterns": [
+                    "isolation relay|\\bIRs?\\b",
+                    "tractive|battery"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-14",
@@ -220,7 +533,28 @@
         "100"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "mqtt-interval",
+          "claim": "Publishing is rate limited to 100 ms per unique CAN ID.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 12,
+                  "quote": "it rate-limits publishing by enforcing a minimum\ninterval of 100 milliseconds per unique CAN ID.",
+                  "start_offset": 793,
+                  "end_offset": 889,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-15",
@@ -234,7 +568,28 @@
         "10"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "heartbeat-interval",
+          "claim": "The Monitor Service sends a heartbeat every 10 seconds.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 11,
+                  "quote": "the Monitor Service sends a\nheartbeat ping to Mapache every 10 seconds.",
+                  "start_offset": 784,
+                  "end_offset": 855,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-16",
@@ -248,7 +603,28 @@
         "5|five"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "connectivity-interval",
+          "claim": "Epic Shelter checks connectivity every five minutes.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 13,
+                  "quote": "Epic Shelter runs in the background and checks for connectivity every 5 minutes.",
+                  "start_offset": 1326,
+                  "end_offset": 1406,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-17",
@@ -264,7 +640,41 @@
         "name"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "signal-primary-key",
+          "claim": "The primary key consists of timestamp, vehicle_id and name.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 15,
+                  "quote": "PRIMARY KEY (`timestamp`,`vehicle_id`,`name`),",
+                  "start_offset": 1022,
+                  "end_offset": 1068,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 15,
+                  "quote": "The composite primary key on (timestamp, vehicle_id, name) ensures\nuniqueness and supports rapid time-based lookups.",
+                  "start_offset": 1674,
+                  "end_offset": 1790,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-18",
@@ -278,7 +688,50 @@
         "Epic Shelter"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "deferred-upload",
+          "claim": "Epic Shelter eventually uploads messages not published live.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 13,
+                  "quote": "While real-time\ndata is streamed via the MQTT service, Epic Shelter ensures that every message,\nincluding those not published live, eventually makes it to the cloud.",
+                  "start_offset": 255,
+                  "end_offset": 420,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 26,
+                  "quote": "Epic Shelter successfully buffered incoming\n      messages locally to prevent data loss.",
+                  "start_offset": 1159,
+                  "end_offset": 1247,
+                  "offset_unit": "utf8_bytes"
+                },
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 26,
+                  "quote": "Upon reconnection, Epic Shelter synced 128MB batches in under\n      5 seconds each, enabling full recovery of multi-hour sessions within\n      minutes.",
+                  "start_offset": 1372,
+                  "end_offset": 1523,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-19",
@@ -293,7 +746,41 @@
         "poll|overhead|latency"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "interrupt-efficiency",
+          "claim": "Interrupts avoid polling and reduce overhead.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 8,
+                  "quote": "the microcontroller asserting a\ndedicated interrupt line whenever it has messages ready to transmit. This lets the\nJetson clock in data only when needed, avoiding constant polling.",
+                  "start_offset": 822,
+                  "end_offset": 1002,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 10,
+                  "quote": "This interrupt-driven approach eliminates the need for constant\npolling, reducing CPU overhead and ensuring messages are pulled from the\nmicrocontroller as soon as they are available.",
+                  "start_offset": 1302,
+                  "end_offset": 1485,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-20",
@@ -308,7 +795,28 @@
         "million|1[ ,]000[ ,]000"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "flush-triggers",
+          "claim": "Flush after one second or one million messages, whichever comes first.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 12,
+                  "quote": "Messages are flushed to the local PostgreSQL database once per\nsecond or after 1 million messages, whichever comes first, in batches of 10,000.",
+                  "start_offset": 1835,
+                  "end_offset": 1978,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-21",
@@ -324,7 +832,47 @@
         "URL|S3"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "s3-notification",
+          "claim": "An MQTT notification on epic-shelter/gr25 carries the uploaded S3 URL.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 14,
+                  "quote": "Epic Shelter publishes an MQTT message to the\nepic-shelter/gr25 topic with the S3 URL of the uploaded Parquet file.",
+                  "start_offset": 1081,
+                  "end_offset": 1196,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cloud-ingest",
+          "claim": "The notification causes Mapache Ingest to pull and ingest the file.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 14,
+                  "quote": "This\nmessage notifies the Mapache Ingest service to pull the file from S3, extract the\ndata, and ingest it into the database.",
+                  "start_offset": 1197,
+                  "end_offset": 1322,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-22",
@@ -339,7 +887,56 @@
         "complex|time|expensive|efficient"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "sql-alignment-cost",
+          "claim": "Aligning mismatched timestamps in SQL is expensive and error prone.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 23,
+                  "quote": "Converting long-format data to wide format\nrequires aligning multiple signals across mismatched timestamps, a task that\nbecomes computationally expensive and error-prone when implemented directly\nin SQL.",
+                  "start_offset": 32,
+                  "end_offset": 235,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "pandas-processing",
+          "claim": "Pandas merges and resamples the separately retrieved signals in memory.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 23,
+                  "quote": "To solve this, we implemented the core logic of the Query Service using pandas.",
+                  "start_offset": 546,
+                  "end_offset": 625,
+                  "offset_unit": "utf8_bytes"
+                },
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 23,
+                  "quote": "Once in\nmemory, the signal data is merged, resampled, and transformed using vectorized\npandas operations.",
+                  "start_offset": 845,
+                  "end_offset": 950,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-23",
@@ -348,14 +945,112 @@
       "query": "What protects telemetry from being lost when LTE connectivity drops?",
       "expected_pages": [
         12,
-        13
+        13,
+        26
       ],
       "answer_patterns": [
         "local|PostgreSQL",
         "Epic Shelter|upload"
       ],
       "requires_image": false,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "local-persistence",
+          "claim": "Incoming CAN traffic is persisted locally despite connectivity loss.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 12,
+                  "quote": "To ensure no data is lost, even if a message is skipped or connectivity drops, the\nMQTT service stores all incoming CAN messages in a circular buffer held in\nmemory.",
+                  "start_offset": 1588,
+                  "end_offset": 1753,
+                  "offset_unit": "utf8_bytes"
+                },
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 12,
+                  "quote": "Messages are flushed to the local PostgreSQL database once per\nsecond or after 1 million messages, whichever comes first, in batches of 10,000.",
+                  "start_offset": 1835,
+                  "end_offset": 1978,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 9,
+                  "quote": "A local PostgreSQL instance serves as the primary data store for all TCM services.\nIt logs metadata such as connectivity status and latency metrics, but more\ncritically, it stores a complete backup of all incoming CAN traffic.",
+                  "start_offset": 1040,
+                  "end_offset": 1266,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 26,
+                  "quote": "Epic Shelter successfully buffered incoming\n      messages locally to prevent data loss. The Jetson sustained write\n      performance while storing over 10 million messages in its local PostgreSQL\n      database.",
+                  "start_offset": 1159,
+                  "end_offset": 1371,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "eventual-sync",
+          "claim": "Epic Shelter uploads stored messages when connectivity is available.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 13,
+                  "quote": "While real-time\ndata is streamed via the MQTT service, Epic Shelter ensures that every message,\nincluding those not published live, eventually makes it to the cloud.",
+                  "start_offset": 255,
+                  "end_offset": 420,
+                  "offset_unit": "utf8_bytes"
+                },
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 13,
+                  "quote": "If a stable connection is detected, the service initiates the data upload pipeline.",
+                  "start_offset": 1407,
+                  "end_offset": 1490,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            },
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 26,
+                  "quote": "Upon reconnection, Epic Shelter synced 128MB batches in under\n      5 seconds each, enabling full recovery of multi-hour sessions within\n      minutes.",
+                  "start_offset": 1372,
+                  "end_offset": 1523,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-24",
@@ -369,7 +1064,36 @@
         "LTE"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "lte-link",
+          "claim": "The LTE router connects the GR25 TCM to the cloud MQTT broker.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "gr25",
+                  "page": 3,
+                  "label": "Figure 1 GR25 TCM LTE router MQTT connection",
+                  "region": [
+                    0.22,
+                    0.23,
+                    0.49,
+                    0.33
+                  ],
+                  "description_patterns": [
+                    "LTE",
+                    "TCM",
+                    "MQTT"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-25",
@@ -383,7 +1107,54 @@
         "GR ID"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "sender-id",
+          "claim": "GR ID identifies the sending node.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "text",
+                  "document": "gr25",
+                  "page": 4,
+                  "quote": "The GR ID is the identifier that\ncorresponds to the node that is sending the message",
+                  "start_offset": 475,
+                  "end_offset": 559,
+                  "offset_unit": "utf8_bytes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "can-id-figure",
+          "claim": "Inspect the GR ID field in the expanded CAN ID diagram.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "gr25",
+                  "page": 4,
+                  "label": "Figure 3 GR ID field",
+                  "region": [
+                    0.12,
+                    0.34,
+                    0.89,
+                    0.43
+                  ],
+                  "description_patterns": [
+                    "GR ID",
+                    "CAN ID|Figure 3"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "gr25-26",
@@ -401,7 +1172,38 @@
         "Epic Shelter"
       ],
       "requires_image": true,
-      "expect_abstention": false
+      "expect_abstention": false,
+      "evidence_groups": [
+        {
+          "id": "tcm-services",
+          "claim": "The TCM diagram contains PostgreSQL, CAN, Monitor, MQTT and Epic Shelter.",
+          "alternatives": [
+            {
+              "spans": [
+                {
+                  "kind": "visual",
+                  "document": "gr25",
+                  "page": 9,
+                  "label": "Figure 6 five TCM software services",
+                  "region": [
+                    0.26,
+                    0.12,
+                    0.71,
+                    0.4
+                  ],
+                  "description_patterns": [
+                    "Postgres",
+                    "CAN",
+                    "Monitor",
+                    "MQTT",
+                    "Epic Shelter"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "sae-27",
@@ -411,7 +1213,8 @@
       "expected_pages": [],
       "answer_patterns": [],
       "requires_image": false,
-      "expect_abstention": true
+      "expect_abstention": true,
+      "evidence_groups": []
     },
     {
       "id": "sae-28",
@@ -421,7 +1224,8 @@
       "expected_pages": [],
       "answer_patterns": [],
       "requires_image": false,
-      "expect_abstention": true
+      "expect_abstention": true,
+      "evidence_groups": []
     },
     {
       "id": "gr25-29",
@@ -431,7 +1235,8 @@
       "expected_pages": [],
       "answer_patterns": [],
       "requires_image": false,
-      "expect_abstention": true
+      "expect_abstention": true,
+      "evidence_groups": []
     },
     {
       "id": "gr25-30",
@@ -441,7 +1246,8 @@
       "expected_pages": [],
       "answer_patterns": [],
       "requires_image": false,
-      "expect_abstention": true
+      "expect_abstention": true,
+      "evidence_groups": []
     }
   ]
 }
