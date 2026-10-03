@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ type Transport interface {
 	Guild(context.Context, string) (*discordgo.Guild, error)
 	Send(context.Context, string, string, string, string, string, []string) (string, error)
 	React(context.Context, string, string, string) error
+	Delete(context.Context, string, string) error
 }
 type Bridge struct {
 	DB       *gorm.DB
@@ -222,9 +224,18 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 		if err := tx.Model(input).Update("turn_id", result.TurnID).Error; err != nil {
 			return err
 		}
-		output := model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: input.ID, RunID: result.RunID, Reaction: "👀"}
+		output := model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: input.ID, RunID: result.RunID, Content: workingReplies[rand.IntN(len(workingReplies))], Placeholder: true}
 		if payload.Operation == "cancel" {
-			output.Reaction, output.Content = "", "Stopped the current work."
+			output.Placeholder, output.Content = false, "Stopped the current work."
+			var placeholders []model.Outbox
+			if err := tx.Where("binding_id = ? AND placeholder = true AND state IN ?", binding.ID, []string{"pending", "sending", "sent"}).Find(&placeholders).Error; err != nil {
+				return err
+			}
+			for _, placeholder := range placeholders {
+				if err := queuePlaceholderCleanup(tx, output.ID+"/cleanup/"+placeholder.ID, placeholder); err != nil {
+					return err
+				}
+			}
 		}
 		return queue(tx, output)
 	})
@@ -272,5 +283,36 @@ func queue(tx *gorm.DB, output model.Outbox) error {
 	output.State = "pending"
 	output.NextAttemptAt = time.Now().UTC()
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&output).Error
+}
+
+var workingReplies = [...]string{
+	"Working on it!",
+	"On it!",
+	"Let me take a look.",
+	"Looking into it!",
+	"Give me a moment to check.",
+}
+
+func queueResponse(tx *gorm.DB, output model.Outbox) error {
+	var placeholder model.Outbox
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&placeholder, "id = ? AND placeholder = true", "input/"+output.ReplyToMessageID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return queue(tx, output)
+	}
+	if err != nil {
+		return err
+	}
+	output.WaitForOutboxID = output.ID + "/cleanup"
+	if err := queuePlaceholderCleanup(tx, output.WaitForOutboxID, placeholder); err != nil {
+		return err
+	}
+	return queue(tx, output)
+}
+
+func queuePlaceholderCleanup(tx *gorm.DB, id string, placeholder model.Outbox) error {
+	if err := tx.Model(&placeholder).Where("state = 'pending' AND first_attempt_at IS NULL").Update("state", "cancelled").Error; err != nil {
+		return err
+	}
+	return queue(tx, model.Outbox{ID: id, ChannelID: placeholder.ChannelID, DeleteOutboxID: placeholder.ID, WaitForOutboxID: placeholder.ID})
 }
 func backoff(attempt int) time.Duration { return time.Duration(1<<min(attempt, 6)) * time.Second }

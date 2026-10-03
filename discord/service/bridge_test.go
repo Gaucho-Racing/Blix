@@ -64,6 +64,9 @@ type fakeDiscord struct {
 	channels        []string
 	allowedMentions [][]string
 	reacted         []string
+	deleted         []string
+	operations      []string
+	deleteError     error
 	fail            bool
 }
 
@@ -80,7 +83,13 @@ func (d *fakeDiscord) React(_ context.Context, channel, message, emoji string) e
 	d.reacted = append(d.reacted, channel+"/"+message+"/"+emoji)
 	return nil
 }
+func (d *fakeDiscord) Delete(_ context.Context, channel, message string) error {
+	d.operations = append(d.operations, "delete/"+channel+"/"+message)
+	d.deleted = append(d.deleted, channel+"/"+message)
+	return d.deleteError
+}
 func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link string, allowedUserIDs []string) (string, error) {
+	d.operations = append(d.operations, "send/"+id)
 	d.sent = append(d.sent, id)
 	d.references = append(d.references, replyTo)
 	d.channels = append(d.channels, channel)
@@ -221,7 +230,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if err := b.DB.Find(&outputs).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(outputs) != 2 {
+	if len(outputs) != 3 {
 		t.Fatalf("outputs=%+v", outputs)
 	}
 	var reply model.Outbox
@@ -239,7 +248,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if work, err := b.Deliver(ctx); work || err != nil {
 		t.Fatalf("redelivered completed output: work=%v err=%v", work, err)
 	}
-	if len(d.sent) != 1 || len(d.reacted) != 1 || d.reacted[0] != "300/500/👀" {
+	if len(d.sent) != 1 || len(d.reacted) != 0 || len(d.deleted) != 0 {
 		t.Fatal("duplicate deliveries")
 	}
 	for i := range d.sent {
@@ -428,5 +437,190 @@ func TestForeignAndBotMessagesAreIgnored(t *testing.T) {
 	var count int64
 	if err := b.DB.Model(&model.Inbox{}).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("inbox=%d err=%v", count, err)
+	}
+}
+
+func startWithPlaceholder(t *testing.T, b *Bridge) {
+	t.Helper()
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if work, err := b.ProcessInbox(ctx); !work || err != nil {
+		t.Fatalf("start work=%v error=%v", work, err)
+	}
+	var output model.Outbox
+	if err := b.DB.First(&output, "id = ?", "input/500").Error; err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, reply := range workingReplies {
+		found = found || output.Content == reply
+	}
+	if !output.Placeholder || output.Reaction != "" || !found {
+		t.Fatalf("invalid placeholder: %+v", output)
+	}
+	if work, err := b.Deliver(ctx); !work || err != nil {
+		t.Fatalf("placeholder work=%v error=%v", work, err)
+	}
+}
+
+func completeTurn(t *testing.T, b *Bridge, r *fakeRuntime, eventType string) {
+	t.Helper()
+	turnID := "turn_500"
+	r.events = []client.Event{{Position: 1, Type: eventType, SessionID: "session_run_500", TurnID: &turnID, Payload: json.RawMessage(`{"channel_content":"Final answer"}`)}}
+	for i := 0; i < 2; i++ {
+		if err := b.PollEvents(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestResponseDeletesPlaceholderBeforeReplying(t *testing.T) {
+	for _, eventType := range []string{"message.assistant_v1", "attempt.failed_v1", "approval.requested_v1"} {
+		t.Run(eventType, func(t *testing.T) {
+			b, r, d := fixture(t)
+			startWithPlaceholder(t, b)
+			completeTurn(t, b, r, eventType)
+			for i := 0; i < 2; i++ {
+				if work, err := b.Deliver(context.Background()); !work || err != nil {
+					t.Fatalf("delivery work=%v error=%v", work, err)
+				}
+			}
+			expected := []string{"send/input/500", "delete/300/901", "send/event/run_500/1"}
+			if fmt.Sprint(d.operations) != fmt.Sprint(expected) || d.references[1] != "500" || len(d.reacted) != 0 {
+				t.Fatalf("wrong lifecycle: operations=%v references=%v", d.operations, d.references)
+			}
+			var placeholder model.Outbox
+			if err := b.DB.First(&placeholder, "id = ?", "input/500").Error; err != nil || placeholder.State != "deleted" {
+				t.Fatalf("placeholder=%+v error=%v", placeholder, err)
+			}
+			if work, err := b.Deliver(context.Background()); work || err != nil {
+				t.Fatalf("duplicate work=%v error=%v", work, err)
+			}
+		})
+	}
+}
+
+func TestCleanupRetriesAcrossRestartWithoutDuplicateReplies(t *testing.T) {
+	b, r, d := fixture(t)
+	startWithPlaceholder(t, b)
+	completeTurn(t, b, r, "message.assistant_v1")
+	d.deleteError = &client.Error{Status: 503, Code: "discord_cleanup_failed"}
+	if work, err := b.Deliver(context.Background()); !work || err == nil {
+		t.Fatalf("cleanup work=%v error=%v", work, err)
+	}
+	if work, err := b.Deliver(context.Background()); work || err != nil {
+		t.Fatalf("answer bypassed cleanup: work=%v error=%v", work, err)
+	}
+	past := time.Now().Add(-3 * time.Minute)
+	if err := b.DB.Model(&model.Outbox{}).Where("id = ?", "event/run_500/1/cleanup").Updates(map[string]any{"first_attempt_at": past, "next_attempt_at": past}).Error; err != nil {
+		t.Fatal(err)
+	}
+	restarted := *b
+	d.deleteError = nil
+	for i := 0; i < 2; i++ {
+		if work, err := restarted.Deliver(context.Background()); !work || err != nil {
+			t.Fatalf("retry work=%v error=%v", work, err)
+		}
+	}
+	if len(d.sent) != 2 || len(d.deleted) != 2 {
+		t.Fatalf("sent=%v deleted=%v", d.sent, d.deleted)
+	}
+	if work, err := restarted.Deliver(context.Background()); work || err != nil {
+		t.Fatalf("redelivered completed response: work=%v error=%v", work, err)
+	}
+}
+
+func TestPermanentCleanupFailureDoesNotSuppressAnswer(t *testing.T) {
+	b, r, d := fixture(t)
+	startWithPlaceholder(t, b)
+	completeTurn(t, b, r, "message.assistant_v1")
+	d.deleteError = &client.Error{Status: 403, Code: "discord_cleanup_failed"}
+	if _, err := b.Deliver(context.Background()); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	if work, err := b.Deliver(context.Background()); !work || err != nil {
+		t.Fatalf("answer work=%v error=%v", work, err)
+	}
+	if len(d.sent) != 2 {
+		t.Fatalf("missing answer: %v", d.sent)
+	}
+	var cleanup model.Outbox
+	if err := b.DB.First(&cleanup, "id = ?", "event/run_500/1/cleanup").Error; err != nil || cleanup.State != "failed" || cleanup.ErrorCode != "discord_cleanup_failed" {
+		t.Fatalf("cleanup=%+v error=%v", cleanup, err)
+	}
+}
+
+func TestAnswerRetryDoesNotRepeatPlaceholderDeletion(t *testing.T) {
+	b, r, d := fixture(t)
+	startWithPlaceholder(t, b)
+	completeTurn(t, b, r, "message.assistant_v1")
+	if _, err := b.Deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	d.fail = true
+	if _, err := b.Deliver(context.Background()); err == nil {
+		t.Fatal("expected send failure")
+	}
+	if err := b.DB.Model(&model.Outbox{}).Where("id = ?", "event/run_500/1").Update("next_attempt_at", time.Now().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.deleted) != 1 || len(d.sent) != 3 || d.sent[1] != d.sent[2] {
+		t.Fatalf("sent=%v deleted=%v", d.sent, d.deleted)
+	}
+}
+
+func TestResponseOnlyRemovesItsOwnTurnsPlaceholder(t *testing.T) {
+	b, r, d := fixture(t)
+	startWithPlaceholder(t, b)
+	m := mention("501", "300", "600")
+	m.MessageReference = &discordgo.MessageReference{MessageID: "901", ChannelID: "300"}
+	if err := b.Receive(context.Background(), "400", m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	completeTurn(t, b, r, "message.assistant_v1")
+	for i := 0; i < 2; i++ {
+		if _, err := b.Deliver(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(d.deleted) != 1 || d.deleted[0] != "300/901" {
+		t.Fatalf("deleted another turn's placeholder: %v", d.deleted)
+	}
+	var second model.Outbox
+	if err := b.DB.First(&second, "id = ?", "input/501").Error; err != nil || second.State != "sent" {
+		t.Fatalf("second turn=%+v error=%v", second, err)
+	}
+}
+
+func TestCancelRemovesOutstandingPlaceholders(t *testing.T) {
+	b, r, d := fixture(t)
+	startWithPlaceholder(t, b)
+	m := mention("501", "300", "600")
+	m.Content = "<@400> cancel"
+	m.MessageReference = &discordgo.MessageReference{MessageID: "901", ChannelID: "300"}
+	if err := b.Receive(context.Background(), "400", m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := b.Deliver(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(r.inputs) != 2 || r.inputs[1].Operation != "cancel" || len(d.deleted) != 1 || d.deleted[0] != "300/901" || len(d.sent) != 2 {
+		t.Fatalf("inputs=%v operations=%v", r.inputs, d.operations)
 	}
 }

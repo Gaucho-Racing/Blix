@@ -12,7 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
+func TestComponentsV2DeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 	d, err := NewDiscord("test-token")
 	if err != nil {
 		t.Fatal(err)
@@ -22,9 +22,10 @@ func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 			t.Error("missing bot authorization")
 		}
 		var body struct {
-			Content         string `json:"content"`
-			Nonce           string `json:"nonce"`
-			EnforceNonce    bool   `json:"enforce_nonce"`
+			Content         string                 `json:"content"`
+			Flags           discordgo.MessageFlags `json:"flags"`
+			Nonce           string                 `json:"nonce"`
+			EnforceNonce    bool                   `json:"enforce_nonce"`
 			AllowedMentions struct {
 				Parse       []string `json:"parse"`
 				RepliedUser bool     `json:"replied_user"`
@@ -35,8 +36,24 @@ func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if len(utf16.Encode([]rune(body.Content))) > 2000 || !body.EnforceNonce || body.Nonce != Nonce("event/run/123") || len(body.AllowedMentions.Parse) != 0 || len(body.Components) != 1 {
+		if body.Content != "" || body.Flags&discordgo.MessageFlagsIsComponentsV2 == 0 || !body.EnforceNonce || body.Nonce != Nonce("event/run/123") || len(body.AllowedMentions.Parse) != 0 || len(body.Components) != 3 {
 			t.Errorf("invalid Discord payload: %+v", body)
+		}
+		if len(body.Components) == 3 {
+			var text, footer discordgo.TextDisplay
+			var separator discordgo.Separator
+			if err := json.Unmarshal(body.Components[0], &text); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body.Components[1], &separator); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body.Components[2], &footer); err != nil {
+				t.Fatal(err)
+			}
+			if text.Content == "" || len(utf16.Encode([]rune(text.Content))) > 1801 || separator.Divider == nil || !*separator.Divider || separator.Spacing == nil || *separator.Spacing != discordgo.SeparatorSpacingSizeSmall || footer.Content != "-# [View in Blix](https://blix.example/chat/run_123)" {
+				t.Errorf("invalid V2 layout: text=%+v separator=%+v footer=%+v", text, separator, footer)
+			}
 		}
 		if body.Reference == nil || body.Reference.MessageID != "456" || body.Reference.ChannelID != "123" || body.Reference.FailIfNotExists == nil || *body.Reference.FailIfNotExists || body.AllowedMentions.RepliedUser {
 			t.Errorf("invalid reply reference: %+v", body)
@@ -111,4 +128,53 @@ func (t rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	req.URL = serverReq.URL
 	req.Host = req.URL.Host
 	return t.inner.RoundTrip(req)
+}
+
+func TestDeletePlaceholderHandlesAlreadyDeletedMessage(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusNotFound, http.StatusForbidden, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			d, err := NewDiscord("test-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete || r.URL.Path != "/api/v9/channels/300/messages/901" {
+					t.Errorf("unexpected cleanup request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			d.Session.Client = server.Client()
+			d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+			err = d.Delete(context.Background(), "300", "901")
+			if (err == nil) != (status == http.StatusNoContent || status == http.StatusNotFound) {
+				t.Fatalf("status=%d error=%v", status, err)
+			}
+		})
+	}
+}
+
+func TestV2MessageWithoutRunHasNoFooter(t *testing.T) {
+	d, err := NewDiscord("test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Components []json.RawMessage `json:"components"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Components) != 1 {
+			t.Errorf("unexpected components: %s", body.Components)
+		}
+		w.Write([]byte(`{"id":"999"}`))
+	}))
+	defer server.Close()
+	d.Session.Client = server.Client()
+	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+	if _, err := d.Send(context.Background(), "greeting", "300", "500", "Hey! How can I help?", "", nil); err != nil {
+		t.Fatal(err)
+	}
 }

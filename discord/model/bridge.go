@@ -41,6 +41,9 @@ type Outbox struct {
 	BindingID                 string `gorm:"index"`
 	ReplyToMessageID          string
 	Reaction                  string
+	Placeholder               bool
+	DeleteOutboxID            string
+	WaitForOutboxID           string
 	State                     string `gorm:"not null;default:pending;index"`
 	Attempts                  int
 	FirstAttemptAt            *time.Time

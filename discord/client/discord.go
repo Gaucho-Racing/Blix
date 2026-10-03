@@ -56,6 +56,20 @@ func (d *Discord) React(ctx context.Context, channelID, messageID, emoji string)
 	}
 	return nil
 }
+func (d *Discord) Delete(ctx context.Context, channelID, messageID string) error {
+	err := d.Session.ChannelMessageDelete(channelID, messageID, discordgo.WithContext(ctx))
+	if err == nil {
+		return nil
+	}
+	var rest *discordgo.RESTError
+	if errors.As(err, &rest) {
+		if rest.Response.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return &Error{Status: rest.Response.StatusCode, Code: "discord_cleanup_failed"}
+	}
+	return &Error{Code: "discord_cleanup_uncertain"}
+}
 func Nonce(id string) string { sum := sha256.Sum256([]byte(id)); return hex.EncodeToString(sum[:12]) }
 func Preview(text string) string {
 	text = strings.TrimSpace(text)
@@ -98,12 +112,17 @@ func UserMentionIDs(content string) []string {
 }
 
 func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL string, allowedUserIDs []string) (string, error) {
-	message := discordgo.MessageSend{Content: Preview(content), AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}, Flags: discordgo.MessageFlagsSuppressEmbeds}
+	text := Preview(content)
+	message := discordgo.MessageSend{
+		Components:      []discordgo.MessageComponent{discordgo.TextDisplay{Content: text}},
+		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
+		Flags:           discordgo.MessageFlagsIsComponentsV2 | discordgo.MessageFlagsSuppressEmbeds,
+	}
 	allowed := map[string]bool{}
 	for _, id := range allowedUserIDs {
 		allowed[id] = true
 	}
-	for _, id := range UserMentionIDs(message.Content) {
+	for _, id := range UserMentionIDs(text) {
 		if allowed[id] {
 			message.AllowedMentions.Users = append(message.AllowedMentions.Users, id)
 		}
@@ -113,7 +132,11 @@ func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, con
 		message.Reference = &discordgo.MessageReference{MessageID: replyToMessageID, ChannelID: channelID, FailIfNotExists: &failIfMissing}
 	}
 	if runURL != "" {
-		message.Components = []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "View in Blix", Style: discordgo.LinkButton, URL: runURL}}}}
+		divider, spacing := true, discordgo.SeparatorSpacingSizeSmall
+		message.Components = append(message.Components,
+			discordgo.Separator{Divider: &divider, Spacing: &spacing},
+			discordgo.TextDisplay{Content: "-# [View in Blix](" + runURL + ")"},
+		)
 	}
 	payload := struct {
 		discordgo.MessageSend

@@ -80,7 +80,7 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 						return err
 					}
 				}
-				if err := queue(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: replyTo, RunID: binding.RunID, Content: content}); err != nil {
+				if err := queueResponse(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: replyTo, RunID: binding.RunID, Content: content}); err != nil {
 					return err
 				}
 			}
@@ -93,10 +93,10 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	var output model.Outbox
 	err := b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("state IN ? AND next_attempt_at <= ?", []string{"pending", "sending"}, time.Now()).Order("created_at,id").First(&output).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("state IN ? AND next_attempt_at <= ?", []string{"pending", "sending"}, time.Now()).Where("NOT EXISTS (SELECT 1 FROM discord_outbox dependency WHERE dependency.id = discord_outbox.wait_for_outbox_id AND dependency.state IN ('pending','sending'))").Order("created_at,id").First(&output).Error; err != nil {
 			return err
 		}
-		if output.Reaction == "" && output.FirstAttemptAt != nil && time.Since(*output.FirstAttemptAt) > 2*time.Minute {
+		if output.DeleteOutboxID == "" && output.Reaction == "" && output.FirstAttemptAt != nil && time.Since(*output.FirstAttemptAt) > 2*time.Minute {
 			output.State = "uncertain"
 			return tx.Model(&output).Updates(map[string]any{"state": "uncertain", "error_code": "delivery_requires_reconciliation"}).Error
 		}
@@ -122,7 +122,9 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		runURL = strings.TrimRight(b.Config.PublicURL, "/") + "/chat/" + output.RunID
 	}
 	messageID := ""
-	if output.Reaction != "" {
+	if output.DeleteOutboxID != "" {
+		err = b.deletePlaceholder(ctx, output)
+	} else if output.Reaction != "" {
 		err = b.Discord.React(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
 	} else {
 		allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
@@ -143,6 +145,26 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		return true, updateErr
 	}
 	return true, err
+}
+
+func (b *Bridge) deletePlaceholder(ctx context.Context, output model.Outbox) error {
+	var placeholder model.Outbox
+	if err := b.DB.WithContext(ctx).First(&placeholder, "id = ?", output.DeleteOutboxID).Error; err != nil {
+		return err
+	}
+	if !placeholder.Placeholder || placeholder.ChannelID != output.ChannelID {
+		return &client.Error{Status: 400, Code: "invalid_placeholder_cleanup"}
+	}
+	if placeholder.State == "uncertain" && placeholder.DiscordMessageID == "" {
+		return &client.Error{Status: 409, Code: "placeholder_cleanup_requires_reconciliation"}
+	}
+	if placeholder.State == "deleted" || placeholder.DiscordMessageID == "" {
+		return nil
+	}
+	if err := b.Discord.Delete(ctx, placeholder.ChannelID, placeholder.DiscordMessageID); err != nil {
+		return err
+	}
+	return b.DB.WithContext(ctx).Model(&placeholder).Update("state", "deleted").Error
 }
 
 func (b *Bridge) verifiedMentions(ctx context.Context, content string) []string {
