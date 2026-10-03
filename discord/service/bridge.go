@@ -302,11 +302,24 @@ func queue(tx *gorm.DB, output model.Outbox) error {
 }
 
 var workingReplies = [...]string{
-	"Working on it!",
-	"On it!",
-	"Let me take a look.",
-	"Looking into it!",
-	"Give me a moment to check.",
+	"Working on it...",
+	"Taking a look...",
+	"Thinking it through...",
+	"Give me a moment...",
+	"Let me cook...",
+	"Putting the brain on the dyno...",
+	"Warming up the thinking tires...",
+	"Torquing the brain bolts...",
+	"Looking for the 10mm socket...",
+	"Box box, thinking stop...",
+	"Checking with the imaginary pit wall...",
+	"Turning caffeine into answers...",
+	"Connecting the dots and a few CAN wires...",
+	"Running a mental shakedown...",
+	"Negotiating with the brain cells...",
+	"Untangling the thought harness...",
+	"Applying a little mental downforce...",
+	"Convincing the neurons to cooperate...",
 }
 
 const placeholderDelay = 6 * time.Second
