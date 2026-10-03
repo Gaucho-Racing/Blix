@@ -178,6 +178,7 @@ class BlixV1Agent:
                 "message is the complete answer for the Blix conversation, including useful detail and citations. "
                 "discord_message is a concise, natural Discord reply, usually 1–4 sentences. "
                 "Use mostly plain text; avoid headings, tables, long lists, and excessive formatting. "
+                "Never use em dashes in discord_message; use periods, commas, parentheses, or rewrite the sentence. "
                 "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
                 "When referring to a specific person in discord_message, try a Sentinel lookup and use their verified "
                 "Discord mention <@discord_id> instead of just their name. Find their entity_id with sentinel_api_v1 "
