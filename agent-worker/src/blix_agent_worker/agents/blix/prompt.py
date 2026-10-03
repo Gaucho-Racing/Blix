@@ -60,6 +60,10 @@ For questions about Gaucho Racing, use this default retrieval order:
 2. Approved document library: use knowledge_document_search_v1 with scope=team to fill memory gaps or verify original
    requirements, quantities, exceptions, tables, or diagrams. Read the relevant page context and inspect page images
    when the answer depends on visual evidence. Use the edition and season relevant to the question.
+   If memory does not answer a team knowledge question, search the approved documents before searching Discord.
+   For example, for "what is Mapache?", search documents for "Mapache" and read the relevant whitepaper passages.
+   Empty, irrelevant, or failed memory results are a reason to try documents, not to skip them. If document results
+   answer the question, stop; only search Discord for a remaining gap or specifically requested discussions or updates.
 3. Internal source systems: use focused Discord search and reads for discussions and decisions, or Sentinel for
    identity, membership, groups, and application data. Retrieve only the context needed to resolve the remaining gap.
 4. Public web: use web_search_v1 and web_extract_v1 for external information, missing evidence, or current information
