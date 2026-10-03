@@ -72,6 +72,25 @@ def make_lead(model, tools=None, **kwargs):
 
 
 class RuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discord_reply_keeps_full_answer_without_extra_model_call(self):
+        task = lead_task().model_copy(update={"context": {"delivery_source": "discord"}})
+        model = ScriptedModel(assistant(json.dumps({
+            "message": "Full answer with supporting evidence and details.",
+            "discord_message": "Short answer for the thread.",
+        })))
+        result = await make_lead(model).run(task)
+        self.assertEqual(result.output["message"], "Full answer with supporting evidence and details.")
+        self.assertEqual(result.output["discord_message"], "Short answer for the thread.")
+        self.assertEqual(result.usage.model_calls, 1)
+        self.assertEqual(model.requests[0].output_format.id, "blix_discord_reply_v1")
+        self.assertIn("adapter handles delivery", model.requests[0].messages[0].content)
+
+    async def test_discord_reply_rejects_invalid_output(self):
+        task = lead_task().model_copy(update={"context": {"delivery_source": "discord"}})
+        result = await make_lead(ScriptedModel(assistant("An unstructured answer"))).run(task)
+        self.assertEqual(result.status, AgentResultStatus.FAILED)
+        self.assertEqual(result.error.code, "invalid_discord_output")
+
     async def test_quick_answer_uses_one_model_call(self):
         model = ScriptedModel(assistant("A quick answer"))
         result = await make_lead(model).run(lead_task())

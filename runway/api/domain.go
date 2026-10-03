@@ -215,6 +215,8 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		c.Status(http.StatusNoContent)
 	})
 	internal := router.Group("/internal/v1", internalAuthentication)
+	internal.POST("/channel-inputs", h.SubmitChannelInput)
+	internal.GET("/channel-runs/:runID/events", h.ChannelRunEvents)
 	internal.GET("/attempts/ready", func(c *gin.Context) {
 		limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
 		if err != nil {

@@ -253,7 +253,11 @@ function RunChat({ runID }: { runID: string }) {
         <div>
           <span className="workspace-kicker">BLIX WORKSPACE</span>
           <h1>{data?.run.name || "What should we work on?"}</h1>
-          <p>Quick answers. Research. Team knowledge.</p>
+          <p>
+            {data?.run.context?.source === "discord"
+              ? "This run is linked to Discord. Replies are also sent to its thread."
+              : "Quick answers. Research. Team knowledge."}
+          </p>
         </div>
         <Link className="secondary-button" to="/chat">
           <Plus size={16} /> New run

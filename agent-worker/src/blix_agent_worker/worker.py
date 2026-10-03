@@ -229,6 +229,8 @@ class ApiRuntime:
 
         async def record_delta(call_id: str, sequence: int, attempt: int, delta: str) -> None:
             nonlocal delta_buffer, delta_call
+            if execution.run.context.get("source") == "discord":
+                return
             async with delta_lock:
                 if delta_call != call_id:
                     await flush_delta_unlocked()
@@ -419,6 +421,7 @@ class ApiRuntime:
             return str(response["task_id"])
 
         trusted_context = {
+            "delivery_source": execution.run.context.get("source"),
             "document_ids": list(execution.run.document_ids),
             "caller": {
                 **execution.run.caller_context.model_dump(mode="json"),
@@ -521,7 +524,13 @@ class ApiRuntime:
             )
         elif outcome.status is AgentResultStatus.SUCCEEDED:
             output = (DocumentQAV1Output if task.agent_id == "document_qa_v1" else BlixV1Output).model_validate(outcome.output)
-            await lease.post("complete", {"content": output.message, "usage": outcome.usage.model_dump(mode="json")})
+            completion = {
+                "content": output.message,
+                "usage": outcome.usage.model_dump(mode="json"),
+            }
+            if execution.run.context.get("source") == "discord":
+                completion["channel_content"] = getattr(output, "discord_message", None) or ""
+            await lease.post("complete", completion)
         else:
             error = outcome.error or ContractError(code="agent_failed", message="The agent failed.")
             await lease.post("fail", {"error": error.model_dump(mode="json"), "retryable": error.retryable})

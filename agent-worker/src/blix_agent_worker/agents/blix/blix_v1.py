@@ -46,6 +46,7 @@ from blix_agent_worker.models.llm import (
     ModelContinuation,
     ModelMessage,
     ModelMessageRole,
+    ModelOutputFormat,
     ModelRequest,
     ModelResponse,
 )
@@ -78,6 +79,12 @@ class BlixV1Input(ContractModel):
 
 class BlixV1Output(ContractModel):
     message: NonEmptyText
+    discord_message: str | None = None
+
+
+class BlixDiscordOutput(ContractModel):
+    message: NonEmptyText
+    discord_message: Annotated[str, Field(min_length=1, max_length=1400)]
 
 
 class BlixV1Agent:
@@ -163,7 +170,18 @@ class BlixV1Agent:
         allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
         allowed_subagent_ids = frozenset(definition.id for definition in subagent_definitions)
 
+        discord_reply = task.context.get("delivery_source") == "discord"
         system_prompt = self.definition.instructions
+        if discord_reply:
+            system_prompt += (
+                "\n\nThis run is delivered through Discord. Return both message and discord_message. "
+                "message is the complete answer for the Blix conversation, including useful detail and citations. "
+                "discord_message is a concise, natural version for the Discord thread, usually 1–4 sentences. "
+                "Use mostly plain text; avoid headings, tables, long lists, and excessive formatting. "
+                "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
+                "The adapter adds a View in Blix link, so do not include that link yourself. "
+                "Do not use Discord sending tools to deliver this reply; the adapter handles delivery."
+            )
         system_prompt += BLIX_V1_MESSAGE_INDEX_SECTION.format(
             message_index=json.dumps(
                 [
@@ -287,14 +305,20 @@ class BlixV1Agent:
                         "The completed execution state has no final model message.",
                         usage=usage,
                     )
-                output = BlixV1Output(message=response_message.content)
+                try:
+                    output = (
+                        BlixDiscordOutput.model_validate_json(response_message.content)
+                        if discord_reply else BlixV1Output(message=response_message.content)
+                    )
+                except ValidationError:
+                    return self._failure(task, "invalid_discord_output", "The Discord reply format is invalid.", usage=usage)
                 return AgentResult(
                     run_id=task.run_id,
                     session_id=task.session_id,
                     parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
-                    output=output.model_dump(mode="json"),
+                    output=output.model_dump(mode="json", exclude_none=True),
                     usage=usage,
                 )
 
@@ -306,6 +330,10 @@ class BlixV1Agent:
                         messages=tuple(messages),
                         callables=catalog.definitions,
                         continuation=continuation,
+                        output_format=(ModelOutputFormat(
+                            id="blix_discord_reply_v1",
+                            json_schema=BlixDiscordOutput.model_json_schema(),
+                        ) if discord_reply else None),
                     )
                     if self._on_before_model is not None:
                         request = await self._on_before_model(request)

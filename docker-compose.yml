@@ -164,6 +164,49 @@ services:
       retries: 12
       start_period: 60s
 
+  discord:
+    container_name: blix-discord
+    build:
+      context: ./discord
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    init: true
+    stop_grace_period: 20s
+    volumes:
+      - ./discord:/app
+      - discord_gopath:/go
+    depends_on:
+      db:
+        condition: service_healthy
+      runway:
+        condition: service_started
+    environment:
+      ENV: ${ENV:?Set ENV in .env}
+      PORT: ${DISCORD_PORT:?Set DISCORD_PORT in .env}
+      DISCORD_ENABLED: ${DISCORD_ENABLED:?Set DISCORD_ENABLED in .env}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN?Set DISCORD_BOT_TOKEN in .env}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID?Set DISCORD_GUILD_ID in .env}
+      DISCORD_CHANNEL_IDS: ${DISCORD_CHANNEL_IDS?Set DISCORD_CHANNEL_IDS in .env}
+      DISCORD_POLL_INTERVAL: ${DISCORD_POLL_INTERVAL:?Set DISCORD_POLL_INTERVAL in .env}
+      BLIX_PUBLIC_URL: ${BLIX_PUBLIC_URL:?Set BLIX_PUBLIC_URL in .env}
+      RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
+      SENTINEL_URL: ${SENTINEL_URL:?Set SENTINEL_URL in .env}
+      SENTINEL_CLIENT_ID: ${SENTINEL_CLIENT_ID?Set SENTINEL_CLIENT_ID in .env}
+      SENTINEL_SERVICE_ACCOUNT_TOKEN: ${SENTINEL_SERVICE_ACCOUNT_TOKEN?Set SENTINEL_SERVICE_ACCOUNT_TOKEN in .env}
+      DATABASE_HOST: ${DATABASE_HOST:?Set DATABASE_HOST in .env}
+      DATABASE_PORT: ${DATABASE_PORT:?Set DATABASE_PORT in .env}
+      DATABASE_USER: ${DATABASE_USER:?Set DATABASE_USER in .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+      DATABASE_NAME: ${DATABASE_NAME:?Set DATABASE_NAME in .env}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:?Set DATABASE_SSL_MODE in .env}
+    healthcheck:
+      test: ["CMD-SHELL", 'wget -q -O /dev/null "http://127.0.0.1:$$PORT/ready"']
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 60s
+
   agent-worker-1:
     container_name: blix-agent-worker-1
     build:
@@ -271,6 +314,7 @@ services:
     image: emqx/nanomq:0.25.6
 
 volumes:
+  discord_gopath:
   ingestion_gopath:
   knowledge_documents:
   agent_worker_1_venv:

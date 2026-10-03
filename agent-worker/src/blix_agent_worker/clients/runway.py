@@ -39,6 +39,7 @@ class Attempt(ResponseModel):
 class Run(ResponseModel):
     run_id: str
     caller_context: CallerContext
+    context: dict[str, object] = Field(default_factory=dict)
     document_ids: tuple[DocumentID, ...] = ()
 
 

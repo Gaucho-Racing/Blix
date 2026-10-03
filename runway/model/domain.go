@@ -28,6 +28,7 @@ type CallerContext struct {
 }
 
 type Run struct {
+	Context        datatypes.JSON                    `json:"context" gorm:"type:jsonb;not null;default:'{}'"`
 	Kind           string                            `json:"kind" gorm:"not null;default:chat;index;check:chk_run_kind,kind IN ('chat','internal')"`
 	DocumentIDs    datatypes.JSONSlice[string]       `json:"document_ids" gorm:"type:jsonb;not null;default:'[]'"`
 	ID             string                            `json:"run_id" gorm:"primaryKey"`
@@ -148,6 +149,7 @@ type RuntimeCheckpoint struct {
 func (RuntimeCheckpoint) TableName() string { return "runway_runtime_checkpoint" }
 
 type Message struct {
+	ChannelContent string    `json:"channel_content,omitempty"`
 	ID             string    `json:"message_id" gorm:"primaryKey"`
 	RunID          string    `json:"run_id" gorm:"index;not null"`
 	TurnID         string    `json:"turn_id" gorm:"index;not null"`

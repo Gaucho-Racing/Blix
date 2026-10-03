@@ -41,7 +41,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 		&model.Run{}, &model.AgentSession{}, &model.Turn{}, &model.Task{}, &model.ExecutionAttempt{},
 		&model.RuntimeCheckpoint{}, &model.Message{}, &model.Event{}, &model.AgentWorker{}, &model.OutboxMessage{},
 		&model.Workspace{}, &model.WorkspaceRepository{}, &model.Artifact{}, &model.Action{}, &model.CapabilityGrant{},
-		&model.Approval{}, &model.SessionCommand{}, &model.TurnTask{},
+		&model.Approval{}, &model.SessionCommand{}, &model.TurnTask{}, &model.ChannelInputReceipt{},
 	); err != nil {
 		return nil, fmt.Errorf("create database schema: %w", err)
 	}
@@ -76,6 +76,7 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 
 func createRelations(db *gorm.DB) error {
 	relations := []struct{ table, column, target string }{
+		{"runway_channel_input_receipt", "run_id", "runway_run"},
 		{"runway_agent_session", "run_id", "runway_run"},
 		{"runway_agent_session", "parent_session_id", "runway_agent_session"},
 		{"runway_run", "lead_session_id", "runway_agent_session"},

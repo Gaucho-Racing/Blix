@@ -1,6 +1,7 @@
 import { api } from "@/lib/api"
 
 export interface Run {
+  context?: { source?: string }
   kind: "chat" | "internal"
   document_ids: string[]
   run_id: string

@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [runway, knowledge, ingestion, cli]
+        service: [runway, knowledge, ingestion, discord, cli]
     services:
       postgres:
         image: pgvector/pgvector:pg18-trixie
@@ -70,9 +70,12 @@ jobs:
       - run: npm run lint && npm test && npm run build
         working-directory: web
 
-  ingestion-image:
+  service-image:
     needs: [go, agent-worker, web]
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        service: [ingestion, discord]
     permissions:
       contents: read
       packages: write
@@ -90,17 +93,17 @@ jobs:
       - uses: docker/metadata-action@v5
         id: metadata
         with:
-          images: ghcr.io/${{ github.repository }}-ingestion
+          images: ghcr.io/${{ github.repository }}-${{ matrix.service }}
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=pr
       - uses: docker/build-push-action@v6
         with:
-          context: ./ingestion
+          context: ./${{ matrix.service }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha,scope=ingestion
-          cache-to: type=gha,mode=max,scope=ingestion
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
