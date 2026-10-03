@@ -78,7 +78,7 @@ func fixture(t *testing.T) (*Bridge, *fakeRuntime, *fakeDiscord) {
 	if port == "" {
 		t.Skip("BLIX_TEST_DATABASE_PORT is required for PostgreSQL integration tests")
 	}
-	c := config.Config{GuildID: "100", ChannelIDs: []string{"300"}, PublicURL: "https://blix.example", DatabaseHost: "127.0.0.1", DatabasePort: port, DatabaseUser: "postgres", DatabasePassword: "blix-test", DatabaseName: "blix_test", DatabaseSSLMode: "disable"}
+	c := config.Config{GuildID: "100", PublicURL: "https://blix.example", DatabaseHost: "127.0.0.1", DatabasePort: port, DatabaseUser: "postgres", DatabasePassword: "blix-test", DatabaseName: "blix_test", DatabaseSSLMode: "disable"}
 	db, err := database.Open(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)

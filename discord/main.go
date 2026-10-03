@@ -30,10 +30,6 @@ func main() {
 func run(c config.Config, log *zap.SugaredLogger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if !c.Enabled {
-		log.Info("Discord Gateway disabled")
-		return api.Run(ctx, c, nil)
-	}
 	db, err := database.Open(ctx, c)
 	if err != nil {
 		return err

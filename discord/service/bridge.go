@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -122,9 +121,6 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 	isThread := channel.Type == discordgo.ChannelTypeGuildPublicThread || channel.Type == discordgo.ChannelTypeGuildNewsThread
 	if isThread {
 		rootID = channel.ParentID
-	}
-	if len(b.Config.ChannelIDs) > 0 && !slices.Contains(b.Config.ChannelIDs, rootID) {
-		return &client.Error{Status: 403, Code: "channel_not_allowed"}
 	}
 	if !isThread && channel.Type != discordgo.ChannelTypeGuildText && channel.Type != discordgo.ChannelTypeGuildNews {
 		return &client.Error{Status: 400, Code: "unsupported_channel"}
