@@ -41,6 +41,7 @@ type Outbox struct {
 	BindingID                 string `gorm:"index"`
 	ReplyToMessageID          string
 	Reaction                  string
+	RemoveReaction            bool
 	Placeholder               bool
 	DeleteOutboxID            string
 	WaitForOutboxID           string

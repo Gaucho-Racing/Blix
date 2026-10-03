@@ -124,6 +124,8 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	messageID := ""
 	if output.DeleteOutboxID != "" {
 		err = b.deletePlaceholder(ctx, output)
+	} else if output.RemoveReaction {
+		err = b.Discord.RemoveReaction(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
 	} else if output.Reaction != "" {
 		err = b.Discord.React(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
 	} else {
@@ -131,7 +133,15 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, allowedUserIDs)
 	}
 	if err == nil {
-		return true, b.DB.WithContext(ctx).Model(&output).Updates(map[string]any{"state": "sent", "discord_message_id": messageID, "error_code": ""}).Error
+		return true, b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&output).Updates(map[string]any{"state": "sent", "discord_message_id": messageID, "error_code": ""}).Error; err != nil {
+				return err
+			}
+			if messageID != "" {
+				return queueEyesRemoval(tx, output)
+			}
+			return nil
+		})
 	}
 	state, code := "pending", "discord_delivery_uncertain"
 	var upstream *client.Error

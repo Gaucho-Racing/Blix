@@ -178,3 +178,27 @@ func TestV2MessageWithoutRunHasNoFooter(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRemoveEyesOnlyRemovesBotsOwnReaction(t *testing.T) {
+	for _, status := range []int{http.StatusNoContent, http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			d, err := NewDiscord("test-token")
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete || !strings.HasSuffix(r.URL.Path, "/channels/300/messages/500/reactions/👀/@me") {
+					t.Errorf("unexpected reaction removal: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			d.Session.Client = server.Client()
+			d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+			err = d.RemoveReaction(context.Background(), "300", "500", "👀")
+			if (err == nil) != (status != http.StatusForbidden) {
+				t.Fatalf("status=%d error=%v", status, err)
+			}
+		})
+	}
+}

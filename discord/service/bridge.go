@@ -33,6 +33,7 @@ type Transport interface {
 	Guild(context.Context, string) (*discordgo.Guild, error)
 	Send(context.Context, string, string, string, string, string, []string) (string, error)
 	React(context.Context, string, string, string) error
+	RemoveReaction(context.Context, string, string, string) error
 	Delete(context.Context, string, string) error
 }
 type Bridge struct {
@@ -235,7 +236,17 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 				if err := queuePlaceholderCleanup(tx, output.ID+"/cleanup/"+placeholder.ID, placeholder); err != nil {
 					return err
 				}
+				if err := queueEyesRemoval(tx, placeholder); err != nil {
+					return err
+				}
 			}
+		} else {
+			eyes := model.Outbox{ID: "eyes/add/" + input.ID, ChannelID: binding.ChannelID, ReplyToMessageID: input.ID, Reaction: "👀"}
+			if err := queue(tx, eyes); err != nil {
+				return err
+			}
+			output.WaitForOutboxID = eyes.ID
+			output.NextAttemptAt = input.CreatedAt.Add(placeholderDelay)
 		}
 		return queue(tx, output)
 	})
@@ -281,7 +292,9 @@ func (b *Bridge) bindingID(ctx context.Context, input *model.Inbox) (string, err
 }
 func queue(tx *gorm.DB, output model.Outbox) error {
 	output.State = "pending"
-	output.NextAttemptAt = time.Now().UTC()
+	if output.NextAttemptAt.IsZero() {
+		output.NextAttemptAt = time.Now().UTC()
+	}
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&output).Error
 }
 
@@ -291,6 +304,23 @@ var workingReplies = [...]string{
 	"Let me take a look.",
 	"Looking into it!",
 	"Give me a moment to check.",
+}
+
+const placeholderDelay = 6 * time.Second
+
+func queueEyesRemoval(tx *gorm.DB, output model.Outbox) error {
+	var eyes model.Outbox
+	err := tx.First(&eyes, "id = ? AND channel_id = ?", "eyes/add/"+output.ReplyToMessageID, output.ChannelID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := tx.Model(&eyes).Where("state = 'pending'").Update("state", "cancelled").Error; err != nil {
+		return err
+	}
+	return queue(tx, model.Outbox{ID: "eyes/remove/" + output.ReplyToMessageID, ChannelID: output.ChannelID, ReplyToMessageID: output.ReplyToMessageID, Reaction: "👀", RemoveReaction: true, WaitForOutboxID: eyes.ID})
 }
 
 func queueResponse(tx *gorm.DB, output model.Outbox) error {

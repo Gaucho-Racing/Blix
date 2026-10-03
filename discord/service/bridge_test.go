@@ -64,6 +64,9 @@ type fakeDiscord struct {
 	channels        []string
 	allowedMentions [][]string
 	reacted         []string
+	removed         []string
+	removeError     error
+	reactionError   error
 	deleted         []string
 	operations      []string
 	deleteError     error
@@ -81,7 +84,11 @@ func (d *fakeDiscord) Guild(context.Context, string) (*discordgo.Guild, error) {
 }
 func (d *fakeDiscord) React(_ context.Context, channel, message, emoji string) error {
 	d.reacted = append(d.reacted, channel+"/"+message+"/"+emoji)
-	return nil
+	return d.reactionError
+}
+func (d *fakeDiscord) RemoveReaction(_ context.Context, channel, message, emoji string) error {
+	d.removed = append(d.removed, channel+"/"+message+"/"+emoji)
+	return d.removeError
 }
 func (d *fakeDiscord) Delete(_ context.Context, channel, message string) error {
 	d.operations = append(d.operations, "delete/"+channel+"/"+message)
@@ -230,7 +237,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if err := b.DB.Find(&outputs).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(outputs) != 3 {
+	if len(outputs) != 4 {
 		t.Fatalf("outputs=%+v", outputs)
 	}
 	var reply model.Outbox
@@ -240,7 +247,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if reply.Content != "Short answer" || reply.ChannelID != "300" || reply.ReplyToMessageID != "500" {
 		t.Fatal("sent the full answer to Discord")
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 4; i++ {
 		if _, err := b.Deliver(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +255,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if work, err := b.Deliver(ctx); work || err != nil {
 		t.Fatalf("redelivered completed output: work=%v err=%v", work, err)
 	}
-	if len(d.sent) != 1 || len(d.reacted) != 0 || len(d.deleted) != 0 {
+	if len(d.sent) != 1 || len(d.reacted) != 1 || len(d.removed) != 1 || len(d.deleted) != 0 {
 		t.Fatal("duplicate deliveries")
 	}
 	for i := range d.sent {
@@ -325,9 +332,7 @@ func TestReplyToBotContinuesRunAndTargetsEachTurn(t *testing.T) {
 	if err := b.PollEvents(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Deliver(ctx); err != nil {
-		t.Fatal(err)
-	}
+	drainReady(t, b)
 	for _, id := range []string{"501", "502"} {
 		m := mention(id, "300", "600")
 		m.MessageReference = &discordgo.MessageReference{MessageID: "901", ChannelID: "300"}
@@ -457,12 +462,17 @@ func startWithPlaceholder(t *testing.T, b *Bridge) {
 	for _, reply := range workingReplies {
 		found = found || output.Content == reply
 	}
-	if !output.Placeholder || output.Reaction != "" || !found {
+	if !output.Placeholder || output.Reaction != "" || !found || output.NextAttemptAt.Sub(output.CreatedAt) < placeholderDelay-time.Second {
 		t.Fatalf("invalid placeholder: %+v", output)
 	}
 	if work, err := b.Deliver(ctx); !work || err != nil {
 		t.Fatalf("placeholder work=%v error=%v", work, err)
 	}
+	if work, err := b.Deliver(ctx); work || err != nil {
+		t.Fatalf("placeholder delivered too early: work=%v error=%v", work, err)
+	}
+	makePlaceholderDue(t, b, "500")
+	drainReady(t, b)
 }
 
 func completeTurn(t *testing.T, b *Bridge, r *fakeRuntime, eventType string) {
@@ -488,7 +498,7 @@ func TestResponseDeletesPlaceholderBeforeReplying(t *testing.T) {
 				}
 			}
 			expected := []string{"send/input/500", "delete/300/901", "send/event/run_500/1"}
-			if fmt.Sprint(d.operations) != fmt.Sprint(expected) || d.references[1] != "500" || len(d.reacted) != 0 {
+			if fmt.Sprint(d.operations) != fmt.Sprint(expected) || d.references[1] != "500" || len(d.reacted) != 1 || len(d.removed) != 1 {
 				t.Fatalf("wrong lifecycle: operations=%v references=%v", d.operations, d.references)
 			}
 			var placeholder model.Outbox
@@ -588,6 +598,8 @@ func TestResponseOnlyRemovesItsOwnTurnsPlaceholder(t *testing.T) {
 	if _, err := b.Deliver(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	makePlaceholderDue(t, b, "501")
+	drainReady(t, b)
 	completeTurn(t, b, r, "message.assistant_v1")
 	for i := 0; i < 2; i++ {
 		if _, err := b.Deliver(context.Background()); err != nil {
@@ -622,5 +634,174 @@ func TestCancelRemovesOutstandingPlaceholders(t *testing.T) {
 	}
 	if len(r.inputs) != 2 || r.inputs[1].Operation != "cancel" || len(d.deleted) != 1 || d.deleted[0] != "300/901" || len(d.sent) != 2 {
 		t.Fatalf("inputs=%v operations=%v", r.inputs, d.operations)
+	}
+}
+
+func makePlaceholderDue(t *testing.T, b *Bridge, inputID string) {
+	t.Helper()
+	if err := b.DB.Model(&model.Outbox{}).Where("id = ?", "input/"+inputID).Update("next_attempt_at", time.Now().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+func drainReady(t *testing.T, b *Bridge) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		work, err := b.Deliver(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !work {
+			return
+		}
+	}
+	t.Fatal("delivery queue did not drain")
+}
+
+func TestFastReplySkipsDelayedPlaceholderAndRemovesEyesAfterAnswer(t *testing.T) {
+	b, r, d := fixture(t)
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.reacted) != 1 || len(d.sent) != 0 {
+		t.Fatalf("initial feedback: reacted=%v sent=%v", d.reacted, d.sent)
+	}
+	if work, err := b.Deliver(ctx); work || err != nil {
+		t.Fatalf("early placeholder: work=%v error=%v", work, err)
+	}
+	completeTurn(t, b, r, "message.assistant_v1")
+	for i := 0; i < 2; i++ {
+		if _, err := b.Deliver(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(d.sent) != 1 || d.sent[0] != "event/run_500/1" || len(d.removed) != 0 {
+		t.Fatalf("response feedback: sent=%v removed=%v", d.sent, d.removed)
+	}
+	drainReady(t, b)
+	if len(d.removed) != 1 || d.removed[0] != "300/500/👀" {
+		t.Fatalf("missing eyes cleanup: %v", d.removed)
+	}
+	makePlaceholderDue(t, b, "500")
+	drainReady(t, b)
+	if len(d.sent) != 1 {
+		t.Fatalf("late placeholder: %v", d.sent)
+	}
+}
+
+func TestDelayedPlaceholderSurvivesRestartAndRemovesEyes(t *testing.T) {
+	b, _, d := fixture(t)
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	drainReady(t, b)
+	if len(d.sent) != 0 || len(d.reacted) != 1 || len(d.removed) != 0 {
+		t.Fatalf("premature placeholder: sent=%v reacted=%v removed=%v", d.sent, d.reacted, d.removed)
+	}
+	restarted := *b
+	makePlaceholderDue(t, &restarted, "500")
+	if work, err := restarted.Deliver(ctx); !work || err != nil {
+		t.Fatalf("placeholder: work=%v error=%v", work, err)
+	}
+	if len(d.sent) != 1 || len(d.removed) != 0 {
+		t.Fatalf("placeholder transition: sent=%v removed=%v", d.sent, d.removed)
+	}
+	drainReady(t, &restarted)
+	if len(d.removed) != 1 {
+		t.Fatalf("missing removal: %v", d.removed)
+	}
+}
+
+func TestReactionRemovalRetryDoesNotResendAnswer(t *testing.T) {
+	b, r, d := fixture(t)
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(ctx); err != nil {
+		t.Fatal(err)
+	}
+	completeTurn(t, b, r, "message.assistant_v1")
+	for i := 0; i < 2; i++ {
+		if _, err := b.Deliver(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.removeError = &client.Error{Status: 503, Code: "discord_reaction_cleanup_failed"}
+	if _, err := b.Deliver(ctx); err == nil {
+		t.Fatal("expected transient removal failure")
+	}
+	past := time.Now().Add(-3 * time.Minute)
+	if err := b.DB.Model(&model.Outbox{}).Where("id = ?", "eyes/remove/500").Updates(map[string]any{"first_attempt_at": past, "next_attempt_at": past}).Error; err != nil {
+		t.Fatal(err)
+	}
+	d.removeError = nil
+	restarted := *b
+	drainReady(t, &restarted)
+	if len(d.sent) != 1 || len(d.removed) != 2 {
+		t.Fatalf("cleanup resent answer: sent=%v removed=%v", d.sent, d.removed)
+	}
+}
+
+func TestFailedReactionDoesNotReappearAfterFastAnswer(t *testing.T) {
+	b, r, d := fixture(t)
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d.reactionError = &client.Error{Status: 503, Code: "discord_reaction_failed"}
+	if _, err := b.Deliver(ctx); err == nil {
+		t.Fatal("expected reaction failure")
+	}
+	completeTurn(t, b, r, "message.assistant_v1")
+	drainReady(t, b)
+	var eyes model.Outbox
+	if err := b.DB.First(&eyes, "id = ?", "eyes/add/500").Error; err != nil || eyes.State != "cancelled" {
+		t.Fatalf("eyes=%+v error=%v", eyes, err)
+	}
+	if len(d.sent) != 1 || len(d.removed) != 1 {
+		t.Fatalf("sent=%v removed=%v", d.sent, d.removed)
+	}
+	if err := b.DB.Model(&eyes).Update("next_attempt_at", time.Now().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	d.reactionError = nil
+	drainReady(t, b)
+	if len(d.reacted) != 1 {
+		t.Fatalf("reaction reappeared after answer: %v", d.reacted)
+	}
+}
+
+func TestPlaceholderDelayIncludesTimeSpentStartingRun(t *testing.T) {
+	b, _, d := fixture(t)
+	ctx := context.Background()
+	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.DB.Model(&model.Inbox{}).Where("id = ?", "500").Update("created_at", time.Now().Add(-7*time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ProcessInbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	drainReady(t, b)
+	if len(d.sent) != 1 || d.sent[0] != "input/500" || len(d.removed) != 1 {
+		t.Fatalf("delay restarted after setup: sent=%v removed=%v", d.sent, d.removed)
 	}
 }

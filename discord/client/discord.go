@@ -56,6 +56,20 @@ func (d *Discord) React(ctx context.Context, channelID, messageID, emoji string)
 	}
 	return nil
 }
+func (d *Discord) RemoveReaction(ctx context.Context, channelID, messageID, emoji string) error {
+	err := d.Session.MessageReactionRemove(channelID, messageID, emoji, "@me", discordgo.WithContext(ctx))
+	if err == nil {
+		return nil
+	}
+	var rest *discordgo.RESTError
+	if errors.As(err, &rest) {
+		if rest.Response.StatusCode == http.StatusNotFound {
+			return nil
+		}
+		return &Error{Status: rest.Response.StatusCode, Code: "discord_reaction_cleanup_failed"}
+	}
+	return &Error{Code: "discord_reaction_cleanup_uncertain"}
+}
 func (d *Discord) Delete(ctx context.Context, channelID, messageID string) error {
 	err := d.Session.ChannelMessageDelete(channelID, messageID, discordgo.WithContext(ctx))
 	if err == nil {
