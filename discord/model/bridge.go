@@ -8,6 +8,9 @@ import (
 type Inbox struct {
 	ID                                    string `gorm:"primaryKey"`
 	GuildID, ChannelID, AuthorID, Content string
+	ReplyToMessageID                      string
+	BindingID                             string         `gorm:"index"`
+	TurnID                                string         `gorm:"index"`
 	Payload                               datatypes.JSON `gorm:"type:jsonb;not null;default:'{}'"`
 	State                                 string         `gorm:"not null;default:pending;index"`
 	Attempts                              int
@@ -19,7 +22,8 @@ type Inbox struct {
 func (Inbox) TableName() string { return "discord_inbox" }
 
 type Binding struct {
-	ChannelID                                                string `gorm:"primaryKey"`
+	ID                                                       string `gorm:"primaryKey"`
+	ChannelID                                                string `gorm:"index"`
 	GuildID, RootChannelID, OwnerDiscordID, EntityID, UserID string
 	RunID                                                    string `gorm:"index"`
 	SessionID                                                string
@@ -31,14 +35,17 @@ type Binding struct {
 func (Binding) TableName() string { return "discord_run_binding" }
 
 type Outbox struct {
-	ID                                          string `gorm:"primaryKey"`
-	ChannelID, RunID, Content, DiscordMessageID string
-	State                                       string `gorm:"not null;default:pending;index"`
-	Attempts                                    int
-	FirstAttemptAt                              *time.Time
-	NextAttemptAt                               time.Time `gorm:"index"`
-	ErrorCode                                   string
-	CreatedAt                                   time.Time
+	ID                        string `gorm:"primaryKey"`
+	ChannelID, RunID, Content string
+	DiscordMessageID          string `gorm:"index"`
+	BindingID                 string `gorm:"index"`
+	ReplyToMessageID          string
+	State                     string `gorm:"not null;default:pending;index"`
+	Attempts                  int
+	FirstAttemptAt            *time.Time
+	NextAttemptAt             time.Time `gorm:"index"`
+	ErrorCode                 string
+	CreatedAt                 time.Time
 }
 
 func (Outbox) TableName() string { return "discord_outbox" }

@@ -26,9 +26,11 @@ func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 			Nonce           string `json:"nonce"`
 			EnforceNonce    bool   `json:"enforce_nonce"`
 			AllowedMentions struct {
-				Parse []string `json:"parse"`
+				Parse       []string `json:"parse"`
+				RepliedUser bool     `json:"replied_user"`
 			} `json:"allowed_mentions"`
-			Components []json.RawMessage `json:"components"`
+			Reference  *discordgo.MessageReference `json:"message_reference"`
+			Components []json.RawMessage           `json:"components"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
@@ -36,13 +38,16 @@ func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 		if len(utf16.Encode([]rune(body.Content))) > 2000 || !body.EnforceNonce || body.Nonce != Nonce("event/run/123") || len(body.AllowedMentions.Parse) != 0 || len(body.Components) != 1 {
 			t.Errorf("invalid Discord payload: %+v", body)
 		}
+		if body.Reference == nil || body.Reference.MessageID != "456" || body.Reference.ChannelID != "123" || body.Reference.FailIfNotExists == nil || *body.Reference.FailIfNotExists || body.AllowedMentions.RepliedUser {
+			t.Errorf("invalid reply reference: %+v", body)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"id":"999"}`))
 	}))
 	defer server.Close()
 	d.Session.Client = server.Client()
 	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
-	if id, err := d.Send(context.Background(), "event/run/123", "123", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123"); err != nil || id != "999" {
+	if id, err := d.Send(context.Background(), "event/run/123", "123", "456", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123"); err != nil || id != "999" {
 		t.Fatalf("send=%s err=%v", id, err)
 	}
 	if d.Session.Identify.Intents&discordgo.IntentMessageContent != 0 {

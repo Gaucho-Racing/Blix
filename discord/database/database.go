@@ -35,7 +35,26 @@ func Open(ctx context.Context, c config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect Discord database: %w", err)
 	}
-	if err = db.AutoMigrate(&model.Inbox{}, &model.Binding{}, &model.Outbox{}); err != nil {
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended('blix/discord/schema',0))").Error; err != nil {
+			return err
+		}
+		if tx.Migrator().HasTable(&model.Binding{}) && !tx.Migrator().HasColumn(&model.Binding{}, "id") {
+			for _, statement := range []string{
+				"ALTER TABLE discord_run_binding ADD COLUMN id text",
+				"UPDATE discord_run_binding SET id = channel_id",
+				"ALTER TABLE discord_run_binding ALTER COLUMN id SET NOT NULL",
+				"ALTER TABLE discord_run_binding DROP CONSTRAINT discord_run_binding_pkey",
+				"ALTER TABLE discord_run_binding ADD PRIMARY KEY (id)",
+			} {
+				if err := tx.Exec(statement).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return tx.AutoMigrate(&model.Inbox{}, &model.Binding{}, &model.Outbox{})
+	})
+	if err != nil {
 		return nil, fmt.Errorf("create Discord schema: %w", err)
 	}
 	return db, nil

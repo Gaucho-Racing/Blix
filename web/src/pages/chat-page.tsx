@@ -255,7 +255,7 @@ function RunChat({ runID }: { runID: string }) {
           <h1>{data?.run.name || "What should we work on?"}</h1>
           <p>
             {data?.run.context?.source === "discord"
-              ? "This run is linked to Discord. Replies are also sent to its thread."
+              ? "This run is linked to Discord. Replies are also sent to its channel or thread."
               : "Quick answers. Research. Team knowledge."}
           </p>
         </div>

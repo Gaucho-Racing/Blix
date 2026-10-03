@@ -16,7 +16,7 @@ import (
 
 func (b *Bridge) PollEvents(ctx context.Context) error {
 	var bindings []model.Binding
-	if err := b.DB.WithContext(ctx).Where("run_id <> ''").Order("last_polled_at,channel_id").Limit(25).Find(&bindings).Error; err != nil {
+	if err := b.DB.WithContext(ctx).Where("run_id <> ''").Order("last_polled_at,id").Limit(25).Find(&bindings).Error; err != nil {
 		return err
 	}
 	var failures []error
@@ -37,7 +37,7 @@ func (b *Bridge) PollEvents(ctx context.Context) error {
 func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events []client.Event) error {
 	return b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.Binding
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "channel_id = ?", binding.ChannelID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", binding.ID).Error; err != nil {
 			return err
 		}
 		if current.RunID != binding.RunID {
@@ -69,7 +69,17 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 				}
 			}
 			if content != "" {
-				if err := queue(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, RunID: binding.RunID, Content: content}); err != nil {
+				replyTo := binding.ID
+				if event.TurnID != nil {
+					var input model.Inbox
+					err := tx.First(&input, "binding_id = ? AND turn_id = ?", binding.ID, *event.TurnID).Error
+					if err == nil {
+						replyTo = input.ID
+					} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+				}
+				if err := queue(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: replyTo, RunID: binding.RunID, Content: content}); err != nil {
 					return err
 				}
 			}
@@ -110,7 +120,7 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	if output.RunID != "" {
 		runURL = strings.TrimRight(b.Config.PublicURL, "/") + "/chat/" + output.RunID
 	}
-	messageID, err := b.Discord.Send(ctx, output.ID, output.ChannelID, output.Content, runURL)
+	messageID, err := b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL)
 	if err == nil {
 		return true, b.DB.WithContext(ctx).Model(&output).Updates(map[string]any{"state": "sent", "discord_message_id": messageID, "error_code": ""}).Error
 	}

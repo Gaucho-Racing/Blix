@@ -26,6 +26,7 @@ type Event struct {
 	Position  uint64          `json:"position"`
 	Type      string          `json:"type"`
 	SessionID string          `json:"session_id"`
+	TurnID    *string         `json:"turn_id,omitempty"`
 	Payload   json.RawMessage `json:"payload"`
 }
 type Runway struct{ HTTP *HTTP }

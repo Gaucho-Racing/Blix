@@ -43,20 +43,6 @@ func (d *Discord) Guild(ctx context.Context, id string) (*discordgo.Guild, error
 	}
 	return d.Session.Guild(id, discordgo.WithContext(ctx))
 }
-func (d *Discord) Thread(ctx context.Context, channelID, messageID, name string) (*discordgo.Channel, error) {
-	if ch, err := d.Channel(ctx, messageID); err == nil {
-		if ch.ParentID != channelID || (ch.Type != discordgo.ChannelTypeGuildPublicThread && ch.Type != discordgo.ChannelTypeGuildNewsThread) {
-			return nil, &Error{Status: 403, Code: "invalid_thread"}
-		}
-		return ch, nil
-	} else {
-		var rest *discordgo.RESTError
-		if !errors.As(err, &rest) || rest.Response.StatusCode != 404 {
-			return nil, err
-		}
-	}
-	return d.Session.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{Name: truncate(name, 90), AutoArchiveDuration: 1440}, discordgo.WithContext(ctx))
-}
 func Nonce(id string) string { sum := sha256.Sum256([]byte(id)); return hex.EncodeToString(sum[:12]) }
 func Preview(text string) string {
 	text = strings.TrimSpace(text)
@@ -82,8 +68,12 @@ func truncate(text string, limit int) string {
 	}
 	return b.String()
 }
-func (d *Discord) Send(ctx context.Context, id, channelID, content, runURL string) (string, error) {
+func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL string) (string, error) {
 	message := discordgo.MessageSend{Content: Preview(content), AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}, Flags: discordgo.MessageFlagsSuppressEmbeds}
+	if replyToMessageID != "" {
+		failIfMissing := false
+		message.Reference = &discordgo.MessageReference{MessageID: replyToMessageID, ChannelID: channelID, FailIfNotExists: &failIfMissing}
+	}
 	if runURL != "" {
 		message.Components = []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.Button{Label: "View in Blix", Style: discordgo.LinkButton, URL: runURL}}}}
 	}

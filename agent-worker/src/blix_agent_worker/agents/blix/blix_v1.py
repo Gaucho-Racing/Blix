@@ -176,7 +176,7 @@ class BlixV1Agent:
             system_prompt += (
                 "\n\nThis run is delivered through Discord. Return both message and discord_message. "
                 "message is the complete answer for the Blix conversation, including useful detail and citations. "
-                "discord_message is a concise, natural version for the Discord thread, usually 1–4 sentences. "
+                "discord_message is a concise, natural Discord reply, usually 1–4 sentences. "
                 "Use mostly plain text; avoid headings, tables, long lists, and excessive formatting. "
                 "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
                 "The adapter adds a View in Blix link, so do not include that link yourself. "

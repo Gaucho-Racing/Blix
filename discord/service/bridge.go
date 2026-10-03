@@ -29,8 +29,7 @@ type Runtime interface {
 type Transport interface {
 	Channel(context.Context, string) (*discordgo.Channel, error)
 	Guild(context.Context, string) (*discordgo.Guild, error)
-	Thread(context.Context, string, string, string) (*discordgo.Channel, error)
-	Send(context.Context, string, string, string, string) (string, error)
+	Send(context.Context, string, string, string, string, string) (string, error)
 }
 type Bridge struct {
 	DB       *gorm.DB
@@ -57,6 +56,9 @@ func (b *Bridge) Receive(ctx context.Context, botID string, message *discordgo.M
 		content = "[Empty mention]"
 	}
 	input := model.Inbox{ID: message.ID, GuildID: message.GuildID, ChannelID: message.ChannelID, AuthorID: message.Author.ID, Content: content, State: "pending", NextAttemptAt: time.Now().UTC()}
+	if ref := message.MessageReference; ref != nil && config.Snowflake(ref.MessageID) && (ref.ChannelID == "" || ref.ChannelID == message.ChannelID) && (ref.GuildID == "" || ref.GuildID == message.GuildID) {
+		input.ReplyToMessageID = ref.MessageID
+	}
 	return b.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&input).Error
 }
 
@@ -87,7 +89,7 @@ func (b *Bridge) ProcessInbox(ctx context.Context) (bool, error) {
 		}
 		content := "I couldn’t start this request. Make sure your Discord account is linked in Sentinel and you have Blix access."
 		if upstream.Code == "run_owner_required" {
-			content = "This thread’s Blix run belongs to the person who started it. Mention me in the channel to start your own run."
+			content = "This Blix run belongs to the person who started it. Mention me in a new message to start your own run."
 		}
 		if upstream.Code == "empty_question" {
 			content = "Mention me with a question. Import documents from the Knowledge page in Blix."
@@ -96,7 +98,7 @@ func (b *Bridge) ProcessInbox(ctx context.Context) (bool, error) {
 			content = "Mention me in a text channel or a public thread."
 		}
 		if upstream.Code == "no_active_run" {
-			content = "There’s no active Blix run in this thread yet. Mention me with a question to start one."
+			content = "Reply to a message from your Blix run and mention me with cancel to stop it."
 		}
 		return true, b.reject(ctx, input, upstream.Code, content)
 	}
@@ -138,24 +140,28 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 	if err = b.Runtime.Authorize(ctx, identity); err != nil {
 		return err
 	}
-	if !isThread {
-		channel, err = b.Discord.Thread(ctx, input.ChannelID, input.ID, "Blix · "+input.Content)
-		if err != nil {
-			return err
-		}
-		if channel.GuildID != b.Config.GuildID || channel.ParentID != rootID {
-			return &client.Error{Status: 403, Code: "channel_not_allowed"}
-		}
+	bindingID, err := b.bindingID(ctx, input)
+	if err != nil {
+		return err
 	}
-	binding := model.Binding{ChannelID: channel.ID, GuildID: input.GuildID, RootChannelID: rootID, OwnerDiscordID: input.AuthorID, EntityID: identity.ID, UserID: identity.User.ID}
+	if strings.EqualFold(input.Content, "cancel") && bindingID == input.ID {
+		return &client.Error{Status: 400, Code: "no_active_run"}
+	}
+	binding := model.Binding{ID: bindingID, ChannelID: channel.ID, GuildID: input.GuildID, RootChannelID: rootID, OwnerDiscordID: input.AuthorID, EntityID: identity.ID, UserID: identity.User.ID}
 	if err = b.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&binding).Error; err != nil {
 		return err
 	}
-	if err = b.DB.WithContext(ctx).First(&binding, "channel_id = ?", channel.ID).Error; err != nil {
+	if err = b.DB.WithContext(ctx).First(&binding, "id = ?", bindingID).Error; err != nil {
 		return err
 	}
-	if binding.OwnerDiscordID != input.AuthorID || binding.EntityID != identity.ID || binding.UserID != identity.User.ID {
+	if binding.ChannelID != input.ChannelID || binding.GuildID != input.GuildID || binding.OwnerDiscordID != input.AuthorID || binding.EntityID != identity.ID || binding.UserID != identity.User.ID {
 		return &client.Error{Status: 403, Code: "run_owner_required"}
+	}
+	if binding.RunID == "" && binding.ID != input.ID {
+		return &client.Error{Code: "parent_request_pending"}
+	}
+	if err = b.DB.WithContext(ctx).Model(input).Update("binding_id", binding.ID).Error; err != nil {
+		return err
 	}
 	var payload client.Input
 	if len(input.Payload) > 2 {
@@ -171,7 +177,11 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 		if err != nil {
 			return err
 		}
-		contextBytes, err := json.Marshal(map[string]any{"guild_id": guild.ID, "guild_name": guild.Name, "channel_id": root.ID, "channel_name": root.Name, "channel_topic": root.Topic, "thread_id": channel.ID, "thread_name": channel.Name, "discord_author_id": input.AuthorID, "sentinel_entity_id": identity.ID, "message_id": input.ID, "message_url": fmt.Sprintf("https://discord.com/channels/%s/%s/%s", input.GuildID, input.ChannelID, input.ID)})
+		transportContext := map[string]any{"guild_id": guild.ID, "guild_name": guild.Name, "channel_id": root.ID, "channel_name": root.Name, "channel_topic": root.Topic, "discord_author_id": input.AuthorID, "sentinel_entity_id": identity.ID, "message_id": input.ID, "reply_to_message_id": input.ReplyToMessageID, "message_url": fmt.Sprintf("https://discord.com/channels/%s/%s/%s", input.GuildID, input.ChannelID, input.ID)}
+		if isThread {
+			transportContext["thread_id"], transportContext["thread_name"] = channel.ID, channel.Name
+		}
+		contextBytes, err := json.Marshal(transportContext)
 		if err != nil {
 			return err
 		}
@@ -207,11 +217,14 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 		if err := tx.Model(&binding).Updates(map[string]any{"run_id": result.RunID, "session_id": result.SessionID}).Error; err != nil {
 			return err
 		}
-		content := "On it. I’ll reply here when it’s ready."
+		if err := tx.Model(input).Update("turn_id", result.TurnID).Error; err != nil {
+			return err
+		}
+		content := "On it. I’ll reply when it’s ready."
 		if payload.Operation == "cancel" {
 			content = "Stopped the current work."
 		}
-		return queue(tx, model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, RunID: result.RunID, Content: content})
+		return queue(tx, model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: input.ID, RunID: result.RunID, Content: content})
 	})
 }
 
@@ -220,8 +233,38 @@ func (b *Bridge) reject(ctx context.Context, input model.Inbox, code, content st
 		if err := tx.Model(&input).Updates(map[string]any{"state": "failed", "error_code": code}).Error; err != nil {
 			return err
 		}
-		return queue(tx, model.Outbox{ID: "input/" + input.ID, ChannelID: input.ChannelID, Content: content})
+		return queue(tx, model.Outbox{ID: "input/" + input.ID, ChannelID: input.ChannelID, ReplyToMessageID: input.ID, Content: content})
 	})
+}
+
+func (b *Bridge) bindingID(ctx context.Context, input *model.Inbox) (string, error) {
+	if input.BindingID != "" {
+		return input.BindingID, nil
+	}
+	if input.ReplyToMessageID == "" {
+		return input.ID, nil
+	}
+	var parent model.Inbox
+	err := b.DB.WithContext(ctx).First(&parent, "id = ? AND channel_id = ?", input.ReplyToMessageID, input.ChannelID).Error
+	if err == nil {
+		if parent.BindingID != "" {
+			return parent.BindingID, nil
+		}
+		if parent.State == "pending" || parent.State == "processing" {
+			return "", &client.Error{Code: "parent_request_pending"}
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	var output model.Outbox
+	err = b.DB.WithContext(ctx).First(&output, "discord_message_id = ? AND channel_id = ? AND binding_id <> ''", input.ReplyToMessageID, input.ChannelID).Error
+	if err == nil {
+		return output.BindingID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	return input.ID, nil
 }
 func queue(tx *gorm.DB, output model.Outbox) error {
 	output.State = "pending"
