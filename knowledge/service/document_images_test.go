@@ -88,8 +88,9 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	if err != nil || !documentStageComplete(identified.Document, "identifying_metadata") || identified.Document.ReviewStatus != model.DocumentReviewInReview || identified.Document.Status != "analyzing_visuals" {
 		t.Fatalf("metadata did not complete independently of visual analysis: %+v %v", identified, err)
 	}
-	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: []string{"F.1.13", "IC.2.4.2.b"}, Description: "The red dashed boundary follows the hoop outline in the front view."}}
-	for _, section := range []string{"IC.2.4.2.invalid", "IC.2.4.2.b trailing", "IC.2.4.2.b\n"} {
+	references := []string{"F.1.13", "IC.2.4.2.b", "2.3", "Appendix A", "System Architecture", "Figure 2", "§ 4.2", "系统架构"}
+	visual := SaveDocumentVisualAnalysis{DocumentExecution: execution, ImageSHA256: page.PageImage.SHA256, Model: "fast-vision", Finding: &VisualFinding{Page: 1, SectionIDs: references, Description: "The red dashed boundary follows the hoop outline in the front view."}}
+	for _, section := range []string{"", "  ", "invalid\x00text", strings.Repeat("x", 257)} {
 		invalid := visual
 		invalid.Finding = &VisualFinding{Page: 1, SectionIDs: []string{section}, Description: "Invalid section reference."}
 		if _, err := service.SaveVisualAnalysis(ctx, id, 1, invalid); !errors.Is(err, ErrInvalid) {
@@ -136,8 +137,8 @@ func TestPageImagesOCRResumeVisualSearchAndAudit(t *testing.T) {
 	var provenance struct {
 		SectionIDs []string `json:"section_ids"`
 	}
-	if err := json.Unmarshal(record.Metadata, &provenance); err != nil || strings.Join(provenance.SectionIDs, ",") != "F.1.13,IC.2.4.2.b" {
-		t.Fatalf("lettered section lost: %s %v", record.Metadata, err)
+	if err := json.Unmarshal(record.Metadata, &provenance); err != nil || strings.Join(provenance.SectionIDs, ",") != strings.Join(references, ",") {
+		t.Fatalf("document section references lost: %s %v", record.Metadata, err)
 	}
 	scope := DocumentRetrievalScope{DocumentIDs: []string{id}, AllowUnapproved: true}
 	hits, err := service.SearchSources(ctx, DocumentSearchOptions{Query: "dashed", Limit: 8}, scope)

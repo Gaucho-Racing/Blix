@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,8 +13,6 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
-
-var visualSectionIdentifier = regexp.MustCompile(`^[A-Z]{1,4}\.[0-9]+(?:\.[0-9]+)*(?:\.[a-zA-Z])?$`)
 
 type SaveDocumentVisualAnalysis struct {
 	DocumentExecution
@@ -91,8 +88,8 @@ func saveVisualFinding(ctx context.Context, tx *gorm.DB, doc model.Document, pag
 	}
 	seen := map[string]bool{}
 	for _, section := range finding.SectionIDs {
-		if seen[section] || !visualSectionIdentifier.MatchString(section) {
-			return fmt.Errorf("%w: visual section IDs must be unique exact rule identifiers", ErrInvalid)
+		if strings.TrimSpace(section) == "" || seen[section] || len(section) > 256 || !utf8.ValidString(section) || strings.ContainsRune(section, 0) {
+			return fmt.Errorf("%w: visual section references must be unique nonempty text within 256 bytes", ErrInvalid)
 		}
 		seen[section] = true
 	}

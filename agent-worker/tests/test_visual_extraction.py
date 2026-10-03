@@ -116,30 +116,31 @@ class VisualExtractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempts, 3)
         self.assertFalse(any(call[0] == "POST" for call in calls))
 
-    async def test_lettered_rule_subsections_are_saved_without_retry(self):
+    async def test_document_section_formats_are_preserved_without_retry(self):
         extractor, task, details, calls, _ = self.fixture(pages=1)
         attempts = 0
+        references = ["IC.2.4.2.b", "2.3", "Appendix A", "System Architecture", "Figure 2", "§ 4.2", "系统架构"]
 
         async def complete(request):
             nonlocal attempts
             attempts += 1
             return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
                 "finding": {"page": 1, "description": "Boosted intake diagram under IC.2.4.2.b",
-                            "section_ids": ["IC.2.4.2.b", "IC.2.5.2"]},
+                            "section_ids": references},
             })))
 
         extractor.model.complete = complete
         await extractor.extract(task, details, "http://knowledge", "documents/doc", {})
         self.assertEqual(attempts, 1)
         saved = next(call for call in calls if call[0] == "POST")
-        self.assertEqual(saved[2]["payload"]["finding"]["section_ids"], ["IC.2.4.2.b", "IC.2.5.2"])
+        self.assertEqual(saved[2]["payload"]["finding"]["section_ids"], references)
 
-    async def test_invalid_rule_identifier_reports_field_and_page_without_saving(self):
+    async def test_oversized_section_reference_reports_field_and_page_without_saving(self):
         extractor, task, details, calls, _ = self.fixture(pages=1)
 
         async def complete(request):
             return ModelResponse(message=ModelMessage(role=ModelMessageRole.ASSISTANT, content=json.dumps({
-                "finding": {"page": 1, "description": "A diagram", "section_ids": ["IC.2.4.2.invalid"]},
+                "finding": {"page": 1, "description": "A diagram", "section_ids": ["x" * 257]},
             })))
 
         extractor.model.complete = complete
