@@ -4,7 +4,6 @@ import {
   BookOpen,
   FileText,
   LoaderCircle,
-  Search,
   Upload,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -16,7 +15,6 @@ import { DocumentTags } from "@/components/document-tags"
 import {
   importDocument,
   listDocuments,
-  searchWiki,
   validateDocumentFile,
   documentReviewLabel,
   type DocumentReviewStatus,
@@ -28,8 +26,6 @@ export function KnowledgePage() {
   const navigate = useNavigate()
   const [documentFilter, setDocumentFilter] =
     useState<DocumentReviewStatus>("ingested")
-  const [query, setQuery] = useState("")
-  const [search, setSearch] = useState("")
   const picker = useRef<HTMLInputElement>(null)
   const uploadBusy = useRef(false)
   const [dragging, setDragging] = useState(false)
@@ -44,11 +40,6 @@ export function KnowledgePage() {
     queryFn: listDocuments,
     enabled: allowed,
     refetchInterval: 5000,
-  })
-  const results = useQuery({
-    queryKey: ["wiki-search", search],
-    queryFn: ({ signal }) => searchWiki(search, signal),
-    enabled: allowed && !!search,
   })
   const upload = useMutation({
     mutationFn: (file: File) => importDocument(file, setProgress),
@@ -222,73 +213,6 @@ export function KnowledgePage() {
           </div>
         </section>
       )}
-      <section className="knowledge-section">
-        <div className="content-heading">
-          <div>
-            <h2>Published wiki</h2>
-          </div>
-        </div>
-        <form
-          className="knowledge-search"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setSearch(query.trim())
-          }}
-        >
-          <Search size={20} />
-          <input
-            aria-label="Search wiki"
-            disabled={!allowed}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Brake requirements, accumulator, GR26…"
-            value={query}
-            type="search"
-          />
-          <button type="submit" disabled={!query.trim() || !allowed}>
-            Search
-          </button>
-        </form>
-        {!!search && (
-          <div className="wiki-results">
-            {results.isPending && (
-              <p className="loading-state">
-                <LoaderCircle className="spin" size={16} /> Searching…
-              </p>
-            )}
-            {results.error && (
-              <p role="alert" className="runtime-error">
-                {errorMessage(results.error)}
-              </p>
-            )}
-            {results.data?.stale && (
-              <p className="document-help">
-                Showing the last indexed snapshot. Refresh is pending.
-              </p>
-            )}
-            {results.data && !results.data.results.length && (
-              <p className="document-help">
-                No matching wiki sections. Try different terms or ask Blix to
-                research this.
-              </p>
-            )}
-            {results.data?.results.map((hit) => (
-              <Link
-                key={`${hit.path}:${hit.section}`}
-                className="wiki-result"
-                to={`/knowledge/page?path=${encodeURIComponent(hit.path)}`}
-              >
-                <div>
-                  <BookOpen size={17} />
-                  <strong>{hit.title || hit.path}</strong>
-                  <span>{hit.season}</span>
-                </div>
-                <small>{hit.heading || hit.path}</small>
-                <p>{hit.content.slice(0, 400)}</p>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
       <section className="knowledge-section">
         <div className="content-heading">
           <div>
