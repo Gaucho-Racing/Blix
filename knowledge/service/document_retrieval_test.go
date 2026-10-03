@@ -216,3 +216,10 @@ func TestDocumentEvidenceReadIsBoundedAndIndexCanRebuild(t *testing.T) {
 		t.Fatal("index retry duplicated chunks")
 	}
 }
+
+func TestSourceRulesRetainParentSectionsWithoutNumericPrefixMatches(t *testing.T) {
+	chunks := sourceChunks(model.SourceRecord{ID: identifier.New(identifier.SourceRecord), Content: "EV.8.1.7 Shutdown Circuit diagram. T.3.20 unrelated rule."})
+	if !slices.Contains(chunks[0].RuleIDs, "EV.8.1") || !slices.Contains(chunks[0].RuleIDs, "EV.8") || slices.Contains(chunks[0].RuleIDs, "T.3.2") {
+		t.Fatalf("invalid rule ancestry: %v", chunks[0].RuleIDs)
+	}
+}

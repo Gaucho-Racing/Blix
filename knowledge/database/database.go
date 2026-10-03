@@ -36,7 +36,11 @@ func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
+		return nil, fmt.Errorf("enable pgvector: %w", err)
+	}
 	if err := db.AutoMigrate(
+		&model.Embedding{},
 		&model.WikiIndexState{},
 		&model.WikiPage{},
 		&model.WikiSection{},

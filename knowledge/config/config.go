@@ -9,6 +9,12 @@ import (
 )
 
 type Config struct {
+	EmbeddingEndpoint           string
+	EmbeddingAPIKey             string
+	EmbeddingModel              string
+	EmbeddingRevision           string
+	EmbeddingDimensions         int
+	EmbeddingSendDimensions     bool
 	DepotURL                    string
 	DepotBucket                 string
 	SentinelServiceAccountToken string
@@ -40,7 +46,21 @@ func Load() (Config, error) {
 	if _, err := strconv.ParseUint(databasePort, 10, 16); err != nil {
 		return Config{}, fmt.Errorf("DATABASE_PORT must be a valid TCP port")
 	}
+	dimensions, err := strconv.Atoi(value("EMBEDDING_DIMENSIONS", "1536"))
+	if err != nil || dimensions < 1 || dimensions > 4096 {
+		return Config{}, fmt.Errorf("EMBEDDING_DIMENSIONS must be between 1 and 4096")
+	}
+	sendDimensions, err := strconv.ParseBool(value("EMBEDDING_SEND_DIMENSIONS", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("EMBEDDING_SEND_DIMENSIONS must be a boolean")
+	}
 	configuration := Config{
+		EmbeddingEndpoint:           strings.TrimRight(value("EMBEDDING_ENDPOINT", ""), "/"),
+		EmbeddingAPIKey:             value("EMBEDDING_API_KEY", ""),
+		EmbeddingModel:              value("EMBEDDING_MODEL", ""),
+		EmbeddingRevision:           value("EMBEDDING_REVISION", "1"),
+		EmbeddingDimensions:         dimensions,
+		EmbeddingSendDimensions:     sendDimensions,
 		DepotURL:                    strings.TrimRight(value("DEPOT_URL", ""), "/"),
 		DepotBucket:                 value("DEPOT_BUCKET", "blix-documents"),
 		SentinelServiceAccountToken: value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
@@ -62,6 +82,14 @@ func Load() (Config, error) {
 		SentinelURL:                 strings.TrimRight(value("SENTINEL_URL", "https://sso.gauchoracing.com"), "/"),
 		SentinelClientID:            value("SENTINEL_CLIENT_ID", ""),
 	}
+	for _, c := range configuration.EmbeddingAPIKey {
+		if c < 33 || c > 126 {
+			return Config{}, fmt.Errorf("EMBEDDING_API_KEY must contain only printable non-whitespace ASCII characters")
+		}
+	}
+	if configuration.EmbeddingAPIKey != "" && (configuration.EmbeddingEndpoint == "" || configuration.EmbeddingModel == "") {
+		return Config{}, fmt.Errorf("EMBEDDING_ENDPOINT and EMBEDDING_MODEL are required when EMBEDDING_API_KEY is set")
+	}
 	parsedRepositoryURL, err := url.ParseRequestURI(configuration.WikiRepositoryURL)
 	if err != nil || parsedRepositoryURL.Scheme != "https" || parsedRepositoryURL.Host != "github.com" ||
 		parsedRepositoryURL.User != nil || parsedRepositoryURL.RawQuery != "" || parsedRepositoryURL.Fragment != "" {
@@ -78,7 +106,7 @@ func Load() (Config, error) {
 		sentinelURL.User != nil || sentinelURL.RawQuery != "" || sentinelURL.Fragment != "" {
 		return Config{}, fmt.Errorf("SENTINEL_URL must be an HTTP or HTTPS URL without credentials, query, or fragment")
 	}
-	for name, raw := range map[string]string{"DEPOT_URL": configuration.DepotURL, "RUNWAY_URL": configuration.RunwayURL} {
+	for name, raw := range map[string]string{"EMBEDDING_ENDPOINT": configuration.EmbeddingEndpoint, "DEPOT_URL": configuration.DepotURL, "RUNWAY_URL": configuration.RunwayURL} {
 		if raw == "" {
 			continue
 		}

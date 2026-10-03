@@ -10,6 +10,7 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/config"
 	"github.com/gaucho-racing/blix/knowledge/database"
 	"github.com/gaucho-racing/blix/knowledge/pkg/depot"
+	"github.com/gaucho-racing/blix/knowledge/pkg/embedding"
 	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
 	"github.com/gaucho-racing/blix/knowledge/pkg/sentinel"
 	"github.com/gaucho-racing/blix/knowledge/repository"
@@ -56,6 +57,20 @@ func run(configuration config.Config) error {
 		index.Run(ctx, func(err error) { logger.SugarLogger.Warnf("wiki index: %v", err) })
 	}()
 	defer func() { stop(); <-indexDone }()
+	var embeddings *service.EmbeddingService
+	if configuration.EmbeddingAPIKey != "" {
+		client := embedding.New(configuration.EmbeddingEndpoint, configuration.EmbeddingAPIKey, configuration.EmbeddingModel, configuration.EmbeddingDimensions)
+		client.SendDimensions = configuration.EmbeddingSendDimensions
+		namespace := client.Namespace(configuration.EmbeddingRevision)
+		embeddings = service.NewEmbeddingService(db, client, namespace, configuration.EmbeddingDimensions)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			embeddings.Run(ctx, func(err error) { logger.SugarLogger.Warnf("embedding index: %v", err) })
+		}()
+		defer func() { stop(); <-done }()
+	}
+	pages.SetEmbeddings(embeddings)
 	sentinelClient := sentinel.NewClient(configuration.SentinelURL, configuration.SentinelClientID)
 	if sentinelClient.Configured() {
 		if err := sentinelClient.InitializeSigningKeys(ctx); err != nil {
@@ -64,6 +79,7 @@ func run(configuration config.Config) error {
 	}
 	auth := service.NewAuthService(sentinelClient)
 	documents := service.NewDocumentService(db, configuration.DocumentStoragePath, nil)
+	documents.SetEmbeddings(embeddings)
 	documents.SetIntegration(depot.NewClient(configuration.DepotURL, configuration.DepotBucket, configuration.SentinelServiceAccountToken), service.NewDocumentRuntimeClient(configuration.RunwayURL, os.Getenv("BLIX_INTERNAL_TOKEN")))
 	documentsDone := make(chan struct{})
 	go func() {

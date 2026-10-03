@@ -26,6 +26,7 @@ type WikiPage struct {
 func (WikiPage) TableName() string { return "knowledge_wiki_page" }
 
 type WikiSection struct {
+	ContentHash  string `gorm:"size:64;not null;default:''"`
 	Path         string `gorm:"primaryKey"`
 	Position     int    `gorm:"primaryKey"`
 	Heading      string `gorm:"not null"`

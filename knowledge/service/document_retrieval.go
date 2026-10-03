@@ -2,15 +2,20 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gaucho-racing/blix/knowledge/model"
 	"github.com/gaucho-racing/blix/knowledge/pkg/identifier"
+	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
+	pgvector "github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type DocumentRetrievalScope struct {
@@ -20,6 +25,7 @@ type DocumentRetrievalScope struct {
 }
 
 type DocumentSearchOptions struct {
+	Mode       string `json:"mode,omitempty"`
 	Query      string `json:"query"`
 	DocumentID string `json:"document_id,omitempty"`
 	Limit      int    `json:"limit"`
@@ -56,10 +62,11 @@ type DocumentPassage struct {
 }
 
 type DocumentSearchResult struct {
-	Retrieval string                  `json:"retrieval"`
-	Documents []DocumentSearchContext `json:"documents"`
-	Results   []DocumentPassage       `json:"results"`
-	Truncated bool                    `json:"truncated"`
+	SemanticStatus string                  `json:"semantic_status"`
+	Retrieval      string                  `json:"retrieval"`
+	Documents      []DocumentSearchContext `json:"documents"`
+	Results        []DocumentPassage       `json:"results"`
+	Truncated      bool                    `json:"truncated"`
 }
 
 func validateRetrievalIDs(ids []string) error {
@@ -138,10 +145,29 @@ func (s *DocumentService) ListRetrievableDocuments(ctx context.Context, scope Do
 
 func (s *DocumentService) SearchSources(ctx context.Context, options DocumentSearchOptions, scope DocumentRetrievalScope) (DocumentSearchResult, error) {
 	options.Query = strings.TrimSpace(options.Query)
-	if options.Query == "" || len(options.Query) > 256 || !utf8.ValidString(options.Query) || strings.ContainsRune(options.Query, 0) || options.Limit < 1 || options.Limit > 20 {
+	if options.Query == "" || len(options.Query) > 256 || !utf8.ValidString(options.Query) || strings.ContainsRune(options.Query, 0) || options.Limit < 1 || options.Limit > 20 || (options.Mode != "" && options.Mode != "hybrid" && options.Mode != "lexical") {
 		return DocumentSearchResult{}, ErrInvalid
 	}
+	if _, err := documentRetrievalQuery(s.db, scope, options.DocumentID); err != nil {
+		return DocumentSearchResult{}, err
+	}
 	result := DocumentSearchResult{Retrieval: "document_lexical_v1", Documents: []DocumentSearchContext{}, Results: []DocumentPassage{}}
+	started := time.Now()
+	defer func() {
+		if logger.SugarLogger != nil {
+			logger.SugarLogger.Infow("document retrieval", "query_hash", hashBytes([]byte(options.Query)), "duration_ms", time.Since(started).Milliseconds(), "retrieval", result.Retrieval, "semantic_status", result.SemanticStatus, "hits", len(result.Results), "truncated", result.Truncated)
+		}
+	}()
+	semanticStatus := "disabled"
+	var vector pgvector.Vector
+	if options.Mode != "lexical" && (scope.Team || len(scope.DocumentIDs) > 0) {
+		vector, semanticStatus = s.embeddings.Query(ctx, options.Query)
+	}
+	result.SemanticStatus = semanticStatus
+	candidateLimit := options.Limit + 1
+	if semanticStatus == "ready" {
+		candidateLimit = 60
+	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
 		result.Documents, err = retrievalDocuments(tx, scope, options.DocumentID)
@@ -165,12 +191,27 @@ func (s *DocumentService) SearchSources(ctx context.Context, options DocumentSea
 		}
 		query = query.Joins("JOIN knowledge_document_page p ON p.document_id = d.id").Joins("JOIN knowledge_source_chunk c ON (c.source_record_id = p.source_record_id OR c.source_record_id = p.visual_source_record_id) AND c.chunker_version = ?", sourceChunkerVersion).
 			Joins("JOIN knowledge_source_record r ON r.id = c.source_record_id").Joins(`CROSS JOIN (SELECT plainto_tsquery('english', ?) AS all_terms, replace(plainto_tsquery('english', ?)::text, ' & ', ' | ')::tsquery AS any_terms) q`, options.Query, options.Query).
-			Where("c.search_vector @@ q.any_terms").Where("c.rule_ids @> ?::jsonb", string(rulesJSON))
-		err = query.Select(`r.evidence_type, r.capture_method, c.id AS chunk_id, c.source_record_id, d.id AS document_id, d.title, p.number AS pdf_page, c.ordinal, c.content, c.start_offset, c.end_offset,
+			Where("c.rule_ids @> ?::jsonb", string(rulesJSON))
+		err = query.Session(&gorm.Session{}).Where("(c.search_vector @@ q.any_terms OR ?)", len(rules) > 0).Select(`r.evidence_type, r.capture_method, c.id AS chunk_id, c.source_record_id, d.id AS document_id, d.title, p.number AS pdf_page, c.ordinal, c.content, c.start_offset, c.end_offset,
           d.review_status, c.search_vector @@ q.all_terms AS matched_all_terms, ts_rank_cd(c.search_vector, q.any_terms, 32) AS score`).
-			Order("matched_all_terms DESC, score DESC, d.id ASC, p.number ASC, c.ordinal ASC").Limit(options.Limit + 1).Scan(&result.Results).Error
+			Order("matched_all_terms DESC, score DESC, d.id ASC, p.number ASC, c.ordinal ASC").Limit(candidateLimit).Scan(&result.Results).Error
 		if err != nil {
 			return err
+		}
+		if semanticStatus == "ready" {
+			var semantic []DocumentPassage
+			err = query.Session(&gorm.Session{}).Joins("JOIN knowledge_embedding e ON e.content_hash=c.content_hash AND e.namespace=? AND e.status='ready'", s.embeddings.namespace).
+				Select(`r.evidence_type,r.capture_method,c.id AS chunk_id,c.source_record_id,d.id AS document_id,d.title,p.number AS pdf_page,c.ordinal,c.content,c.start_offset,c.end_offset,d.review_status, false AS matched_all_terms, 1-(e.vector <=> ?::vector) AS score`, vector.String()).
+				Where("e.vector IS NOT NULL").Order(clause.OrderBy{Expression: clause.Expr{SQL: "e.vector <=> ?::vector, c.id", Vars: []any{vector.String()}}}).Limit(60).Scan(&semantic).Error
+			if err != nil {
+				return err
+			}
+			if len(semantic) > 0 {
+				result.Results = fuseRanks(result.Results, semantic, func(h DocumentPassage) string { return h.ChunkID }, func(h *DocumentPassage, v float64) { h.Score = v }, options.Limit+1)
+				result.Retrieval = "document_hybrid_v1"
+			} else {
+				result.SemanticStatus = "pending"
+			}
 		}
 		if len(result.Results) > options.Limit {
 			result.Results = result.Results[:options.Limit]
@@ -201,7 +242,7 @@ func (s *DocumentService) SearchSources(ctx context.Context, options DocumentSea
 			remaining -= len(hit.Content)
 		}
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return result, err
 }
 

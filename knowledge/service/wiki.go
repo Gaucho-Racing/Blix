@@ -25,10 +25,11 @@ var seasonPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 var sourceRecordReferencePattern = regexp.MustCompile(`sourcerecord_[0-9a-hjkmnp-tv-z]{26}`)
 
 type WikiService struct {
-	database *gorm.DB
-	wiki     wikiRepository
-	writer   sync.Mutex
-	index    *WikiIndex
+	database   *gorm.DB
+	embeddings *EmbeddingService
+	wiki       wikiRepository
+	writer     sync.Mutex
+	index      *WikiIndex
 }
 
 type wikiRepository interface {

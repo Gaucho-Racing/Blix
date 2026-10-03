@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const sourceChunkerVersion = 1
+const sourceChunkerVersion = 2
 const sourcePassageBytes = 2400
 const sourcePassageOverlap = 240
 
@@ -60,8 +60,15 @@ func sourceChunks(record model.SourceRecord) []model.SourceChunk {
 		rules := []string{}
 		for _, rule := range ruleIdentifier.FindAllString(content, -1) {
 			rule = strings.ToUpper(rule)
-			if !slices.Contains(rules, rule) {
-				rules = append(rules, rule)
+			for {
+				if !slices.Contains(rules, rule) {
+					rules = append(rules, rule)
+				}
+				dot := strings.LastIndexByte(rule, '.')
+				if dot <= strings.IndexByte(rule, '.') {
+					break
+				}
+				rule = rule[:dot]
 			}
 		}
 		chunks = append(chunks, model.SourceChunk{ID: identifier.New(identifier.SourceChunk), SourceRecordID: record.ID, ChunkerVersion: sourceChunkerVersion, Ordinal: len(chunks) + 1, StartOffset: start, EndOffset: end, Content: content, ContentHash: hashBytes([]byte(content)), RuleIDs: rules})

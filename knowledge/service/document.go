@@ -51,12 +51,13 @@ type PDFExtractor interface {
 	Extract(context.Context, string) ([]string, error)
 }
 type DocumentService struct {
-	db        *gorm.DB
-	directory string
-	extractor PDFExtractor
-	slots     chan struct{}
-	depot     *depot.Client
-	runtime   *DocumentRuntimeClient
+	db         *gorm.DB
+	embeddings *EmbeddingService
+	directory  string
+	extractor  PDFExtractor
+	slots      chan struct{}
+	depot      *depot.Client
+	runtime    *DocumentRuntimeClient
 }
 
 func NewDocumentService(db *gorm.DB, directory string, extractor PDFExtractor) *DocumentService {

@@ -1,0 +1,447 @@
+{
+  "version": 1,
+  "documents": [
+    {
+      "key": "sae",
+      "filename": "FSAE_Rules_2027_V1.pdf",
+      "title": "Formula SAE Rules 2027",
+      "sha256": "f71df5552e341dab1b58f1ff47212e7281953d66b9c41833de8347560913ed0e",
+      "visual_pages": [
+        24,
+        106
+      ]
+    },
+    {
+      "key": "gr25",
+      "filename": "GR25 Data Analytics Whitepaper.pdf",
+      "title": "GR25 Data Analytics Whitepaper",
+      "sha256": "92451f5b7d450b9cdc60ccbfdae01a4bb43357fac9437993164d8d7940afcf5d",
+      "visual_pages": [
+        3,
+        4,
+        9
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "id": "sae-01",
+      "document": "sae",
+      "category": "exact",
+      "query": "Under T.3.3.4, can the driver reset the BOTS?",
+      "expected_pages": [
+        66
+      ],
+      "answer_patterns": [
+        "cannot|not.*reset"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-02",
+      "document": "sae",
+      "category": "exact",
+      "query": "What does EV.5.6.1 require before closing the second isolation relay?",
+      "expected_pages": [
+        98
+      ],
+      "answer_patterns": [
+        "90"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-03",
+      "document": "sae",
+      "category": "exact",
+      "query": "What temperature limit does EV.8.5.2 impose?",
+      "expected_pages": [
+        108
+      ],
+      "answer_patterns": [
+        "60",
+        "lower|whichever|minimum"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-04",
+      "document": "sae",
+      "category": "exact",
+      "query": "How long must both conditions persist under EV.8.7.2 before the BSPD trips?",
+      "expected_pages": [
+        109
+      ],
+      "answer_patterns": [
+        "0[.]5|half"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-05",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "Can we use a software controller to implement the brake overtravel safety switch?",
+      "expected_pages": [
+        66
+      ],
+      "answer_patterns": [
+        "no|not|analog"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-06",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "Can we solder voltage monitoring wires to battery cells?",
+      "expected_pages": [
+        97
+      ],
+      "answer_patterns": [
+        "yes|permit",
+        "high.current|monitor"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-07",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "Can a contactor serve as a battery maintenance plug?",
+      "expected_pages": [
+        97
+      ],
+      "answer_patterns": [
+        "no|not"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-08",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "How quickly must an untrained person be able to operate the manual service disconnect?",
+      "expected_pages": [
+        98
+      ],
+      "answer_patterns": [
+        "10"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-09",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "How long may a capacitor hold isolation relays closed after shutdown opens?",
+      "expected_pages": [
+        98
+      ],
+      "answer_patterns": [
+        "250"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-10",
+      "document": "sae",
+      "category": "paraphrase",
+      "query": "What fraction of lithium battery cells must have their temperature monitored?",
+      "expected_pages": [
+        108
+      ],
+      "answer_patterns": [
+        "20"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-11",
+      "document": "sae",
+      "category": "diagram",
+      "query": "In F.1.13, where does the rollover protection envelope end without triangulated members behind the main hoop?",
+      "expected_pages": [
+        24
+      ],
+      "answer_patterns": [
+        "rear.*plane|rear.*main.hoop"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-12",
+      "document": "sae",
+      "category": "diagram",
+      "query": "What is the height marked on the component envelope diagram in F.1.15?",
+      "expected_pages": [
+        24
+      ],
+      "answer_patterns": [
+        "350"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-13",
+      "document": "sae",
+      "category": "diagram",
+      "query": "In the EV.8.1 shutdown circuit diagram, which relays isolate the battery from the tractive system?",
+      "expected_pages": [
+        106
+      ],
+      "answer_patterns": [
+        "isolation|\\bIR"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-14",
+      "document": "gr25",
+      "category": "exact",
+      "query": "What is the minimum MQTT publish interval per unique CAN ID?",
+      "expected_pages": [
+        12
+      ],
+      "answer_patterns": [
+        "100"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-15",
+      "document": "gr25",
+      "category": "exact",
+      "query": "How frequently does the Monitor Service send a heartbeat to Mapache?",
+      "expected_pages": [
+        11
+      ],
+      "answer_patterns": [
+        "10"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-16",
+      "document": "gr25",
+      "category": "exact",
+      "query": "How often does Epic Shelter check connectivity?",
+      "expected_pages": [
+        13
+      ],
+      "answer_patterns": [
+        "5|five"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-17",
+      "document": "gr25",
+      "category": "exact",
+      "query": "What is the primary key of the SingleStore signal table?",
+      "expected_pages": [
+        15
+      ],
+      "answer_patterns": [
+        "timestamp",
+        "vehicle_id",
+        "name"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-18",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "Which service eventually uploads telemetry that was skipped by live streaming?",
+      "expected_pages": [
+        13
+      ],
+      "answer_patterns": [
+        "Epic Shelter"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-19",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "Why use a hardware interrupt between the microcontroller and Jetson rather than constantly checking for messages?",
+      "expected_pages": [
+        8,
+        10
+      ],
+      "answer_patterns": [
+        "poll|overhead|latency"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-20",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "What causes the in-memory CAN buffer to flush into local PostgreSQL?",
+      "expected_pages": [
+        12
+      ],
+      "answer_patterns": [
+        "second",
+        "million|1[ ,]000[ ,]000"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-21",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "How does the cloud ingest service find files uploaded by Epic Shelter?",
+      "expected_pages": [
+        14
+      ],
+      "answer_patterns": [
+        "MQTT",
+        "epic-shelter/gr25",
+        "URL|S3"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-22",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "Why reshape telemetry in Python rather than joining signals with mismatched timestamps in SQL?",
+      "expected_pages": [
+        23
+      ],
+      "answer_patterns": [
+        "pandas",
+        "complex|time|expensive|efficient"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-23",
+      "document": "gr25",
+      "category": "paraphrase",
+      "query": "What protects telemetry from being lost when LTE connectivity drops?",
+      "expected_pages": [
+        12,
+        13
+      ],
+      "answer_patterns": [
+        "local|PostgreSQL",
+        "Epic Shelter|upload"
+      ],
+      "requires_image": false,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-24",
+      "document": "gr25",
+      "category": "diagram",
+      "query": "In the Mapache system architecture diagram, what connects the car telemetry module to the cloud MQTT broker?",
+      "expected_pages": [
+        3
+      ],
+      "answer_patterns": [
+        "LTE"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-25",
+      "document": "gr25",
+      "category": "diagram",
+      "query": "In the CAN ID diagram, which field identifies the node sending a message?",
+      "expected_pages": [
+        4
+      ],
+      "answer_patterns": [
+        "GR ID"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "gr25-26",
+      "document": "gr25",
+      "category": "diagram",
+      "query": "Which five services are shown in the TCM software architecture?",
+      "expected_pages": [
+        9
+      ],
+      "answer_patterns": [
+        "PostgreSQL",
+        "CAN",
+        "Monitor",
+        "MQTT",
+        "Epic Shelter"
+      ],
+      "requires_image": true,
+      "expect_abstention": false
+    },
+    {
+      "id": "sae-27",
+      "document": "sae",
+      "category": "unanswerable",
+      "query": "Which specific IMD product model is approved for the 2027 event?",
+      "expected_pages": [],
+      "answer_patterns": [],
+      "requires_image": false,
+      "expect_abstention": true
+    },
+    {
+      "id": "sae-28",
+      "document": "sae",
+      "category": "unanswerable",
+      "query": "What tire pressure did Gaucho Racing run at the 2027 competition?",
+      "expected_pages": [],
+      "answer_patterns": [],
+      "requires_image": false,
+      "expect_abstention": true
+    },
+    {
+      "id": "gr25-29",
+      "document": "gr25",
+      "category": "unanswerable",
+      "query": "What exact GR25 accumulator temperature was measured at 12:03 PM during endurance?",
+      "expected_pages": [],
+      "answer_patterns": [],
+      "requires_image": false,
+      "expect_abstention": true
+    },
+    {
+      "id": "gr25-30",
+      "document": "gr25",
+      "category": "unanswerable",
+      "query": "What is the Sentinel production database password?",
+      "expected_pages": [],
+      "answer_patterns": [],
+      "requires_image": false,
+      "expect_abstention": true
+    }
+  ]
+}

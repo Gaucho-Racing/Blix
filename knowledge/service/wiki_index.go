@@ -13,11 +13,12 @@ import (
 	"github.com/gaucho-racing/blix/knowledge/model"
 	"github.com/gaucho-racing/blix/knowledge/pkg/logger"
 	"github.com/gaucho-racing/blix/knowledge/repository"
+	pgvector "github.com/pgvector/pgvector-go"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const wikiIndexVersion = 1
+const wikiIndexVersion = 2
 const wikiRefreshInterval = 30 * time.Second
 const wikiReadLimit = 8000
 const wikiSearchBudget = 16000
@@ -73,6 +74,7 @@ type WikiIndexedPage struct {
 }
 
 type WikiSearchOptions struct {
+	Mode   string `json:"mode,omitempty"`
 	budget int
 	Query  string `json:"query"`
 	Limit  int    `json:"limit"`
@@ -93,10 +95,11 @@ type WikiSectionHit struct {
 	Content                string   `json:"content"`
 	Score                  float64  `json:"score"`
 	Truncated              bool     `json:"truncated"`
-	SourceRecordIDs        []string `json:"source_record_ids"`
+	SourceRecordIDs        []string `json:"source_record_ids" gorm:"-"`
 }
 
 type WikiIndexedSearch struct {
+	SemanticStatus string `json:"semantic_status"`
 	WikiFreshness
 	Results          []WikiSectionHit    `json:"results"`
 	Citations        map[string]Citation `json:"citations"`
@@ -177,6 +180,9 @@ func (i *WikiIndex) install(ctx context.Context, snapshot repository.Snapshot) e
 				continue
 			}
 			title, season, sections := parseWikiPage(page)
+			for j := range sections {
+				sections[j].ContentHash = hashBytes([]byte(wikiEmbeddingText(title, sections[j].Heading, sections[j].Content)))
+			}
 			ids := citationIDs([]string{page.Content})
 			stored := model.WikiPage{Path: page.Path, BlobSHA: page.BlobSHA, Title: title, Content: page.Content, Season: season, SourceRecordIDs: ids[:min(len(ids), 16)], CitationsTruncated: len(ids) > 16}
 			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&stored).Error; err != nil {
@@ -294,10 +300,19 @@ func (s *WikiService) ReadIndexedPage(ctx context.Context, path string, options 
 func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptions) (WikiIndexedSearch, error) {
 	started := time.Now()
 	options.Query = strings.TrimSpace(options.Query)
-	if options.Query == "" || len(options.Query) > 256 || strings.ContainsRune(options.Query, 0) || options.Limit < 1 || options.Limit > 20 || len(options.Prefix) > 512 || options.Season != "" && !seasonPattern.MatchString(options.Season) {
+	if options.Query == "" || len(options.Query) > 256 || !utf8.ValidString(options.Query) || strings.ContainsRune(options.Query, 0) || options.Limit < 1 || options.Limit > 20 || len(options.Prefix) > 512 || options.Season != "" && !seasonPattern.MatchString(options.Season) || (options.Mode != "" && options.Mode != "hybrid" && options.Mode != "lexical") {
 		return WikiIndexedSearch{}, ErrInvalid
 	}
-	result := WikiIndexedSearch{Results: []WikiSectionHit{}, MissingCitations: []string{}, Retrieval: "lexical_v1"}
+	semanticStatus := "disabled"
+	var vector pgvector.Vector
+	if options.Mode != "lexical" {
+		vector, semanticStatus = s.embeddings.Query(ctx, options.Query)
+	}
+	candidateLimit := options.Limit
+	if semanticStatus == "ready" {
+		candidateLimit = 60
+	}
+	result := WikiIndexedSearch{SemanticStatus: semanticStatus, Results: []WikiSectionHit{}, MissingCitations: []string{}, Retrieval: "lexical_v1"}
 	defer func() {
 		if logger.SugarLogger != nil {
 			bytes, allTerms := 0, 0
@@ -331,9 +346,27 @@ func (s *WikiService) SearchIndexed(ctx context.Context, options WikiSearchOptio
       FROM knowledge_wiki_section section JOIN knowledge_wiki_page page USING(path) CROSS JOIN query
       WHERE section.search_vector @@ query.any_terms AND (? = '' OR section.season = ?)
       AND starts_with(section.path, ?)
-      ORDER BY score DESC, section.path, section.position LIMIT ?`, options.Query, options.Query, options.Season, options.Season, options.Prefix, options.Limit).Scan(&hits).Error
+      ORDER BY score DESC, section.path, section.position LIMIT ?`, options.Query, options.Query, options.Season, options.Season, options.Prefix, candidateLimit).Scan(&hits).Error
 		if err != nil {
 			return err
+		}
+		if semanticStatus == "ready" {
+			var semantic []WikiSectionHit
+			err = tx.Raw(`SELECT section.path,page.blob_sha,page.title,page.source_record_ids AS page_source_record_ids,
+ page.citations_truncated AS page_citations_truncated, false AS matched_all_terms,section.heading,section.position AS section,section.season,section.content,1-(e.vector <=> ?::vector) AS score
+ FROM knowledge_wiki_section section JOIN knowledge_wiki_page page USING(path)
+ JOIN knowledge_embedding e ON e.content_hash=section.content_hash AND e.namespace=? AND e.status='ready'
+ WHERE e.vector IS NOT NULL AND (?='' OR section.season=?) AND starts_with(section.path,?)
+ ORDER BY e.vector <=> ?::vector,section.path,section.position LIMIT 60`, vector.String(), s.embeddings.namespace, options.Season, options.Season, options.Prefix, vector.String()).Scan(&semantic).Error
+			if err != nil {
+				return err
+			}
+			if len(semantic) > 0 {
+				hits = fuseRanks(hits, semantic, func(h WikiSectionHit) string { return fmt.Sprintf("%s:%d", h.Path, h.Section) }, func(h *WikiSectionHit, v float64) { h.Score = v }, options.Limit)
+				result.Retrieval = "hybrid_v1"
+			} else {
+				result.SemanticStatus = "pending"
+			}
 		}
 		budget := wikiSearchBudget
 		if options.budget > 0 {
