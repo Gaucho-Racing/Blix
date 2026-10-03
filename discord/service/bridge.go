@@ -93,6 +93,9 @@ func (b *Bridge) ProcessInbox(ctx context.Context) (bool, error) {
 			return true, b.DB.WithContext(ctx).Model(&input).Updates(map[string]any{"state": "ignored", "error_code": upstream.Code}).Error
 		}
 		content := "I couldn’t start this request. Make sure your Discord account is linked in Sentinel and you have Blix access."
+		if upstream.Code == "blix_access_required" {
+			content = "Sorry, I can't help with that! Make sure you are a member of the `BlixUsers` group."
+		}
 		if upstream.Code == "run_owner_required" {
 			content = "This Blix run belongs to the person who started it. Mention me in a new message to start your own run."
 		}
