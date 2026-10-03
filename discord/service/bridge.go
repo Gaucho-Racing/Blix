@@ -308,6 +308,7 @@ var workingReplies = [...]string{
 	"give me a moment...",
 	"let me cook...",
 	"we are checking...",
+	"inventing...",
 }
 
 const placeholderDelay = 6 * time.Second
