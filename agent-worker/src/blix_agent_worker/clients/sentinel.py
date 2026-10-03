@@ -86,6 +86,8 @@ class _LinkedUser(BaseModel):
 
     id: UserID
     entity_id: EntityID
+    first_name: str = ""
+    last_name: str = ""
 
 
 class SentinelLinkedIdentity(BaseModel):
@@ -211,10 +213,44 @@ class SentinelClient:
         provider: str,
         external_id: str,
     ) -> SentinelLinkedIdentity | None:
+        identity = await self._read_linked_identity(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            path=f"/api/core/entity/external/{quote(provider.upper(), safe='')}/{quote(external_id, safe='')}",
+        )
+        if identity is not None and not any(
+            account.provider.casefold() == provider.casefold() and account.external_id == external_id
+            for account in identity.external_auths
+        ):
+            raise SentinelClientError("invalid_sentinel_response", "Sentinel returned an unrelated identity.")
+        return identity
+
+    async def resolve_entity_identity(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        entity_id: EntityID,
+    ) -> SentinelLinkedIdentity | None:
+        identity = await self._read_linked_identity(
+            sentinel_url=sentinel_url,
+            service_account_token=service_account_token,
+            path=f"/api/core/entity/{quote(entity_id, safe='')}",
+        )
+        if identity is not None and identity.id != entity_id:
+            raise SentinelClientError("invalid_sentinel_response", "Sentinel returned an unrelated identity.")
+        return identity
+
+    async def _read_linked_identity(
+        self,
+        *,
+        sentinel_url: str,
+        service_account_token: str,
+        path: str,
+    ) -> SentinelLinkedIdentity | None:
         try:
             response = await self._client.get(
-                f"{sentinel_url.rstrip('/')}/api/core/entity/external/"
-                f"{quote(provider.upper(), safe='')}/{quote(external_id, safe='')}",
+                f"{sentinel_url.rstrip('/')}{path}",
                 headers={"Authorization": f"Bearer {service_account_token}"},
             )
         except httpx.RequestError:
@@ -240,13 +276,7 @@ class SentinelClient:
                 retryable=response.status_code == 429 or response.status_code >= 500,
             )
         try:
-            identity = SentinelLinkedIdentity.model_validate(response.json())
-            if not any(
-                account.provider.casefold() == provider.casefold() and account.external_id == external_id
-                for account in identity.external_auths
-            ):
-                raise ValueError("Sentinel returned an unrelated identity")
-            return identity
+            return SentinelLinkedIdentity.model_validate(response.json())
         except ValueError:
             raise SentinelClientError(
                 "invalid_sentinel_response",

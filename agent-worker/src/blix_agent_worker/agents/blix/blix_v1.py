@@ -179,6 +179,11 @@ class BlixV1Agent:
                 "discord_message is a concise, natural Discord reply, usually 1–4 sentences. "
                 "Use mostly plain text; avoid headings, tables, long lists, and excessive formatting. "
                 "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
+                "When referring to a specific person in discord_message, try a Sentinel lookup and use their verified "
+                "Discord mention <@discord_id> instead of just their name. Find their entity_id with sentinel_api_v1 "
+                "GET /api/users when needed, then call sentinel_identity_resolve_v1 with entity_id to get linked_ids. "
+                "Use only a linked Discord external_id returned by that lookup. If the identity is ambiguous or no "
+                "Discord account is linked, use their name without guessing an ID. Keep names readable in message. "
                 "The adapter adds a View in Blix link, so do not include that link yourself. "
                 "Do not use Discord sending tools to deliver this reply; the adapter handles delivery."
             )

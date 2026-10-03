@@ -1,7 +1,7 @@
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, HttpUrl, TypeAdapter, ValidationError
+from pydantic import Field, HttpUrl, TypeAdapter, ValidationError, model_validator
 
 from blix_agent_worker.clients.sentinel import SentinelClient, SentinelClientError
 from blix_agent_worker.models.common import (
@@ -17,10 +17,21 @@ from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolResult, 
 
 
 class SentinelIdentityResolveV1Input(ContractModel):
-    provider: Literal["discord"] = Field(description="Only Discord is supported currently.")
-    external_id: Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,19}$")] = Field(
+    provider: Literal["discord"] | None = Field(default=None, description="Use with external_id for Discord lookup.")
+    external_id: Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,19}$")] | None = Field(
+        default=None,
         description="Exact Discord user ID, not a display name, username, mention, or channel ID."
     )
+    entity_id: EntityID | None = Field(default=None, description="Sentinel entity ID to look up its linked provider IDs.")
+
+    @model_validator(mode="after")
+    def validate_lookup(self) -> Self:
+        if self.entity_id is not None:
+            if self.provider is not None or self.external_id is not None:
+                raise ValueError("Use entity_id alone, or provider and external_id together")
+        elif self.provider is None or self.external_id is None:
+            raise ValueError("Use entity_id alone, or provider and external_id together")
+        return self
 
 
 class LinkedProviderID(ContractModel):
@@ -42,9 +53,12 @@ class SentinelIdentityResolveV1Tool:
     definition = ToolDefinition(
         id="sentinel_identity_resolve_v1",
         description=(
-            "Resolve an exact Discord user ID to its Sentinel entity/user IDs and all linked provider IDs. "
+            "Resolve either a Sentinel entity_id alone or an exact Discord ID using provider=discord and external_id. "
+            "Returns the Sentinel entity/user IDs, name, and all linked provider IDs. "
+            "For a named person, first find their entity_id with sentinel_api_v1 GET /api/users, then use this tool "
+            "to find their linked Discord ID. Do not guess identity matches or provider IDs. "
             "Uses Blix's Sentinel service account with user:read, not caller impersonation. Returns identifiers "
-            "only, never credentials or provider tokens. found=false means no linked Sentinel entity exists. "
+            "and safe identity metadata, never credentials or provider tokens. found=false means the entity was not found. "
             "Use sentinel_api_v1 GET /api/users/{user_id} for the full profile using the returned user_id. "
             "Lookup does not authenticate the Discord author, authorize actions, or change the current caller. "
             "Google/email/GitHub lookups are not supported yet."
@@ -93,14 +107,21 @@ class SentinelIdentityResolveV1Tool:
                 ),
             )
         try:
-            identity = await self._client.resolve_external_identity(
-                sentinel_url=str(url).rstrip("/"),
-                service_account_token=token,
-                provider=request.provider,
-                external_id=request.external_id,
-            )
+            if request.entity_id is not None:
+                identity = await self._client.resolve_entity_identity(
+                    sentinel_url=str(url).rstrip("/"),
+                    service_account_token=token,
+                    entity_id=request.entity_id,
+                )
+            else:
+                identity = await self._client.resolve_external_identity(
+                    sentinel_url=str(url).rstrip("/"),
+                    service_account_token=token,
+                    provider=request.provider,
+                    external_id=request.external_id,
+                )
             canonical = None
-            if identity is not None and identity.type is EntityType.USER:
+            if request.entity_id is None and identity is not None and identity.type is EntityType.USER:
                 canonical = await self._client.resolve_external_user(
                     sentinel_url=str(url).rstrip("/"),
                     service_account_token=token,
@@ -118,6 +139,11 @@ class SentinelIdentityResolveV1Tool:
             )
         output = SentinelIdentityResolveV1Output(found=False)
         if identity is not None:
+            full_name = canonical.full_name if canonical else None
+            if full_name is None and identity.user is not None:
+                full_name = " ".join(
+                    part.strip() for part in (identity.user.first_name, identity.user.last_name) if part.strip()
+                ) or None
             output = SentinelIdentityResolveV1Output(
                 found=True,
                 entity_id=identity.id,
@@ -128,7 +154,7 @@ class SentinelIdentityResolveV1Tool:
                     LinkedProviderID(provider=item.provider.lower(), external_id=item.external_id)
                     for item in identity.external_auths
                 ),
-                full_name=canonical.full_name if canonical else None,
+                full_name=full_name,
             )
         return ToolResult(
             run_id=call.run_id,

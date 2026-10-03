@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gaucho-racing/blix/discord/client"
@@ -120,7 +121,8 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	if output.RunID != "" {
 		runURL = strings.TrimRight(b.Config.PublicURL, "/") + "/chat/" + output.RunID
 	}
-	messageID, err := b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL)
+	allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
+	messageID, err := b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, allowedUserIDs)
 	if err == nil {
 		return true, b.DB.WithContext(ctx).Model(&output).Updates(map[string]any{"state": "sent", "discord_message_id": messageID, "error_code": ""}).Error
 	}
@@ -136,4 +138,37 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		return true, updateErr
 	}
 	return true, err
+}
+
+func (b *Bridge) verifiedMentions(ctx context.Context, content string) []string {
+	ids := client.UserMentionIDs(content)
+	verified := make([]bool, len(ids))
+	limit := make(chan struct{}, 4)
+	var workers sync.WaitGroup
+	for i, id := range ids {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case limit <- struct{}{}:
+				defer func() { <-limit }()
+			case <-ctx.Done():
+				return
+			}
+			linked, err := b.Identity.VerifyDiscordMention(ctx, id)
+			if err != nil {
+				b.Log.Warnw("Discord mention lookup failed; notification disabled", "reason", safeError(err))
+				return
+			}
+			verified[i] = linked
+		}()
+	}
+	workers.Wait()
+	allowed := []string{}
+	for i, id := range ids {
+		if verified[i] {
+			allowed = append(allowed, id)
+		}
+	}
+	return allowed
 }

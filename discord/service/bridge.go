@@ -20,6 +20,7 @@ import (
 
 type IdentityResolver interface {
 	Resolve(context.Context, string) (client.Identity, error)
+	VerifyDiscordMention(context.Context, string) (bool, error)
 }
 type Runtime interface {
 	Authorize(context.Context, client.Identity) error
@@ -29,7 +30,7 @@ type Runtime interface {
 type Transport interface {
 	Channel(context.Context, string) (*discordgo.Channel, error)
 	Guild(context.Context, string) (*discordgo.Guild, error)
-	Send(context.Context, string, string, string, string, string) (string, error)
+	Send(context.Context, string, string, string, string, string, []string) (string, error)
 }
 type Bridge struct {
 	DB       *gorm.DB

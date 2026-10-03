@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"unicode/utf16"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/gaucho-racing/blix/discord/config"
 )
 
 type Discord struct {
@@ -68,8 +70,33 @@ func truncate(text string, limit int) string {
 	}
 	return b.String()
 }
-func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL string) (string, error) {
+
+var userMentionPattern = regexp.MustCompile(`<@!?([1-9][0-9]{0,19})>`)
+
+func UserMentionIDs(content string) []string {
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, match := range userMentionPattern.FindAllStringSubmatch(content, -1) {
+		id := match[1]
+		if !seen[id] && config.Snowflake(id) && len(ids) < 100 {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	return ids
+}
+
+func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL string, allowedUserIDs []string) (string, error) {
 	message := discordgo.MessageSend{Content: Preview(content), AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}, Flags: discordgo.MessageFlagsSuppressEmbeds}
+	allowed := map[string]bool{}
+	for _, id := range allowedUserIDs {
+		allowed[id] = true
+	}
+	for _, id := range UserMentionIDs(message.Content) {
+		if allowed[id] {
+			message.AllowedMentions.Users = append(message.AllowedMentions.Users, id)
+		}
+	}
 	if replyToMessageID != "" {
 		failIfMissing := false
 		message.Reference = &discordgo.MessageReference{MessageID: replyToMessageID, ChannelID: channelID, FailIfNotExists: &failIfMissing}

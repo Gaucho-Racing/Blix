@@ -84,6 +84,8 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.usage.model_calls, 1)
         self.assertEqual(model.requests[0].output_format.id, "blix_discord_reply_v1")
         self.assertIn("adapter handles delivery", model.requests[0].messages[0].content)
+        self.assertIn("sentinel_identity_resolve_v1 with entity_id", model.requests[0].messages[0].content)
+        self.assertIn("without guessing an ID", model.requests[0].messages[0].content)
 
     async def test_discord_reply_rejects_invalid_output(self):
         task = lead_task().model_copy(update={"context": {"delivery_source": "discord"}})

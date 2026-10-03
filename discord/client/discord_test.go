@@ -47,11 +47,37 @@ func TestConciseDeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 	defer server.Close()
 	d.Session.Client = server.Client()
 	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
-	if id, err := d.Send(context.Background(), "event/run/123", "123", "456", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123"); err != nil || id != "999" {
+	if id, err := d.Send(context.Background(), "event/run/123", "123", "456", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123", nil); err != nil || id != "999" {
 		t.Fatalf("send=%s err=%v", id, err)
 	}
 	if d.Session.Identify.Intents&discordgo.IntentMessageContent != 0 {
 		t.Fatal("mention-only bot requested privileged content intent")
+	}
+}
+
+func TestExplicitUserMentionAllowlist(t *testing.T) {
+	d, err := NewDiscord("test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			AllowedMentions discordgo.MessageAllowedMentions `json:"allowed_mentions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		mentions := body.AllowedMentions
+		if len(mentions.Users) != 1 || mentions.Users[0] != "123" || len(mentions.Parse) != 0 || len(mentions.Roles) != 0 || mentions.RepliedUser {
+			t.Errorf("invalid allowlist: %+v", mentions)
+		}
+		w.Write([]byte(`{"id":"999"}`))
+	}))
+	defer server.Close()
+	d.Session.Client = server.Client()
+	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+	if _, err := d.Send(context.Background(), "mentions", "300", "500", "Ask <@123> or <@!123>. <@999> @everyone <@&456>", "", []string{"123", "123", "555"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

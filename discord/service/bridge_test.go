@@ -18,6 +18,13 @@ import (
 
 type fakeIdentity struct{}
 
+func (fakeIdentity) VerifyDiscordMention(_ context.Context, id string) (bool, error) {
+	if id == "888" {
+		return false, &client.Error{Code: "upstream_unavailable"}
+	}
+	return id == "123", nil
+}
+
 func (fakeIdentity) Resolve(context.Context, string) (client.Identity, error) {
 	var i client.Identity
 	json.Unmarshal([]byte(`{"id":"ent_user","type":"USER","user":{"id":"usr_user","entity_id":"ent_user"}}`), &i)
@@ -52,10 +59,11 @@ func (r *fakeRuntime) Events(context.Context, string, uint64) ([]client.Event, e
 }
 
 type fakeDiscord struct {
-	sent       []string
-	references []string
-	channels   []string
-	fail       bool
+	sent            []string
+	references      []string
+	channels        []string
+	allowedMentions [][]string
+	fail            bool
 }
 
 func (d *fakeDiscord) Channel(_ context.Context, id string) (*discordgo.Channel, error) {
@@ -67,10 +75,11 @@ func (d *fakeDiscord) Channel(_ context.Context, id string) (*discordgo.Channel,
 func (d *fakeDiscord) Guild(context.Context, string) (*discordgo.Guild, error) {
 	return &discordgo.Guild{ID: "100", Name: "Gaucho Racing"}, nil
 }
-func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link string) (string, error) {
+func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link string, allowedUserIDs []string) (string, error) {
 	d.sent = append(d.sent, id)
 	d.references = append(d.references, replyTo)
 	d.channels = append(d.channels, channel)
+	d.allowedMentions = append(d.allowedMentions, allowedUserIDs)
 	if d.fail {
 		d.fail = false
 		return "", &client.Error{Code: "discord_delivery_uncertain"}
@@ -250,6 +259,20 @@ func TestUncertainOldDeliveryDoesNotResend(t *testing.T) {
 	}
 	if err := b.DB.First(&output, "id = ?", "old").Error; err != nil || output.State != "uncertain" {
 		t.Fatalf("output=%+v err=%v", output, err)
+	}
+}
+
+func TestDeliveryOnlyAllowsVerifiedUserMentions(t *testing.T) {
+	b, _, d := fixture(t)
+	output := model.Outbox{ID: "mentions", ChannelID: "300", ReplyToMessageID: "500", Content: "Ask <@123> or <@!123>. <@999> <@888> @everyone <@&456>", State: "pending", NextAttemptAt: time.Now()}
+	if err := b.DB.Create(&output).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.sent) != 1 || len(d.allowedMentions[0]) != 1 || d.allowedMentions[0][0] != "123" {
+		t.Fatalf("allowed mentions=%v", d.allowedMentions)
 	}
 }
 

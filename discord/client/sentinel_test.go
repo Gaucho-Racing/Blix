@@ -48,3 +48,26 @@ func TestSentinelLookupVerifiesLinkBeforeImpersonation(t *testing.T) {
 		})
 	}
 }
+
+func TestMentionVerificationNeverImpersonates(t *testing.T) {
+	for _, linkedID := range []string{"123", "999", "missing"} {
+		t.Run(linkedID, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/core/entity/external/DISCORD/123" || r.Header.Get("Authorization") != "Bearer service-token" {
+					t.Fatalf("unexpected identity request: %s", r.URL.Path)
+				}
+				if linkedID == "missing" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{"id": "ent_user", "type": "USER", "user": map[string]string{"id": "usr_user", "entity_id": "ent_user"}, "external_auths": []map[string]string{{"entity_id": "ent_user", "provider": "DISCORD", "external_id": linkedID}}})
+			}))
+			defer server.Close()
+			s := Sentinel{HTTP: NewHTTP(server.URL, "service-token")}
+			verified, err := s.VerifyDiscordMention(context.Background(), "123")
+			if err != nil || verified != (linkedID == "123") {
+				t.Fatalf("verified=%v err=%v", verified, err)
+			}
+		})
+	}
+}
