@@ -149,16 +149,17 @@ type RuntimeCheckpoint struct {
 func (RuntimeCheckpoint) TableName() string { return "runway_runtime_checkpoint" }
 
 type Message struct {
-	ChannelContent string    `json:"channel_content,omitempty"`
-	ID             string    `json:"message_id" gorm:"primaryKey"`
-	RunID          string    `json:"run_id" gorm:"index;not null"`
-	TurnID         string    `json:"turn_id" gorm:"index;not null"`
-	SessionID      string    `json:"session_id" gorm:"not null"`
-	EventPosition  uint64    `json:"event_position" gorm:"uniqueIndex;not null"`
-	Role           string    `json:"role" gorm:"not null"`
-	Content        string    `json:"content" gorm:"type:text;not null"`
-	DisplayContent string    `json:"display_content,omitempty" gorm:"type:text;not null;default:''"`
-	CreatedAt      time.Time `json:"created_at"`
+	ChannelContent    string    `json:"channel_content,omitempty"`
+	ChannelHasSources bool      `json:"channel_has_sources,omitempty"`
+	ID                string    `json:"message_id" gorm:"primaryKey"`
+	RunID             string    `json:"run_id" gorm:"index;not null"`
+	TurnID            string    `json:"turn_id" gorm:"index;not null"`
+	SessionID         string    `json:"session_id" gorm:"not null"`
+	EventPosition     uint64    `json:"event_position" gorm:"uniqueIndex;not null"`
+	Role              string    `json:"role" gorm:"not null"`
+	Content           string    `json:"content" gorm:"type:text;not null"`
+	DisplayContent    string    `json:"display_content,omitempty" gorm:"type:text;not null;default:''"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 func (Message) TableName() string { return "runway_message" }

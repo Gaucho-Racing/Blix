@@ -125,7 +125,7 @@ func UserMentionIDs(content string) []string {
 	return ids
 }
 
-func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL string, allowedUserIDs []string) (string, error) {
+func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL, sourcesURL string, allowedUserIDs []string) (string, error) {
 	text := Preview(content)
 	message := discordgo.MessageSend{
 		Components:      []discordgo.MessageComponent{discordgo.TextDisplay{Content: text}},
@@ -147,9 +147,13 @@ func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, con
 	}
 	if runURL != "" {
 		divider, spacing := true, discordgo.SeparatorSpacingSizeSmall
+		footer := "-# [View in Blix](" + runURL + ")"
+		if sourcesURL != "" {
+			footer = "-# [Sources](" + sourcesURL + ") · [View in Blix](" + runURL + ")"
+		}
 		message.Components = append(message.Components,
 			discordgo.Separator{Divider: &divider, Spacing: &spacing},
-			discordgo.TextDisplay{Content: "-# [View in Blix](" + runURL + ")"},
+			discordgo.TextDisplay{Content: footer},
 		)
 	}
 	payload := struct {

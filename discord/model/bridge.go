@@ -43,6 +43,7 @@ type Outbox struct {
 	Reaction                  string
 	RemoveReaction            bool
 	Placeholder               bool
+	SourceMessageID           string
 	DeleteOutboxID            string
 	WaitForOutboxID           string
 	State                     string `gorm:"not null;default:pending;index"`

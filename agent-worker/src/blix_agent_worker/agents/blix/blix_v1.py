@@ -80,11 +80,13 @@ class BlixV1Input(ContractModel):
 class BlixV1Output(ContractModel):
     message: NonEmptyText
     discord_message: str | None = None
+    discord_has_sources: bool = False
 
 
 class BlixDiscordOutput(ContractModel):
     message: NonEmptyText
     discord_message: Annotated[str, Field(min_length=1, max_length=1400)]
+    discord_has_sources: bool
 
 
 class BlixV1Agent:
@@ -174,10 +176,14 @@ class BlixV1Agent:
         system_prompt = self.definition.instructions
         if discord_reply:
             system_prompt += (
-                "\n\nThis run is delivered through Discord. Return both message and discord_message. "
+                "\n\nThis run is delivered through Discord. Return message, discord_message, and discord_has_sources. "
                 "message is the complete answer for the Blix conversation, including useful detail and citations. "
                 "discord_message is a concise, natural Discord reply, usually 1–4 sentences. "
                 "Use mostly plain text; avoid headings, tables, long lists, and excessive formatting. "
+                "The general citation rules apply only to message, not discord_message. Never include inline citations "
+                "or a Sources section in discord_message. Include source URLs, document links, or Discord message links "
+                "in discord_message only when the user explicitly asks for links or sources. Otherwise keep all references "
+                "in the full message. Set discord_has_sources to true only when the full answer actually cites sources. "
                 "Never use em dashes in discord_message; use periods, commas, parentheses, or rewrite the sentence. "
                 "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
                 "When referring to a specific person in discord_message, try a Sentinel lookup and use their verified "
@@ -185,7 +191,7 @@ class BlixV1Agent:
                 "GET /api/users when needed, then call sentinel_identity_resolve_v1 with entity_id to get linked_ids. "
                 "Use only a linked Discord external_id returned by that lookup. If the identity is ambiguous or no "
                 "Discord account is linked, use their name without guessing an ID. Keep names readable in message. "
-                "The adapter adds a View in Blix link, so do not include that link yourself. "
+                "The adapter adds Sources and View in Blix footer links as appropriate; do not include those yourself. "
                 "Do not use Discord sending tools to deliver this reply; the adapter handles delivery."
             )
         system_prompt += BLIX_V1_MESSAGE_INDEX_SECTION.format(
@@ -324,7 +330,7 @@ class BlixV1Agent:
                     parent_session_id=task.parent_session_id,
                     agent_id=self.definition.id,
                     status=AgentResultStatus.SUCCEEDED,
-                    output=output.model_dump(mode="json", exclude_none=True),
+                    output=output.model_dump(mode="json", exclude_none=True, exclude_defaults=True),
                     usage=usage,
                 )
 

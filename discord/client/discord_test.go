@@ -64,7 +64,7 @@ func TestComponentsV2DeliveryDisablesMentionsAndUsesNonce(t *testing.T) {
 	defer server.Close()
 	d.Session.Client = server.Client()
 	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
-	if id, err := d.Send(context.Background(), "event/run/123", "123", "456", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123", nil); err != nil || id != "999" {
+	if id, err := d.Send(context.Background(), "event/run/123", "123", "456", strings.Repeat("🙂", 2000), "https://blix.example/chat/run_123", "", nil); err != nil || id != "999" {
 		t.Fatalf("send=%s err=%v", id, err)
 	}
 	if d.Session.Identify.Intents&discordgo.IntentMessageContent != 0 {
@@ -93,7 +93,39 @@ func TestExplicitUserMentionAllowlist(t *testing.T) {
 	defer server.Close()
 	d.Session.Client = server.Client()
 	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
-	if _, err := d.Send(context.Background(), "mentions", "300", "500", "Ask <@123> or <@!123>. <@999> @everyone <@&456>", "", []string{"123", "123", "555"}); err != nil {
+	if _, err := d.Send(context.Background(), "mentions", "300", "500", "Ask <@123> or <@!123>. <@999> @everyone <@&456>", "", "", []string{"123", "123", "555"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourcesFooterLinksToCitedAnswer(t *testing.T) {
+	d, err := NewDiscord("test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Components []json.RawMessage `json:"components"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Components) != 3 {
+			t.Fatalf("unexpected components: %s", body.Components)
+		}
+		var footer discordgo.TextDisplay
+		if err := json.Unmarshal(body.Components[2], &footer); err != nil {
+			t.Fatal(err)
+		}
+		if footer.Content != "-# [Sources](https://blix.example/chat/run_123#message-msg_123) · [View in Blix](https://blix.example/chat/run_123)" {
+			t.Errorf("unexpected footer: %s", footer.Content)
+		}
+		w.Write([]byte(`{"id":"999"}`))
+	}))
+	defer server.Close()
+	d.Session.Client = server.Client()
+	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+	if _, err := d.Send(context.Background(), "sources", "300", "500", "Mapache is our telemetry platform.", "https://blix.example/chat/run_123", "https://blix.example/chat/run_123#message-msg_123", nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -174,7 +206,7 @@ func TestV2MessageWithoutRunHasNoFooter(t *testing.T) {
 	defer server.Close()
 	d.Session.Client = server.Client()
 	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
-	if _, err := d.Send(context.Background(), "greeting", "300", "500", "Hey! How can I help?", "", nil); err != nil {
+	if _, err := d.Send(context.Background(), "greeting", "300", "500", "Hey! How can I help?", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 }

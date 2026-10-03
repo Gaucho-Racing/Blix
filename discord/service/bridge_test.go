@@ -63,6 +63,7 @@ type fakeDiscord struct {
 	references      []string
 	channels        []string
 	allowedMentions [][]string
+	sources         []string
 	reacted         []string
 	removed         []string
 	removeError     error
@@ -95,9 +96,10 @@ func (d *fakeDiscord) Delete(_ context.Context, channel, message string) error {
 	d.deleted = append(d.deleted, channel+"/"+message)
 	return d.deleteError
 }
-func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link string, allowedUserIDs []string) (string, error) {
+func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link, sourcesURL string, allowedUserIDs []string) (string, error) {
 	d.operations = append(d.operations, "send/"+id)
 	d.sent = append(d.sent, id)
+	d.sources = append(d.sources, sourcesURL)
 	d.references = append(d.references, replyTo)
 	d.channels = append(d.channels, channel)
 	d.allowedMentions = append(d.allowedMentions, allowedUserIDs)
@@ -483,6 +485,34 @@ func completeTurn(t *testing.T, b *Bridge, r *fakeRuntime, eventType string) {
 		if err := b.PollEvents(context.Background()); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestSourceFooterUsesAssistantEventMetadata(t *testing.T) {
+	for _, hasSources := range []bool{false, true} {
+		t.Run(fmt.Sprint(hasSources), func(t *testing.T) {
+			b, r, d := fixture(t)
+			startWithPlaceholder(t, b)
+			turnID := "turn_500"
+			payload, err := json.Marshal(map[string]any{"message_id": "msg_123", "content": "Full cited answer", "channel_content": "Short answer with a requested link https://example.com", "channel_has_sources": hasSources})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.events = []client.Event{{Position: 1, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &turnID, Payload: payload}}
+			for i := 0; i < 2; i++ {
+				if err := b.PollEvents(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			drainReady(t, b)
+			expected := ""
+			if hasSources {
+				expected = "https://blix.example/chat/run_500#message-msg_123"
+			}
+			if len(d.sources) != 2 || d.sources[0] != "" || d.sources[1] != expected {
+				t.Fatalf("incorrect sources links: %v", d.sources)
+			}
+		})
 	}
 }
 

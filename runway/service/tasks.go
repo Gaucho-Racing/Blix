@@ -140,11 +140,12 @@ func (s *ExecutionService) updateTarget(tx *gorm.DB, a model.ExecutionAttempt, u
 
 type CompletionRequest struct {
 	Ownership
-	ChannelContent string          `json:"channel_content,omitempty"`
-	Content        string          `json:"content,omitempty"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	Usage          map[string]any  `json:"usage,omitempty"`
-	Artifacts      []ArtifactInput `json:"artifacts,omitempty"`
+	ChannelContent    string          `json:"channel_content,omitempty"`
+	ChannelHasSources bool            `json:"channel_has_sources,omitempty"`
+	Content           string          `json:"content,omitempty"`
+	Result            json.RawMessage `json:"result,omitempty"`
+	Usage             map[string]any  `json:"usage,omitempty"`
+	Artifacts         []ArtifactInput `json:"artifacts,omitempty"`
 }
 type ArtifactInput struct {
 	Kind       string          `json:"kind"`
@@ -166,8 +167,8 @@ func (s *ExecutionService) Complete(ctx context.Context, id string, r Completion
 			if len(r.ChannelContent) > 8000 {
 				return ErrInvalid
 			}
-			msg := model.Message{ID: identifier.New(identifier.Message), RunID: a.RunID, TurnID: *a.TurnID, SessionID: a.SessionID, Role: "assistant", Content: r.Content, ChannelContent: r.ChannelContent}
-			event, err := s.event(tx, a, "message.assistant_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": msg.Content, "channel_content": msg.ChannelContent, "usage": r.Usage})
+			msg := model.Message{ID: identifier.New(identifier.Message), RunID: a.RunID, TurnID: *a.TurnID, SessionID: a.SessionID, Role: "assistant", Content: r.Content, ChannelContent: r.ChannelContent, ChannelHasSources: r.ChannelHasSources}
+			event, err := s.event(tx, a, "message.assistant_v1", msg.ID, map[string]any{"message_id": msg.ID, "content": msg.Content, "channel_content": msg.ChannelContent, "channel_has_sources": msg.ChannelHasSources, "usage": r.Usage})
 			if err != nil {
 				return err
 			}

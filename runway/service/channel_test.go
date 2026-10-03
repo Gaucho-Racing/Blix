@@ -92,14 +92,25 @@ func TestChannelReplyPreservesCanonicalAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := f.claim(t, attempt.ID)
-	if err = f.s.Complete(f.ctx, a.Attempt.ID, CompletionRequest{Ownership: own(a), Content: "Full answer with detailed evidence.", ChannelContent: "Short Discord answer."}); err != nil {
+	if err = f.s.Complete(f.ctx, a.Attempt.ID, CompletionRequest{Ownership: own(a), Content: "Full answer with detailed evidence.", ChannelContent: "Short Discord answer.", ChannelHasSources: true}); err != nil {
 		t.Fatal(err)
 	}
 	var message model.Message
 	if err = f.db.First(&message, "run_id = ? AND role = 'assistant'", r.RunID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if message.Content != "Full answer with detailed evidence." || message.ChannelContent != "Short Discord answer." {
+	if message.Content != "Full answer with detailed evidence." || message.ChannelContent != "Short Discord answer." || !message.ChannelHasSources {
 		t.Fatalf("lost reply variants: %+v", message)
+	}
+	var event model.Event
+	if err = f.db.First(&event, "run_id = ? AND type = 'message.assistant_v1'", r.RunID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		MessageID         string `json:"message_id"`
+		ChannelHasSources bool   `json:"channel_has_sources"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil || payload.MessageID != message.ID || !payload.ChannelHasSources {
+		t.Fatalf("lost source metadata: payload=%s error=%v", event.Payload, err)
 	}
 }

@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
 import {
@@ -156,12 +156,14 @@ export function ChatPage() {
 function RunChat({ runID }: { runID: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
+  const { hash } = useLocation()
+  const focusedMessage = useRef("")
   const cache = useQueryClient()
   const [draft, setDraft] = useState("")
   const pendingRun = useRef("")
   const end = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
-  const [follow, setFollow] = useState(true)
+  const [follow, setFollow] = useState(!hash)
   const permitted =
     auth.isAuthenticated && (auth.user?.groups.includes("BlixUsers") ?? false)
   const recent = useQuery({
@@ -244,9 +246,17 @@ function RunChat({ runID }: { runID: string }) {
     )
     .slice(-8)
   useEffect(() => {
+    if (hash && focusedMessage.current !== hash) {
+      const target = document.getElementById(hash.slice(1))
+      if (target) {
+        focusedMessage.current = hash
+        target.scrollIntoView({ block: "start" })
+        return
+      }
+    }
     if (follow)
       end.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [data?.messages.length, events.length, follow])
+  }, [data?.messages.length, events.length, follow, hash])
   return (
     <div className="workspace-page chat-page">
       <header className="workspace-toolbar chat-toolbar">
@@ -328,6 +338,7 @@ function RunChat({ runID }: { runID: string }) {
             {data?.messages.map((message) => (
               <ChatMessage
                 key={message.message_id}
+                messageID={message.message_id}
                 role={message.role}
                 content={message.display_content || message.content}
                 userAvatarURL={auth.user?.avatar_url}

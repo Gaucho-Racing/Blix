@@ -53,16 +53,22 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 				return fmt.Errorf("invalid event cursor")
 			}
 			content := ""
+			sourceMessageID := ""
 			if event.SessionID == binding.SessionID {
 				switch event.Type {
 				case "message.assistant_v1":
 					var payload struct {
-						ChannelContent string `json:"channel_content"`
+						ChannelContent    string `json:"channel_content"`
+						ChannelHasSources bool   `json:"channel_has_sources"`
+						MessageID         string `json:"message_id"`
 					}
 					if err := json.Unmarshal(event.Payload, &payload); err != nil {
 						return err
 					}
 					content = client.Preview(payload.ChannelContent)
+					if payload.ChannelHasSources {
+						sourceMessageID = payload.MessageID
+					}
 				case "approval.requested_v1":
 					content = "I need your approval before continuing. Open this run in Blix to review the action."
 				case "attempt.failed_v1":
@@ -80,7 +86,7 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 						return err
 					}
 				}
-				if err := queueResponse(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: replyTo, RunID: binding.RunID, Content: content}); err != nil {
+				if err := queueResponse(tx, model.Outbox{ID: fmt.Sprintf("event/%s/%d", binding.RunID, event.Position), ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: replyTo, RunID: binding.RunID, Content: content, SourceMessageID: sourceMessageID}); err != nil {
 					return err
 				}
 			}
@@ -122,6 +128,10 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		runURL = strings.TrimRight(b.Config.PublicURL, "/") + "/chat/" + output.RunID
 	}
 	messageID := ""
+	sourcesURL := ""
+	if runURL != "" && output.SourceMessageID != "" {
+		sourcesURL = runURL + "#message-" + output.SourceMessageID
+	}
 	if output.DeleteOutboxID != "" {
 		err = b.deletePlaceholder(ctx, output)
 	} else if output.RemoveReaction {
@@ -130,7 +140,7 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		err = b.Discord.React(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
 	} else {
 		allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
-		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, allowedUserIDs)
+		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, sourcesURL, allowedUserIDs)
 	}
 	if err == nil {
 		return true, b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

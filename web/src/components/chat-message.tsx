@@ -6,9 +6,10 @@ interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
   userAvatarURL?: string
+  messageID?: string
 }
 
-export function ChatMessage({ role, content, userAvatarURL }: ChatMessageProps) {
+export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMessageProps) {
   if (role === "user") {
     return (
       <article className="chat-message chat-message-user">
@@ -19,7 +20,7 @@ export function ChatMessage({ role, content, userAvatarURL }: ChatMessageProps) 
   }
 
   return (
-    <article className="chat-message chat-message-assistant">
+    <article className="chat-message chat-message-assistant" id={messageID ? `message-${messageID}` : undefined}>
       <span className="chat-message-blix-avatar">B</span>
       <div className="chat-message-body">
         <span className="chat-message-author">Blix</span>

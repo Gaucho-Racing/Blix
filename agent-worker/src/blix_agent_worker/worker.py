@@ -530,6 +530,7 @@ class ApiRuntime:
             }
             if execution.run.context.get("source") == "discord":
                 completion["channel_content"] = getattr(output, "discord_message", None) or ""
+                completion["channel_has_sources"] = getattr(output, "discord_has_sources", False)
             await lease.post("complete", completion)
         else:
             error = outcome.error or ContractError(code="agent_failed", message="The agent failed.")

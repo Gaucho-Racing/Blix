@@ -77,6 +77,7 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         model = ScriptedModel(assistant(json.dumps({
             "message": "Full answer with supporting evidence and details.",
             "discord_message": "Short answer for the thread.",
+            "discord_has_sources": False,
         })))
         result = await make_lead(model).run(task)
         self.assertEqual(result.output["message"], "Full answer with supporting evidence and details.")
@@ -86,6 +87,20 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("adapter handles delivery", model.requests[0].messages[0].content)
         self.assertIn("sentinel_identity_resolve_v1 with entity_id", model.requests[0].messages[0].content)
         self.assertIn("without guessing an ID", model.requests[0].messages[0].content)
+
+    async def test_discord_reply_preserves_citations_only_in_full_answer(self):
+        task = lead_task().model_copy(update={"context": {"delivery_source": "discord"}})
+        full_answer = "Mapache handles telemetry [1].\n\n## Sources\n\n1. [Whitepaper](https://example.com/paper)"
+        model = ScriptedModel(assistant(json.dumps({
+            "message": full_answer,
+            "discord_message": "Mapache handles team telemetry.",
+            "discord_has_sources": True,
+        })))
+        result = await make_lead(model).run(task)
+        self.assertEqual(result.output["message"], full_answer)
+        self.assertEqual(result.output["discord_message"], "Mapache handles team telemetry.")
+        self.assertTrue(result.output["discord_has_sources"])
+        self.assertEqual(result.usage.model_calls, 1)
 
     async def test_discord_reply_rejects_invalid_output(self):
         task = lead_task().model_copy(update={"context": {"delivery_source": "discord"}})
