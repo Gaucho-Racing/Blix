@@ -63,6 +63,7 @@ type fakeDiscord struct {
 	references      []string
 	channels        []string
 	allowedMentions [][]string
+	reacted         []string
 	fail            bool
 }
 
@@ -74,6 +75,10 @@ func (d *fakeDiscord) Channel(_ context.Context, id string) (*discordgo.Channel,
 }
 func (d *fakeDiscord) Guild(context.Context, string) (*discordgo.Guild, error) {
 	return &discordgo.Guild{ID: "100", Name: "Gaucho Racing"}, nil
+}
+func (d *fakeDiscord) React(_ context.Context, channel, message, emoji string) error {
+	d.reacted = append(d.reacted, channel+"/"+message+"/"+emoji)
+	return nil
 }
 func (d *fakeDiscord) Send(_ context.Context, id, channel, replyTo, content, link string, allowedUserIDs []string) (string, error) {
 	d.sent = append(d.sent, id)
@@ -234,7 +239,7 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if work, err := b.Deliver(ctx); work || err != nil {
 		t.Fatalf("redelivered completed output: work=%v err=%v", work, err)
 	}
-	if len(d.sent) != 2 {
+	if len(d.sent) != 1 || len(d.reacted) != 1 || d.reacted[0] != "300/500/👀" {
 		t.Fatal("duplicate deliveries")
 	}
 	for i := range d.sent {
@@ -258,6 +263,24 @@ func TestUncertainOldDeliveryDoesNotResend(t *testing.T) {
 		t.Fatal("resent an uncertain old output")
 	}
 	if err := b.DB.First(&output, "id = ?", "old").Error; err != nil || output.State != "uncertain" {
+		t.Fatalf("output=%+v err=%v", output, err)
+	}
+}
+
+func TestOldReactionDeliveryCanRetryWithoutSendingMessage(t *testing.T) {
+	b, _, d := fixture(t)
+	past := time.Now().Add(-3 * time.Minute)
+	output := model.Outbox{ID: "eyes", ChannelID: "300", ReplyToMessageID: "500", Reaction: "👀", State: "sending", FirstAttemptAt: &past, NextAttemptAt: past}
+	if err := b.DB.Create(&output).Error; err != nil {
+		t.Fatal(err)
+	}
+	if work, err := b.Deliver(context.Background()); !work || err != nil {
+		t.Fatalf("reaction delivery work=%v err=%v", work, err)
+	}
+	if len(d.sent) != 0 || len(d.reacted) != 1 || d.reacted[0] != "300/500/👀" {
+		t.Fatalf("sent=%v reacted=%v", d.sent, d.reacted)
+	}
+	if err := b.DB.First(&output, "id = ?", "eyes").Error; err != nil || output.State != "sent" || output.DiscordMessageID != "" {
 		t.Fatalf("output=%+v err=%v", output, err)
 	}
 }
@@ -288,6 +311,14 @@ func TestReplyToBotContinuesRunAndTargetsEachTurn(t *testing.T) {
 	if _, err := b.Deliver(ctx); err != nil {
 		t.Fatal(err)
 	}
+	initialTurn := "turn_500"
+	r.events = []client.Event{{Position: 1, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &initialTurn, Payload: json.RawMessage(`{"channel_content":"Initial answer"}`)}}
+	if err := b.PollEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Deliver(ctx); err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{"501", "502"} {
 		m := mention(id, "300", "600")
 		m.MessageReference = &discordgo.MessageReference{MessageID: "901", ChannelID: "300"}
@@ -307,15 +338,15 @@ func TestReplyToBotContinuesRunAndTargetsEachTurn(t *testing.T) {
 	}
 	turnA, turnB := "turn_501", "turn_502"
 	events := []client.Event{
-		{Position: 1, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &turnB, Payload: json.RawMessage(`{"channel_content":"Second answer"}`)},
-		{Position: 2, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &turnA, Payload: json.RawMessage(`{"channel_content":"First answer"}`)},
+		{Position: 2, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &turnB, Payload: json.RawMessage(`{"channel_content":"Second answer"}`)},
+		{Position: 3, Type: "message.assistant_v1", SessionID: "session_run_500", TurnID: &turnA, Payload: json.RawMessage(`{"channel_content":"First answer"}`)},
 	}
 	if err := b.SaveEvents(ctx, binding, events); err != nil {
 		t.Fatal(err)
 	}
 	for i, expected := range []string{"502", "501"} {
 		var output model.Outbox
-		if err := b.DB.First(&output, "id = ?", fmt.Sprintf("event/run_500/%d", i+1)).Error; err != nil || output.ReplyToMessageID != expected {
+		if err := b.DB.First(&output, "id = ?", fmt.Sprintf("event/run_500/%d", i+2)).Error; err != nil || output.ReplyToMessageID != expected {
 			t.Fatalf("wrong reply target: output=%+v err=%v", output, err)
 		}
 	}

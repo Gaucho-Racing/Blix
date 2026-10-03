@@ -96,7 +96,7 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("state IN ? AND next_attempt_at <= ?", []string{"pending", "sending"}, time.Now()).Order("created_at,id").First(&output).Error; err != nil {
 			return err
 		}
-		if output.FirstAttemptAt != nil && time.Since(*output.FirstAttemptAt) > 2*time.Minute {
+		if output.Reaction == "" && output.FirstAttemptAt != nil && time.Since(*output.FirstAttemptAt) > 2*time.Minute {
 			output.State = "uncertain"
 			return tx.Model(&output).Updates(map[string]any{"state": "uncertain", "error_code": "delivery_requires_reconciliation"}).Error
 		}
@@ -121,8 +121,13 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	if output.RunID != "" {
 		runURL = strings.TrimRight(b.Config.PublicURL, "/") + "/chat/" + output.RunID
 	}
-	allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
-	messageID, err := b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, allowedUserIDs)
+	messageID := ""
+	if output.Reaction != "" {
+		err = b.Discord.React(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
+	} else {
+		allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
+		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, allowedUserIDs)
+	}
 	if err == nil {
 		return true, b.DB.WithContext(ctx).Model(&output).Updates(map[string]any{"state": "sent", "discord_message_id": messageID, "error_code": ""}).Error
 	}

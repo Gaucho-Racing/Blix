@@ -31,6 +31,7 @@ type Transport interface {
 	Channel(context.Context, string) (*discordgo.Channel, error)
 	Guild(context.Context, string) (*discordgo.Guild, error)
 	Send(context.Context, string, string, string, string, string, []string) (string, error)
+	React(context.Context, string, string, string) error
 }
 type Bridge struct {
 	DB       *gorm.DB
@@ -221,11 +222,11 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 		if err := tx.Model(input).Update("turn_id", result.TurnID).Error; err != nil {
 			return err
 		}
-		content := "On it. I’ll reply when it’s ready."
+		output := model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: input.ID, RunID: result.RunID, Reaction: "👀"}
 		if payload.Operation == "cancel" {
-			content = "Stopped the current work."
+			output.Reaction, output.Content = "", "Stopped the current work."
 		}
-		return queue(tx, model.Outbox{ID: "input/" + input.ID, ChannelID: binding.ChannelID, BindingID: binding.ID, ReplyToMessageID: input.ID, RunID: result.RunID, Content: content})
+		return queue(tx, output)
 	})
 }
 

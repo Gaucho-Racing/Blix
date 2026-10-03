@@ -81,6 +81,25 @@ func TestExplicitUserMentionAllowlist(t *testing.T) {
 	}
 }
 
+func TestEyesReactionUsesDiscordReactionEndpoint(t *testing.T) {
+	d, err := NewDiscord("test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || !strings.HasSuffix(r.URL.Path, "/channels/300/messages/500/reactions/👀/@me") || r.Header.Get("Authorization") != "Bot test-token" {
+			t.Errorf("unexpected reaction request: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	d.Session.Client = server.Client()
+	d.Session.Client.Transport = rewriteTransport{base: server.URL, inner: http.DefaultTransport}
+	if err := d.React(context.Background(), "300", "500", "👀"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type rewriteTransport struct {
 	base  string
 	inner http.RoundTripper

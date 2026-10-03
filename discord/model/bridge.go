@@ -40,6 +40,7 @@ type Outbox struct {
 	DiscordMessageID          string `gorm:"index"`
 	BindingID                 string `gorm:"index"`
 	ReplyToMessageID          string
+	Reaction                  string
 	State                     string `gorm:"not null;default:pending;index"`
 	Attempts                  int
 	FirstAttemptAt            *time.Time

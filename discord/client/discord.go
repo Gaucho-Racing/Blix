@@ -45,6 +45,17 @@ func (d *Discord) Guild(ctx context.Context, id string) (*discordgo.Guild, error
 	}
 	return d.Session.Guild(id, discordgo.WithContext(ctx))
 }
+func (d *Discord) React(ctx context.Context, channelID, messageID, emoji string) error {
+	err := d.Session.MessageReactionAdd(channelID, messageID, emoji, discordgo.WithContext(ctx))
+	if err != nil {
+		var rest *discordgo.RESTError
+		if errors.As(err, &rest) {
+			return &Error{Status: rest.Response.StatusCode, Code: "discord_reaction_failed"}
+		}
+		return &Error{Code: "discord_reaction_uncertain"}
+	}
+	return nil
+}
 func Nonce(id string) string { sum := sha256.Sum256([]byte(id)); return hex.EncodeToString(sum[:12]) }
 func Preview(text string) string {
 	text = strings.TrimSpace(text)
