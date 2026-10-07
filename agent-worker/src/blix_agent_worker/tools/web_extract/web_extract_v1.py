@@ -1,5 +1,5 @@
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
 
@@ -18,6 +18,10 @@ class WebExtractV1Input(ContractModel):
     urls: Annotated[tuple[HttpUrl, ...], Field(min_length=1, max_length=5)]
     query: NonEmptyText
     chunks_per_source: Annotated[int, Field(ge=1, le=5)] = 3
+    extract_depth: Literal["basic", "advanced"] = Field(
+        default="basic",
+        description="Use advanced for pages with tables or embedded content, or when basic extraction fails.",
+    )
 
 
 class WebExtractResult(ContractModel):
@@ -94,7 +98,7 @@ class WebExtractV1Tool:
                     "urls": [str(url) for url in tool_input.urls],
                     "query": tool_input.query,
                     "chunks_per_source": tool_input.chunks_per_source,
-                    "extract_depth": "basic",
+                    "extract_depth": tool_input.extract_depth,
                     "include_images": False,
                     "format": "markdown",
                 },

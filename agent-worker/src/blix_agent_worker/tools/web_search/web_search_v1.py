@@ -1,7 +1,8 @@
 import os
-from typing import Annotated, Literal
+from datetime import date
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, model_validator
 
 from blix_agent_worker.clients import TavilyClient, TavilyClientError
 from blix_agent_worker.models.common import (
@@ -13,12 +14,37 @@ from blix_agent_worker.models.common import (
 )
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolResult, ToolResultStatus
 
+Domain = Annotated[
+    str,
+    Field(min_length=3, max_length=253, pattern=r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$"),
+]
+
 
 class WebSearchV1Input(ContractModel):
     query: NonEmptyText
     max_results: Annotated[int, Field(ge=1, le=10)] = 5
     topic: Literal["general", "news", "finance"] = "general"
+    search_depth: Literal["basic", "advanced"] = Field(
+        default="basic",
+        description="Use advanced for precise or hard-to-find information; it costs twice as much as basic.",
+    )
     time_range: Literal["day", "week", "month", "year"] | None = None
+    start_date: date | None = Field(default=None, description="Only return results published on or after this date.")
+    end_date: date | None = Field(default=None, description="Only return results published on or before this date.")
+    include_domains: Annotated[tuple[Domain, ...], Field(max_length=20)] = Field(
+        default=(), description="Restrict results to these domains, such as fsaeonline.com."
+    )
+    exclude_domains: Annotated[tuple[Domain, ...], Field(max_length=20)] = ()
+
+    @model_validator(mode="after")
+    def validate_filters(self) -> Self:
+        if self.time_range is not None and (self.start_date is not None or self.end_date is not None):
+            raise ValueError("use either time_range or start_date/end_date, not both")
+        if self.start_date is not None and self.end_date is not None and self.start_date > self.end_date:
+            raise ValueError("start_date must not be after end_date")
+        if set(self.include_domains) & set(self.exclude_domains):
+            raise ValueError("a domain cannot be both included and excluded")
+        return self
 
 
 class WebSearchResult(ContractModel):
@@ -86,7 +112,7 @@ class WebSearchV1Tool:
         try:
             payload: JsonObject = {
                 "query": tool_input.query,
-                "search_depth": "basic",
+                "search_depth": tool_input.search_depth,
                 "max_results": tool_input.max_results,
                 "topic": tool_input.topic,
                 "include_answer": False,
@@ -96,6 +122,14 @@ class WebSearchV1Tool:
             }
             if tool_input.time_range is not None:
                 payload["time_range"] = tool_input.time_range
+            if tool_input.start_date is not None:
+                payload["start_date"] = tool_input.start_date.isoformat()
+            if tool_input.end_date is not None:
+                payload["end_date"] = tool_input.end_date.isoformat()
+            if tool_input.include_domains:
+                payload["include_domains"] = list(tool_input.include_domains)
+            if tool_input.exclude_domains:
+                payload["exclude_domains"] = list(tool_input.exclude_domains)
             body = await self._client.search(payload, api_key=api_key)
             response = _TavilySearchResponse.model_validate(body)
             output = WebSearchV1Output(
