@@ -5,12 +5,18 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 if [ "$#" -eq 0 ]; then
-  set -- ingestion discord
+  set -- runway knowledge ingestion discord agent-worker web cli sandbox blix-code-v1
 fi
 for service in "$@"; do
   case "$service" in
-    ingestion|discord|sandbox) ;;
+    runway|knowledge|ingestion|discord|agent-worker|web|cli|sandbox|blix-code-v1) ;;
     *) printf 'No production Dockerfile for service: %s\n' "$service" >&2; exit 1 ;;
   esac
-  docker build -t "blix-$service:local" -f "$repo_dir/$service/Dockerfile" "$repo_dir/$service"
+  context="$repo_dir/$service"
+  image="blix-$service:local"
+  if [ "$service" = blix-code-v1 ]; then
+    context="$repo_dir/sandbox/images/ohmypi"
+    image="blix-code-v1:local"
+  fi
+  docker build -t "$image" -f "$context/Dockerfile" "$context"
 done

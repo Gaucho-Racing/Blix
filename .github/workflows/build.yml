@@ -1,0 +1,74 @@
+name: build
+run-name: Check Blix service builds
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA to check. Defaults to the selected ref.
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check workflow results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT_SHA: ${{ inputs.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          sha="${INPUT_SHA:-$CURRENT_SHA}"
+          workflows=(runway knowledge ingestion discord agent-worker web cli sandbox blix-code-v1)
+          deadline=$((SECONDS + 1800))
+          while [ "${#workflows[@]}" -gt 0 ]; do
+            pending=()
+            for workflow in "${workflows[@]}"; do
+              query=(-f "head_sha=$sha" -f per_page=1)
+              if [ "$EVENT" != workflow_dispatch ]; then
+                query+=(-f "event=$EVENT")
+              fi
+              result=$(gh api --method GET "repos/$REPO/actions/workflows/$workflow.yml/runs" \
+                "${query[@]}" --jq '(.workflow_runs[0] // empty) | [.status, (.conclusion // "pending"), .html_url] | @tsv')
+              if [ -z "$result" ]; then
+                echo "$workflow: waiting for a run for $sha"
+                pending+=("$workflow")
+                continue
+              fi
+              IFS=$'\t' read -r status conclusion url <<< "$result"
+              echo "$workflow: $status $conclusion $url"
+              if [ "$status" = completed ]; then
+                if [ "$conclusion" != success ]; then
+                  echo "$workflow failed with conclusion: $conclusion" >&2
+                  exit 1
+                fi
+              else
+                pending+=("$workflow")
+              fi
+            done
+            workflows=("${pending[@]}")
+            if [ "${#workflows[@]}" -eq 0 ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "Service builds did not complete for $sha before timeout" >&2
+              exit 1
+            fi
+            sleep 10
+          done

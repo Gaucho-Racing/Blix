@@ -1,14 +1,18 @@
-name: Image build
+name: agent-worker
+run-name: Triggered by ${{ github.event_name }} to ${{ github.ref }} by @${{ github.actor }}
 
 on:
-  workflow_call:
-    inputs:
-      image:
-        required: true
-        type: string
-      context:
-        required: true
-        type: string
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
 
 permissions:
   contents: read
@@ -44,9 +48,9 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ${{ inputs.context }}
+          context: ./agent-worker
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=ghcr.io/gaucho-racing/blix-agent-worker,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           cache-from: |
             type=gha,scope=${{ github.workflow }}-${{ matrix.pair }}-${{ github.ref }}-${{ github.event_name }}
             type=gha,scope=${{ github.workflow }}-${{ matrix.pair }}-refs/heads/main-push
@@ -92,7 +96,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ${{ inputs.image }}
+          images: ghcr.io/gaucho-racing/blix-agent-worker
           flavor: latest=false
           tags: |
             type=sha
@@ -100,7 +104,7 @@ jobs:
             type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
       - name: Create and inspect manifest
         env:
-          IMAGE: ${{ inputs.image }}
+          IMAGE: ghcr.io/gaucho-racing/blix-agent-worker
           TAGS: ${{ steps.metadata.outputs.tags }}
           DIGEST_DIRECTORY: ${{ runner.temp }}/digests
         run: |
