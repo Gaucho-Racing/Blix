@@ -68,6 +68,7 @@ class DeepResearchV1Agent(ToolAgent):
         output_schema=DeepResearchV1Output.model_json_schema(mode="serialization"),
         model_profile="deep_research",
         tool_ids=(
+            "agent_ask_v1",
             "current_time_v1",
             "discord_read_v1",
             "discord_search_v1",

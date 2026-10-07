@@ -1,6 +1,7 @@
 from collections.abc import Awaitable, Callable
 
 from blix_agent_worker.models.common import ContractError
+from blix_agent_worker.models.task_input import TaskInputRequiredError
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolExecutionMode, ToolResult, ToolResultStatus
 from blix_agent_worker.tools.registry import ToolNotFoundError, ToolRegistry
 
@@ -40,6 +41,8 @@ class ToolRunner:
             return self.failure(call, "approval_required", f"Tool {call.tool_id!r} requires approval.")
         try:
             result = await tool.execute(call)
+        except TaskInputRequiredError:
+            raise
         except Exception:
             result = self.failure(call, "tool_execution_failed", f"Tool {call.tool_id!r} failed unexpectedly.")
         if (

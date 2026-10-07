@@ -491,7 +491,7 @@ func (s *ExecutionService) checkpoint(tx *gorm.DB, a *model.ExecutionAttempt, r 
 		return err
 	}
 	for _, e := range r.Events {
-		if !runtimeEventAllowed(e.Type) || !object(e.Payload) || len(e.Payload) > 1024*1024 || e.EntityID == "" {
+		if e.Type == "runtime.question_v1" || !runtimeEventAllowed(e.Type) || !object(e.Payload) || len(e.Payload) > 1024*1024 || e.EntityID == "" {
 			return ErrInvalid
 		}
 		if _, err := s.event(tx, *a, e.Type, e.EntityID, json.RawMessage(e.Payload)); err != nil {
@@ -520,7 +520,7 @@ func (s *ExecutionService) checkpoint(tx *gorm.DB, a *model.ExecutionAttempt, r 
 	return tx.Save(a).Error
 }
 func runtimeEventAllowed(kind string) bool {
-	return contains([]string{"model.call_v1", "model.failure_v1", "model.response_v1", "model.output.delta_v1", "caller.verified_v1", "runtime.progress_v1", "runtime.compacted_v1"}, kind)
+	return contains([]string{"model.call_v1", "model.failure_v1", "model.response_v1", "model.output.delta_v1", "caller.verified_v1", "runtime.progress_v1", "runtime.compacted_v1", "runtime.question_v1", "runtime.coding_trace_v1"}, kind)
 }
 func (s *ExecutionService) Checkpoint(ctx context.Context, id string, r CheckpointRequest) (uint64, error) {
 	var version uint64
@@ -550,6 +550,15 @@ func (s *ExecutionService) RecordEvents(ctx context.Context, id string, o Owners
 		for _, e := range events {
 			if !runtimeEventAllowed(e.Type) || e.EntityID == "" || !object(e.Payload) || len(e.Payload) > 1024*1024 {
 				return ErrInvalid
+			}
+			if e.Type == "runtime.question_v1" {
+				if e.EntityID != a.SessionID {
+					return ErrInvalid
+				}
+				if err := s.requestTaskInput(tx, a, e.Payload); err != nil {
+					return err
+				}
+				continue
 			}
 			if _, err := s.event(tx, a, e.Type, e.EntityID, json.RawMessage(e.Payload)); err != nil {
 				return err

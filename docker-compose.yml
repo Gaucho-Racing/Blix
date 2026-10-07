@@ -205,6 +205,80 @@ services:
       retries: 12
       start_period: 60s
 
+  sandbox-docker:
+    image: docker:29.5.1-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["dockerd", "--host=unix:///docker/docker.sock", "--group=0", "--storage-driver=overlay2"]
+    volumes:
+      - sandbox_socket:/docker
+      - sandbox_docker_data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "--host=unix:///docker/docker.sock", "info"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  sandbox-image:
+    image: docker:29.5.1-cli
+    restart: "no"
+    depends_on:
+      sandbox-docker:
+        condition: service_healthy
+    environment:
+      DOCKER_HOST: unix:///docker/docker.sock
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-blix-ohmypi:18.5.0}
+    volumes:
+      - sandbox_socket:/docker
+      - ./sandbox/images/ohmypi:/build:ro
+    command: ["sh", "-ec", 'docker build --tag "$$SANDBOX_IMAGE" /build']
+
+  sandbox:
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    init: true
+    container_name: blix-sandbox
+    depends_on:
+      sandbox-docker:
+        condition: service_healthy
+      sandbox-image:
+        condition: service_completed_successfully
+    volumes:
+      - sandbox_socket:/docker
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - >-
+          import os, urllib.request;
+          request = urllib.request.Request("http://127.0.0.1:8080/health",
+          headers={"Authorization": "Bearer " + os.environ["BLIX_INTERNAL_TOKEN"]});
+          urllib.request.urlopen(request, timeout=3).close()
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    environment:
+      BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-blix-ohmypi:18.5.0}
+      SANDBOX_MODEL: ${SANDBOX_MODEL:-gpt-6-astra}
+      SANDBOX_REPOSITORIES: ${SANDBOX_REPOSITORIES:-gaucho-racing/*}
+      SANDBOX_CONCURRENCY: ${SANDBOX_CONCURRENCY:-2}
+      SANDBOX_TIMEOUT_SECONDS: ${SANDBOX_TIMEOUT_SECONDS:-1800}
+      SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-2048}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
+      SANDBOX_GITHUB_TOKEN: ${SANDBOX_GITHUB_TOKEN:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      SANDBOX_COMMIT_NAME: ${SANDBOX_COMMIT_NAME:-}
+      SANDBOX_COMMIT_EMAIL: ${SANDBOX_COMMIT_EMAIL:-}
+      LLM_GATEWAY_ENDPOINT: ${LLM_GATEWAY_ENDPOINT:?Set LLM_GATEWAY_ENDPOINT}
+      LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:?Set LLM_GATEWAY_API_KEY}
+
   agent-worker-1:
     container_name: blix-agent-worker-1
     build:
@@ -215,6 +289,8 @@ services:
       - ./agent-worker:/app
       - agent_worker_1_venv:/app/.venv
     depends_on:
+      sandbox:
+        condition: service_healthy
       runway:
         condition: service_started
       knowledge:
@@ -224,6 +300,7 @@ services:
     env_file:
       - ./.env
     environment:
+      SANDBOX_URL: http://sandbox:8080
       BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
       RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
@@ -244,6 +321,8 @@ services:
       - ./agent-worker:/app
       - agent_worker_2_venv:/app/.venv
     depends_on:
+      sandbox:
+        condition: service_healthy
       runway:
         condition: service_started
       knowledge:
@@ -253,6 +332,7 @@ services:
     env_file:
       - ./.env
     environment:
+      SANDBOX_URL: http://sandbox:8080
       BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
       RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
@@ -273,6 +353,8 @@ services:
       - ./agent-worker:/app
       - agent_worker_3_venv:/app/.venv
     depends_on:
+      sandbox:
+        condition: service_healthy
       runway:
         condition: service_started
       knowledge:
@@ -282,6 +364,7 @@ services:
     env_file:
       - ./.env
     environment:
+      SANDBOX_URL: http://sandbox:8080
       BLIX_INTERNAL_TOKEN: ${BLIX_INTERNAL_TOKEN:?Set BLIX_INTERNAL_TOKEN in .env}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:?Set AGENT_WORKER_CONCURRENCY in .env}
       RUNWAY_URL: ${RUNWAY_URL:?Set RUNWAY_URL in .env}
@@ -312,6 +395,8 @@ services:
     image: emqx/nanomq:0.25.6
 
 volumes:
+  sandbox_socket:
+  sandbox_docker_data:
   discord_gopath:
   ingestion_gopath:
   knowledge_documents:

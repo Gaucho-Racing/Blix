@@ -101,6 +101,7 @@ type Task struct {
 	Status          string                              `json:"status" gorm:"index;not null"`
 	WaitingTaskID   *string                             `json:"waiting_task_id,omitempty"`
 	WaitingReason   string                              `json:"waiting_reason"`
+	PendingInput    datatypes.JSON                      `json:"pending_input,omitempty" gorm:"type:jsonb"`
 	Policy          datatypes.JSONType[ExecutionPolicy] `json:"policy" gorm:"type:jsonb;not null"`
 	DeadlineAt      time.Time                           `json:"deadline_at" gorm:"index;not null"`
 	Result          datatypes.JSON                      `json:"result,omitempty" gorm:"type:jsonb"`

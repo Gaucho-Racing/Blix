@@ -87,6 +87,9 @@ class WorkerRegistration(ResponseModel):
 
 class ExecutionResult(ResponseModel):
     status: str
+    question: dict[str, object] | None = None
+    answer_delivery: dict[str, object] | None = None
+    activity: dict[str, object] | None = None
     result: AgentResult | None = None
 
 

@@ -15,6 +15,7 @@ from blix_agent_worker.agents.blix import (
     BlixV1Input,
     BlixV1Output,
 )
+from blix_agent_worker.agents.coding import BlixCodeV1Agent
 from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
 from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
 from blix_agent_worker.agents.document_ingest.visual_extraction import DocumentVisualExtractor
@@ -33,6 +34,7 @@ from blix_agent_worker.clients import (
 from blix_agent_worker.clients.discord import DiscordClient
 from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.clients.runway import AttemptLease
+from blix_agent_worker.clients.sandbox import CodingInput
 from blix_agent_worker.llm import OpenAIResponsesModel
 from blix_agent_worker.llm.document_images import hydrate_document_images
 from blix_agent_worker.llm.retrying import RetryingModel
@@ -48,6 +50,7 @@ from blix_agent_worker.models.llm import ModelAttemptEvent, ModelMessage, ModelM
 from blix_agent_worker.models.message import RunMessage
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, ToolResult, ToolResultStatus
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
+from blix_agent_worker.tools.agent_ask import AgentAskV1Tool, TaskInputRequiredError
 from blix_agent_worker.tools.agent_execution import AgentExecutionV1Tool
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
 from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordSearchV1Tool, DiscordWebhookSendV1Tool
@@ -101,8 +104,16 @@ class Runtime(Protocol):
 
 
 class RuntimeModel:
-    def __init__(self, model: RetryingModel, lease: AttemptLease, commands: tuple[dict[str, object], ...], *,
-                 knowledge: KnowledgeClient | None = None, run_id: str = "", session_id: str = "") -> None:
+    def __init__(
+        self,
+        model: RetryingModel,
+        lease: AttemptLease,
+        commands: tuple[dict[str, object], ...],
+        *,
+        knowledge: KnowledgeClient | None = None,
+        run_id: str = "",
+        session_id: str = "",
+    ) -> None:
         self.knowledge = knowledge
         self.run_id = run_id
         self.session_id = session_id
@@ -191,6 +202,41 @@ class ApiRuntime:
             )
         return entity.user
 
+    async def authorize_coding_task(self, task: AgentTask, caller: SentinelUser) -> AgentTask:
+        arguments = CodingInput.model_validate(task.input)
+        public_url = os.environ.get("BLIX_PUBLIC_URL", "").strip().rstrip("/")
+        updates = {
+            "blix_run_url": f"{public_url}/chat/{task.run_id}" if public_url else None,
+            "requester_name": f"{caller.first_name} {caller.last_name}".strip() or caller.username,
+            "requester_email": caller.email,
+            "requester_github_id": None,
+            "requester_github_login": None,
+        }
+        identity = await self.sentinel.resolve_entity_identity(
+            sentinel_url=os.environ.get("SENTINEL_URL", "").strip() or DEFAULT_SENTINEL_URL,
+            service_account_token=os.environ.get("SENTINEL_SERVICE_ACCOUNT_TOKEN", "").strip(),
+            entity_id=caller.entity_id,
+        )
+        if (
+            identity is None
+            or identity.type is not EntityType.USER
+            or identity.user is None
+            or identity.id != caller.entity_id
+            or identity.user.id != caller.id
+        ):
+            raise CallerVerificationError(
+                "github_link_required", "Link your GitHub account in Sentinel before starting GitHub write tasks."
+            )
+        links = [link for link in identity.external_auths if link.provider == "GITHUB"]
+        if links and (len(links) != 1 or not links[0].external_id.isdigit() or int(links[0].external_id) <= 0):
+            raise CallerVerificationError(
+                "github_link_required", "Link your GitHub account in Sentinel before starting GitHub write tasks."
+            )
+        if links:
+            updates["requester_github_id"] = int(links[0].external_id)
+        verified = CodingInput.model_validate({**arguments.model_dump(mode="json"), **updates})
+        return task.model_copy(update={"input": verified.model_dump(mode="json")})
+
     async def execute(self, execution: ExecutionContext, lease: AttemptLease) -> None:
         caller = await self.resolve_caller(execution)
         await lease.events(
@@ -202,6 +248,14 @@ class ApiRuntime:
                 }
             ]
         )
+        if execution.session.profile_id == "blix_code_v1":
+            if execution.task is None:
+                raise ValueError("Coding execution requires a delegated task.")
+            task = AgentTask.model_validate(execution.task["invocation"])
+            task = await self.authorize_coding_task(task, caller)
+            result = await BlixCodeV1Agent(lease).run(task)
+            await lease.post("complete", {"result": result.model_dump(mode="json"), "usage": {}})
+            return
         base_model = self.models[str(execution.profile.policy["model_profile"])]
         latest_state: AgentExecutionState | None = None
         if execution.checkpoint is not None:
@@ -257,9 +311,12 @@ class ApiRuntime:
             )
 
         model = RuntimeModel(
-            RetryingModel(base_model, base_model.model, record_attempt, record_delta), lease, execution.commands,
-            knowledge=self.knowledge, run_id=execution.run.run_id,
-            session_id=execution.session.session_id
+            RetryingModel(base_model, base_model.model, record_attempt, record_delta),
+            lease,
+            execution.commands,
+            knowledge=self.knowledge,
+            run_id=execution.run.run_id,
+            session_id=execution.session.session_id,
         )
 
         async def save(state: AgentExecutionState, events: list[dict[str, object]] | None = None) -> None:
@@ -333,6 +390,7 @@ class ApiRuntime:
                 [
                     CurrentTimeV1Tool(),
                     AgentExecutionV1Tool(lease),
+                    AgentAskV1Tool(lease, model.acknowledged.append),
                     DiscordReadV1Tool(self.discord, self.sentinel),
                     DiscordSearchV1Tool(self.discord, self.sentinel),
                     DiscordWebhookSendV1Tool(self.discord, caller),
@@ -369,19 +427,26 @@ class ApiRuntime:
             on_tool_result=checkpoint_tool,
             on_model_response=checkpoint_model,
         )
+
         def document_response_for(model_name: str):
             async def record(sequence: int, response: ModelResponse) -> None:
                 await flush_delta()
-                await lease.events([{
-                    "type": "model.response_v1",
-                    "entity_id": response.call_id,
-                    "payload": {
-                        "sequence": sequence, "model": model_name,
-                        "input_tokens": response.usage.input_tokens,
-                        "output_tokens": response.usage.output_tokens,
-                        "response": response.model_dump(mode="json", exclude={"continuation"}),
-                    },
-                }])
+                await lease.events(
+                    [
+                        {
+                            "type": "model.response_v1",
+                            "entity_id": response.call_id,
+                            "payload": {
+                                "sequence": sequence,
+                                "model": model_name,
+                                "input_tokens": response.usage.input_tokens,
+                                "output_tokens": response.usage.output_tokens,
+                                "response": response.model_dump(mode="json", exclude={"continuation"}),
+                            },
+                        }
+                    ]
+                )
+
             return record
 
         document_response = document_response_for(base_model.model)
@@ -389,12 +454,17 @@ class ApiRuntime:
         if execution.session.profile_id == "document_ingest_v1" and "document_vision" in self.models:
             visual_base = self.models["document_vision"]
             visual_model = RuntimeModel(
-                RetryingModel(visual_base, visual_base.model, record_attempt, record_delta), lease, (),
-                knowledge=self.knowledge, run_id=execution.run.run_id,
+                RetryingModel(visual_base, visual_base.model, record_attempt, record_delta),
+                lease,
+                (),
+                knowledge=self.knowledge,
+                run_id=execution.run.run_id,
                 session_id=execution.session.session_id,
             )
             visual_extractor = DocumentVisualExtractor(
-                client=self.knowledge, model=visual_model, model_name=visual_base.model,
+                client=self.knowledge,
+                model=visual_model,
+                model_name=visual_base.model,
                 concurrency=int(os.environ.get("DOCUMENT_VISION_CONCURRENCY", "4")),
                 on_response=document_response_for(visual_base.model),
             )
@@ -411,10 +481,13 @@ class ApiRuntime:
             on_response=document_response,
         )
         document_qa = DocumentQAV1Agent(
-            model=model, on_before_model=model.prepare, tool_runner=tools,
-            on_tool_result=checkpoint_tool, on_model_response=checkpoint_model,
+            model=model,
+            on_before_model=model.prepare,
+            tool_runner=tools,
+            on_tool_result=checkpoint_tool,
+            on_model_response=checkpoint_model,
         )
-        registry = AgentRegistry([research, curator, document_ingest, document_qa])
+        registry = AgentRegistry([research, curator, document_ingest, document_qa, BlixCodeV1Agent(lease)])
 
         async def background(task: AgentTask, ref: str) -> str:
             response = await lease.delegate(task, ref, background=True)
@@ -426,7 +499,7 @@ class ApiRuntime:
             "caller": {
                 **execution.run.caller_context.model_dump(mode="json"),
                 "user": caller.model_dump(mode="json"),
-            }
+            },
         }
         if execution.task is not None:
             task = AgentTask.model_validate(execution.task["invocation"])
@@ -437,8 +510,11 @@ class ApiRuntime:
         else:
             if execution.profile.profile_id == "document_qa_v1":
                 question_id = execution.turn.get("input_message_id") if execution.turn else None
-                messages = tuple(message for message in execution.messages
-                                 if message.message_id == question_id and message.role == "user")
+                messages = tuple(
+                    message
+                    for message in execution.messages
+                    if message.message_id == question_id and message.role == "user"
+                )
                 if len(messages) != 1:
                     raise ValueError("Document Q&A requires exactly one standalone user question.")
             else:
@@ -456,17 +532,23 @@ class ApiRuntime:
                 if len(execution.run.document_ids) != 1:
                     raise ValueError("Document Q&A requires exactly one trusted document.")
                 await self.knowledge.request(
-                    os.environ["KNOWLEDGE_URL"], "POST", "documents/access",
+                    os.environ["KNOWLEDGE_URL"],
+                    "POST",
+                    "documents/access",
                     payload={"document_ids": list(execution.run.document_ids), "mode": "questions"},
                 )
                 agent = document_qa
                 task = AgentTask(
                     run_id=execution.run.run_id,
-                    session_id=execution.session.session_id, agent_id="document_qa_v1",
+                    session_id=execution.session.session_id,
+                    agent_id="document_qa_v1",
                     objective="Answer the user's question from this document's original evidence.",
-                    input={"document_id": execution.run.document_ids[0],
-                           "messages": [message.model_dump(mode="json") for message in messages]},
-                    context=trusted_context, allowed_tool_ids=execution.allowed_tool_ids,
+                    input={
+                        "document_id": execution.run.document_ids[0],
+                        "messages": [message.model_dump(mode="json") for message in messages],
+                    },
+                    context=trusted_context,
+                    allowed_tool_ids=execution.allowed_tool_ids,
                 )
             else:
                 agent = BlixV1Agent(
@@ -490,6 +572,20 @@ class ApiRuntime:
                 )
         try:
             outcome = await agent.run(task, state=latest_state, resume_result=execution.resume_result)
+        except TaskInputRequiredError as pending:
+            if latest_state is None:
+                raise RuntimeError("Clarification requested without a recoverable checkpoint.") from pending
+            await flush_delta()
+            await lease.post(
+                "input",
+                {
+                    "runtime_kind": "api",
+                    "schema_version": 1,
+                    "payload": latest_state.model_dump(mode="json"),
+                    "question": pending.question.model_dump(mode="json"),
+                },
+            )
+            return
         except ApprovalRequiredError as approval:
             if latest_state is None:
                 raise RuntimeError("Approval requested without a recoverable checkpoint.") from approval
@@ -500,7 +596,9 @@ class ApiRuntime:
             return
         if task.agent_id == "document_qa_v1":
             await self.knowledge.request(
-                os.environ["KNOWLEDGE_URL"], "POST", "documents/access",
+                os.environ["KNOWLEDGE_URL"],
+                "POST",
+                "documents/access",
                 payload={"document_ids": list(execution.run.document_ids), "mode": "questions"},
             )
         await flush_delta()
@@ -523,7 +621,8 @@ class ApiRuntime:
                 "complete", {"result": outcome.model_dump(mode="json"), "usage": outcome.usage.model_dump(mode="json")}
             )
         elif outcome.status is AgentResultStatus.SUCCEEDED:
-            output = (DocumentQAV1Output if task.agent_id == "document_qa_v1" else BlixV1Output).model_validate(outcome.output)
+            output_model = DocumentQAV1Output if task.agent_id == "document_qa_v1" else BlixV1Output
+            output = output_model.model_validate(outcome.output)
             completion = {
                 "content": output.message,
                 "usage": outcome.usage.model_dump(mode="json"),

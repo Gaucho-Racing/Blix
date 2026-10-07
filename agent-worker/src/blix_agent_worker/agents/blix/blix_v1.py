@@ -113,7 +113,7 @@ class BlixV1Agent:
             "web_extract_v1",
             "web_search_v1",
         ),
-        subagent_ids=("deep_research_v1", "knowledge_curator_v1"),
+        subagent_ids=("deep_research_v1", "knowledge_curator_v1", "blix_code_v1"),
     )
 
     def __init__(
@@ -186,7 +186,10 @@ class BlixV1Agent:
                 "The general citation rules apply only to message, not discord_message. Never include inline citations "
                 "or a Sources section in discord_message. Include source URLs, document links, or Discord message links "
                 "in discord_message only when the user explicitly asks for links or sources. Otherwise keep all references "
-                "in the full message. Set discord_has_sources to true only when the full answer actually cites sources. "
+                "in the full message. Exception: a verified created PR is a deliverable, so always link it directly "
+                "in both message and discord_message with a clear label such as [PR #148](actual PR URL). "
+                "Do not move the created PR link to Sources. A deliverable link alone does not count as a source. "
+                "Set discord_has_sources to true only when the full answer actually cites evidence sources. "
                 "Never use em dashes in discord_message; use periods, commas, parentheses, or rewrite the sentence. "
                 "Preserve the actual outcome, critical qualifications, and any question the user must answer. "
                 "When referring to a specific person in discord_message, try a Sentinel lookup and use their verified "

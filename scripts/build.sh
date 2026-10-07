@@ -9,7 +9,7 @@ if [ "$#" -eq 0 ]; then
 fi
 for service in "$@"; do
   case "$service" in
-    ingestion|discord) ;;
+    ingestion|discord|sandbox) ;;
     *) printf 'No production Dockerfile for service: %s\n' "$service" >&2; exit 1 ;;
   esac
   docker build -t "blix-$service:local" -f "$repo_dir/$service/Dockerfile" "$repo_dir/$service"

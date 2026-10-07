@@ -1,15 +1,15 @@
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, JsonValue, field_validator, model_validator
+from pydantic import ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from blix_agent_worker.models.common import (
     ContractError,
     ContractModel,
-    RunID,
     Identifier,
     JsonObject,
     NonEmptyText,
+    RunID,
     SessionID,
     VersionedIdentifier,
 )
@@ -143,6 +143,8 @@ class AgentSuspension(ContractModel):
 
 
 class AgentResult(ContractModel):
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     schema_version: Literal[1] = 1
     run_id: RunID
     session_id: SessionID
