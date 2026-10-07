@@ -19,8 +19,8 @@ from pathlib import Path
 import httpx
 from pydantic import ValidationError
 
-from blix_sandbox.contracts import CodingOutput, SandboxAnswer, SandboxQuestion, SandboxRequest, SandboxTraceEvent
-from blix_sandbox.github_auth import github_app_configured, github_credentials, github_token
+from blix_sandbox_worker.contracts import CodingOutput, SandboxAnswer, SandboxQuestion, SandboxRequest, SandboxTraceEvent
+from blix_sandbox_worker.github_auth import github_app_configured, github_credentials, github_token
 
 logger = logging.getLogger(__name__)
 TASK_ID = re.compile(r"^[a-z][a-z0-9_]{1,80}$")
@@ -301,7 +301,7 @@ class SandboxHost:
                 model = os.environ.get("SANDBOX_MODEL", "gpt-6-astra")
                 if not model:
                     raise SandboxError("SANDBOX_MODEL is required.")
-                with tempfile.TemporaryDirectory(prefix="blix-sandbox-") as directory:
+                with tempfile.TemporaryDirectory(prefix="blix-sandbox-worker-") as directory:
                     root = Path(directory)
                     repo = root / "repo"
                     repo.mkdir()

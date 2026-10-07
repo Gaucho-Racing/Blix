@@ -48,7 +48,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./sandbox/images/ohmypi
+          context: ./sandbox-worker/images/ohmypi
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=ghcr.io/gaucho-racing/blix-code-v1,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           cache-from: |

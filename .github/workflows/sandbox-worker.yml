@@ -1,4 +1,4 @@
-name: sandbox
+name: sandbox-worker
 run-name: Triggered by ${{ github.event_name }} to ${{ github.ref }} by @${{ github.actor }}
 
 on:
@@ -48,9 +48,9 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./sandbox
+          context: ./sandbox-worker
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=ghcr.io/gaucho-racing/blix-sandbox,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=ghcr.io/gaucho-racing/blix-sandbox-worker,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           cache-from: |
             type=gha,scope=${{ github.workflow }}-${{ matrix.pair }}-${{ github.ref }}-${{ github.event_name }}
             type=gha,scope=${{ github.workflow }}-${{ matrix.pair }}-refs/heads/main-push
@@ -96,7 +96,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/gaucho-racing/blix-sandbox
+          images: ghcr.io/gaucho-racing/blix-sandbox-worker
           flavor: latest=false
           tags: |
             type=sha
@@ -104,7 +104,7 @@ jobs:
             type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
       - name: Create and inspect manifest
         env:
-          IMAGE: ghcr.io/gaucho-racing/blix-sandbox
+          IMAGE: ghcr.io/gaucho-racing/blix-sandbox-worker
           TAGS: ${{ steps.metadata.outputs.tags }}
           DIGEST_DIRECTORY: ${{ runner.temp }}/digests
         run: |
