@@ -21,7 +21,7 @@ export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMes
 
   return (
     <article className="chat-message chat-message-assistant" id={messageID ? `message-${messageID}` : undefined}>
-      <span className="chat-message-blix-avatar">B</span>
+      <img className="chat-message-blix-avatar" src="/blix-logo.png" alt="" width={31} height={31} />
       <div className="chat-message-body">
         <span className="chat-message-author">Blix</span>
         <Markdown

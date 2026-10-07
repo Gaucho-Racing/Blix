@@ -23,10 +23,9 @@ export function AppShell() {
     <div className="app-shell">
       <aside className="sidebar">
         <Link className="brand" to="/chat">
-          <span className="brand-mark">B</span>
+          <img className="brand-mark" src="/blix-logo.png" alt="" width={36} height={36} />
           <span>
             <strong>Blix</strong>
-            <small>Gaucho Racing AI</small>
           </span>
         </Link>
 
