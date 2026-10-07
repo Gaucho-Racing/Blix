@@ -25,6 +25,9 @@ export interface RuntimeTurn {
   input_message_id?: string
 }
 export interface RuntimeTask {
+  session_id?: string
+  parent_session_id?: string
+  origin_turn_id?: string
   task_id: string
   objective: string
   status: string
@@ -34,6 +37,7 @@ export interface RuntimeTask {
   created_at: string
 }
 export interface RuntimeEvent {
+  created_at?: string
   position: number
   event_id: string
   turn_id?: string

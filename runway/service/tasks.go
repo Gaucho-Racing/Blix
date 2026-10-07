@@ -225,7 +225,12 @@ func (s *ExecutionService) Complete(ctx context.Context, id string, r Completion
 		if err := tx.Save(&a).Error; err != nil {
 			return err
 		}
-		if err := s.updateTarget(tx, a, map[string]any{"status": model.StatusSucceeded, "completed_at": now, "waiting_task_id": nil}); err != nil {
+		updates := map[string]any{"status": model.StatusSucceeded, "completed_at": now, "waiting_task_id": nil}
+		if a.TaskID != nil {
+			updates["pending_input"] = nil
+			updates["waiting_reason"] = ""
+		}
+		if err := s.updateTarget(tx, a, updates); err != nil {
 			return err
 		}
 		if err := s.workers.recordCompletion(tx, a.WorkerID, model.StatusSucceeded); err != nil {
@@ -349,6 +354,10 @@ func (s *ExecutionService) failOwned(tx *gorm.DB, a *model.ExecutionAttempt, fai
 		return err
 	}
 	updates := map[string]any{"status": status, "completed_at": now}
+	if a.TaskID != nil {
+		updates["pending_input"] = nil
+		updates["waiting_reason"] = ""
+	}
 	if a.TaskID != nil {
 		updates["error"] = datatypes.JSON(failure)
 		var session model.AgentSession
@@ -493,7 +502,12 @@ func (s *ExecutionService) cancelTarget(tx *gorm.DB, runID, sessionID, targetID 
 	} else {
 		a.TaskID = &targetID
 	}
-	if err := s.updateTarget(tx, a, map[string]any{"status": model.StatusCancelled, "completed_at": now}); err != nil {
+	updates := map[string]any{"status": model.StatusCancelled, "completed_at": now}
+	if !turn {
+		updates["pending_input"] = nil
+		updates["waiting_reason"] = ""
+	}
+	if err := s.updateTarget(tx, a, updates); err != nil {
 		return err
 	}
 	if err := tx.Model(&model.ExecutionAttempt{}).Where("target_id = ? AND status IN ?", targetID, []string{model.StatusQueued, model.StatusRunning, model.StatusSuspended}).Updates(map[string]any{"status": model.StatusCancelled, "completed_at": now, "lease_expires_at": nil}).Error; err != nil {
@@ -598,9 +612,11 @@ func (s *ExecutionService) controlTask(tx *gorm.DB, task model.Task, operation, 
 type TaskControlRequest struct {
 	RequestRef string `json:"request_ref"`
 	Ownership
-	Operation string `json:"operation"`
-	TaskID    string `json:"task_id"`
-	Content   string `json:"content"`
+	Operation  string          `json:"operation"`
+	TaskID     string          `json:"task_id"`
+	Content    string          `json:"content"`
+	QuestionID string          `json:"question_id"`
+	Answers    json.RawMessage `json:"answers"`
 }
 
 func (s *ExecutionService) SessionTaskControl(ctx context.Context, id string, r TaskControlRequest) (map[string]any, error) {
@@ -632,9 +648,30 @@ func (s *ExecutionService) SessionTaskControl(ctx context.Context, id string, r 
 		if r.Operation == "status" {
 			result["status"] = task.Status
 			result["result"] = json.RawMessage(task.Result)
+			result["question"] = json.RawMessage(task.PendingInput)
+			delivery, err := taskAnswerDelivery(tx, task.ID)
+			if err != nil {
+				return err
+			}
+			result["answer_delivery"] = delivery
+			var activity model.Event
+			err = tx.Where("run_id = ? AND session_id = ? AND type = ?", task.RunID, task.SessionID, "runtime.coding_trace_v1").Order("position DESC").First(&activity).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			result["activity"] = json.RawMessage(activity.Payload)
 			return nil
 		}
-		if err := s.controlTask(tx, task, r.Operation, r.Content, r.RequestRef); err != nil {
+		if r.Operation == "answer" {
+			if err := s.answerTaskInput(tx, task, r); err != nil {
+				return err
+			}
+			delivery, err := taskAnswerDelivery(tx, task.ID)
+			if err != nil {
+				return err
+			}
+			result["answer_delivery"] = delivery
+		} else if err := s.controlTask(tx, task, r.Operation, r.Content, r.RequestRef); err != nil {
 			return err
 		}
 		a.Version++

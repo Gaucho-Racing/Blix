@@ -59,6 +59,10 @@ func (r *fakeRuntime) Events(context.Context, string, uint64) ([]client.Event, e
 }
 
 type fakeDiscord struct {
+	history         []*discordgo.Message
+	historyError    error
+	reply           *discordgo.Message
+	replyError      error
 	sent            []string
 	references      []string
 	channels        []string
@@ -72,6 +76,13 @@ type fakeDiscord struct {
 	operations      []string
 	deleteError     error
 	fail            bool
+}
+
+func (d *fakeDiscord) Messages(context.Context, string, string, int) ([]*discordgo.Message, error) {
+	return d.history, d.historyError
+}
+func (d *fakeDiscord) Message(context.Context, string, string) (*discordgo.Message, error) {
+	return d.reply, d.replyError
 }
 
 func (d *fakeDiscord) Channel(_ context.Context, id string) (*discordgo.Channel, error) {
@@ -210,6 +221,7 @@ func testInboxDeduplicationContextAndOwner(t *testing.T, channel string) {
 func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	b, r, d := fixture(t)
 	ctx := context.Background()
+	d.history = []*discordgo.Message{historyMessage("499", "300", "It may take an hour")}
 	r.fail = true
 	if err := b.Receive(ctx, "400", mention("500", "300", "600")); err != nil {
 		t.Fatal(err)
@@ -217,6 +229,13 @@ func TestRetryKeepsExactInputAndEventDelivery(t *testing.T) {
 	if _, err := b.ProcessInbox(ctx); err == nil {
 		t.Fatal("expected transient failure")
 	}
+	var firstContext struct {
+		Messages []contextMessage `json:"recent_messages"`
+	}
+	if err := json.Unmarshal(r.inputs[0].Context, &firstContext); err != nil || len(firstContext.Messages) != 1 || firstContext.Messages[0].Content != "It may take an hour" {
+		t.Fatalf("missing Discord history: %+v err=%v", firstContext, err)
+	}
+	d.history = []*discordgo.Message{historyMessage("499", "300", "Changed while retrying")}
 	if err := b.DB.Model(&model.Inbox{}).Where("id = ?", "500").Update("next_attempt_at", time.Now().Add(-time.Second)).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -833,5 +852,29 @@ func TestPlaceholderDelayIncludesTimeSpentStartingRun(t *testing.T) {
 	drainReady(t, b)
 	if len(d.sent) != 1 || d.sent[0] != "input/500" || len(d.removed) != 1 {
 		t.Fatalf("delay restarted after setup: sent=%v removed=%v", d.sent, d.removed)
+	}
+}
+
+func TestConsecutiveResponsesReplyToPreviousDeliveredMessage(t *testing.T) {
+	b, _, d := fixture(t)
+	for _, output := range []model.Outbox{
+		{ID: "first", BindingID: "binding", ChannelID: "300", ReplyToMessageID: "500", Content: "Started"},
+		{ID: "second", BindingID: "binding", ChannelID: "300", ReplyToMessageID: "500", Content: "Progress"},
+		{ID: "third", BindingID: "binding", ChannelID: "300", ReplyToMessageID: "500", Content: "Finished"},
+	} {
+		if err := queueResponse(b.DB, output); err != nil {
+			t.Fatal(err)
+		}
+	}
+	drainReady(t, b)
+	if fmt.Sprint(d.references) != "[500 901 902]" {
+		t.Fatalf("reply chain = %v", d.references)
+	}
+	if err := queueResponse(b.DB, model.Outbox{ID: "new-turn", BindingID: "binding", ChannelID: "300", ReplyToMessageID: "501", Content: "New answer"}); err != nil {
+		t.Fatal(err)
+	}
+	drainReady(t, b)
+	if d.references[3] != "501" {
+		t.Fatalf("new turn replied to %s", d.references[3])
 	}
 }

@@ -99,7 +99,7 @@ func (b *Bridge) SaveEvents(ctx context.Context, binding model.Binding, events [
 func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	var output model.Outbox
 	err := b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("state IN ? AND next_attempt_at <= ?", []string{"pending", "sending"}, time.Now()).Where("NOT EXISTS (SELECT 1 FROM discord_outbox dependency WHERE dependency.id = discord_outbox.wait_for_outbox_id AND dependency.state IN ('pending','sending'))").Order("created_at,id").First(&output).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).Where("state IN ? AND next_attempt_at <= ?", []string{"pending", "sending"}, time.Now()).Where("NOT EXISTS (SELECT 1 FROM discord_outbox dependency WHERE dependency.id = discord_outbox.wait_for_outbox_id AND dependency.state IN ('pending','sending'))").Where("NOT EXISTS (SELECT 1 FROM discord_outbox predecessor WHERE predecessor.id = discord_outbox.reply_to_outbox_id AND predecessor.state IN ('pending','sending'))").Order("created_at,id").First(&output).Error; err != nil {
 			return err
 		}
 		if output.DeleteOutboxID == "" && output.Reaction == "" && output.FirstAttemptAt != nil && time.Since(*output.FirstAttemptAt) > 2*time.Minute {
@@ -139,8 +139,18 @@ func (b *Bridge) Deliver(ctx context.Context) (bool, error) {
 	} else if output.Reaction != "" {
 		err = b.Discord.React(ctx, output.ChannelID, output.ReplyToMessageID, output.Reaction)
 	} else {
+		replyTo := output.ReplyToMessageID
+		if output.ReplyToOutboxID != "" {
+			var previous model.Outbox
+			if lookupErr := b.DB.WithContext(ctx).First(&previous, "id = ?", output.ReplyToOutboxID).Error; lookupErr != nil {
+				return true, lookupErr
+			}
+			if previous.DiscordMessageID != "" {
+				replyTo = previous.DiscordMessageID
+			}
+		}
 		allowedUserIDs := b.verifiedMentions(ctx, client.Preview(output.Content))
-		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, output.ReplyToMessageID, output.Content, runURL, sourcesURL, allowedUserIDs)
+		messageID, err = b.Discord.Send(ctx, output.ID, output.ChannelID, replyTo, output.Content, runURL, sourcesURL, allowedUserIDs)
 	}
 	if err == nil {
 		return true, b.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

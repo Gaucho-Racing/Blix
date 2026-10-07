@@ -87,6 +87,7 @@ class KnowledgeCuratorV1Agent(ToolAgent):
         output_schema=KnowledgeCuratorV1Output.model_json_schema(),
         model_profile="knowledge_curator",
         tool_ids=(
+            "agent_ask_v1",
             "knowledge_read_v1",
             "knowledge_evidence_read_v1",
             "knowledge_source_create_v1",

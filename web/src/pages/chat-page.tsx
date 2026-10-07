@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowUp,
-  BookOpen,
   Check,
   LoaderCircle,
   Plus,
@@ -266,7 +265,7 @@ function RunChat({ runID }: { runID: string }) {
           <p>
             {data?.run.context?.source === "discord"
               ? "This run is linked to Discord. Replies are also sent to its channel or thread."
-              : "Quick answers. Research. Team knowledge."}
+              : "Start a conversation. See where it takes you."}
           </p>
         </div>
         <Link className="secondary-button" to="/chat">
@@ -309,16 +308,16 @@ function RunChat({ runID }: { runID: string }) {
             )}
             {permitted && !runID && (
               <section className="chat-welcome">
-                <div className="blix-spark">B</div>
-                <h2>Your team's work, connected.</h2>
+                <img className="blix-spark" src="/blix-logo.png" alt="" width={56} height={56} />
+                <h2>Gaucho Racing, connected.</h2>
                 <p>
-                  Ask about a design, investigate a question, or turn documents
-                  into useful knowledge.
+                  A shared space for ideas, questions, and whatever comes next.
                 </p>
                 <div className="prompt-grid">
                   {[
-                    "What do we know about GR26?",
-                    "Research a focused engineering question and cite your sources.",
+                    "Lorem ipsum dolor sit amet.",
+                    "Consectetur adipiscing elit.",
+                    "Sed do eiusmod tempor incididunt.",
                   ].map((prompt) => (
                     <button
                       type="button"
@@ -330,9 +329,6 @@ function RunChat({ runID }: { runID: string }) {
                     </button>
                   ))}
                 </div>
-                <Link className="runtime-proposal-link" to="/knowledge">
-                  Import a team document <BookOpen size={15} />
-                </Link>
               </section>
             )}
             {data?.messages.map((message) => (
@@ -409,7 +405,6 @@ function RunChat({ runID }: { runID: string }) {
               }}
             />
             <div>
-              <span>Enter to send · Shift + Enter for a new line</span>
               {working && (
                 <button
                   className="secondary-button"

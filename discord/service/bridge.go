@@ -29,6 +29,8 @@ type Runtime interface {
 	Events(context.Context, string, uint64) ([]client.Event, error)
 }
 type Transport interface {
+	Messages(context.Context, string, string, int) ([]*discordgo.Message, error)
+	Message(context.Context, string, string) (*discordgo.Message, error)
 	Channel(context.Context, string) (*discordgo.Channel, error)
 	Guild(context.Context, string) (*discordgo.Guild, error)
 	Send(context.Context, string, string, string, string, string, string, []string) (string, error)
@@ -189,6 +191,9 @@ func (b *Bridge) submit(ctx context.Context, input *model.Inbox) error {
 		if isThread {
 			transportContext["thread_id"], transportContext["thread_name"] = channel.ID, channel.Name
 		}
+		if !strings.EqualFold(input.Content, "cancel") {
+			b.addMessageContext(ctx, input, transportContext)
+		}
 		contextBytes, err := json.Marshal(transportContext)
 		if err != nil {
 			return err
@@ -329,8 +334,15 @@ func queueEyesRemoval(tx *gorm.DB, output model.Outbox) error {
 }
 
 func queueResponse(tx *gorm.DB, output model.Outbox) error {
+	var previous model.Outbox
+	err := tx.Where("binding_id = ? AND channel_id = ? AND reply_to_message_id = ? AND content <> '' AND placeholder = false AND delete_outbox_id = '' AND reaction = ''", output.BindingID, output.ChannelID, output.ReplyToMessageID).Order("created_at DESC, id DESC").First(&previous).Error
+	if err == nil {
+		output.ReplyToOutboxID = previous.ID
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	var placeholder model.Outbox
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&placeholder, "id = ? AND placeholder = true", "input/"+output.ReplyToMessageID).Error
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&placeholder, "id = ? AND placeholder = true", "input/"+output.ReplyToMessageID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return queue(tx, output)
 	}

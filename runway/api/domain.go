@@ -343,6 +343,19 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		}
 		c.JSON(http.StatusOK, gin.H{"version": v})
 	})
+	internal.POST("/attempts/:attemptID/input", func(c *gin.Context) {
+		var r service.TaskInputRequest
+		if c.ShouldBindJSON(&r) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		v, err := h.executions.WaitTaskInput(c.Request.Context(), c.Param("attemptID"), r)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"version": v})
+	})
 	internal.POST("/attempts/:attemptID/events", func(c *gin.Context) {
 		var r struct {
 			service.Ownership
@@ -408,6 +421,23 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"commands": commands})
+	})
+
+	internal.POST("/attempts/:attemptID/command-acks", func(c *gin.Context) {
+		var r struct {
+			service.Ownership
+			CommandIDs []string `json:"command_ids"`
+		}
+		if c.ShouldBindJSON(&r) != nil {
+			respondError(c, service.ErrInvalid)
+			return
+		}
+		version, err := h.executions.AcknowledgeCommands(c.Request.Context(), c.Param("attemptID"), r.Ownership, r.CommandIDs)
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"version": version})
 	})
 
 	internal.POST("/attempts/:attemptID/task-controls", func(c *gin.Context) {

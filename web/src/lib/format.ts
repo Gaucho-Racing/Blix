@@ -37,6 +37,7 @@ export function formatCompactNumber(value: number): string {
 }
 
 export function eventLabel(type: string): string {
+  if (type === "runtime.coding_trace_v1") return "blix_code_v1 activity"
   return type.replace(/_v\d+$/, "").replaceAll(".", " ").replaceAll("_", " ")
 }
 

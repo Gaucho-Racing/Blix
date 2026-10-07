@@ -46,7 +46,7 @@ export function LoginPage() {
   return (
     <main className="login-page">
       <section className="login-card">
-        <div className="login-mark">B</div>
+        <img className="login-mark" src="/blix-logo.png" alt="" width={64} height={64} />
         <span className="eyebrow">GAUCHO RACING</span>
         <h1>Sign in to Blix</h1>
         {error ? (

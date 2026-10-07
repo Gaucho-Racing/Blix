@@ -5,13 +5,16 @@ from pydantic import Field, ValidationError, model_validator
 
 from blix_agent_worker.clients.runway import AttemptLease, ExecutionResult, RunwayClientError
 from blix_agent_worker.models.common import ContractError, ContractModel, JsonObject, TaskID
+from blix_agent_worker.models.task_input import QuestionAnswer, TaskAnswer
 from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, ToolResult, ToolResultStatus
 
 
 class AgentExecutionV1Input(ContractModel):
-    operation: Literal["list", "status", "await", "cancel", "steer"]
+    operation: Literal["list", "status", "await", "cancel", "steer", "answer"]
     task_id: TaskID | None = None
     content: str = ""
+    question_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    answers: Annotated[list[QuestionAnswer], Field(max_length=10)] = Field(default_factory=list)
     timeout_seconds: Annotated[int, Field(ge=1, le=30)] = 20
 
     @model_validator(mode="after")
@@ -20,6 +23,12 @@ class AgentExecutionV1Input(ContractModel):
             raise ValueError("task_id is required")
         if self.operation == "steer" and not self.content.strip():
             raise ValueError("content is required for steering")
+        if self.operation == "answer":
+            if self.question_id is None or not self.answers:
+                raise ValueError("question_id and answers are required for answering a task")
+            TaskAnswer(question_id=self.question_id, answers=self.answers)
+        elif self.question_id is not None or self.answers:
+            raise ValueError("question_id and answers are only valid for answer operations")
         return self
 
 
@@ -28,7 +37,9 @@ class AgentExecutionV1Tool:
     definition = ToolDefinition(
         id="agent_execution_v1",
         description=(
-            "List, check, cancel, steer, or briefly await durable child tasks by task ID. "
+            "List, check, cancel, steer, answer clarification questions, or briefly await child tasks by task ID. "
+            "For answer, use the pending question_id and one answer per question in order. "
+            "Each answer has id, selected_options (exact option labels), and text (free-form answer). "
             "Status returns immediately. Await "
             "waits up to timeout_seconds and returns the latest status; it does not wait indefinitely."
         ),
@@ -46,7 +57,7 @@ class AgentExecutionV1Tool:
         except ValidationError:
             return self._failure(call, "invalid_arguments", "Invalid agent execution arguments.")
         try:
-            if arguments.operation in {"list", "cancel", "steer"}:
+            if arguments.operation in {"list", "cancel", "steer", "answer"}:
                 output = await self._lease.post(
                     "task-controls",
                     {
@@ -90,6 +101,9 @@ class AgentExecutionV1Tool:
         return {
             "task_id": task_id,
             "status": result.status,
+            "question": result.question,
+            "answer_delivery": result.answer_delivery,
+            "activity": result.activity,
             "terminal": result.status in {"succeeded", "failed", "cancelled"},
             "result": result.result.model_dump(mode="json") if result.result is not None else None,
         }
