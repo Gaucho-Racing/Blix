@@ -1,0 +1,26 @@
+name: discord
+run-name: Build discord for ${{ github.ref }}
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    uses: ./.github/workflows/image-build.yml
+    with:
+      image: ghcr.io/gaucho-racing/blix-discord
+      context: ./discord
