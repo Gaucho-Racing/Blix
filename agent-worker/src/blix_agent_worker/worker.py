@@ -17,6 +17,7 @@ from blix_agent_worker.agents.blix import (
 )
 from blix_agent_worker.agents.coding import BlixCodeV1Agent
 from blix_agent_worker.agents.deep_research import DeepResearchV1Agent
+from blix_agent_worker.agents.discord_research import DiscordResearchV1Agent
 from blix_agent_worker.agents.document_ingest.document_ingest_v1 import DocumentIngestV1Agent
 from blix_agent_worker.agents.document_ingest.visual_extraction import DocumentVisualExtractor
 from blix_agent_worker.agents.document_qa.document_qa_v1 import DocumentQAV1Agent, DocumentQAV1Output
@@ -420,6 +421,13 @@ class ApiRuntime:
             on_tool_result=checkpoint_tool,
             on_model_response=checkpoint_model,
         )
+        discord_research = DiscordResearchV1Agent(
+            model=model,
+            on_before_model=model.prepare,
+            tool_runner=tools,
+            on_tool_result=checkpoint_tool,
+            on_model_response=checkpoint_model,
+        )
         curator = KnowledgeCuratorV1Agent(
             model=model,
             on_before_model=model.prepare,
@@ -487,7 +495,9 @@ class ApiRuntime:
             on_tool_result=checkpoint_tool,
             on_model_response=checkpoint_model,
         )
-        registry = AgentRegistry([research, curator, document_ingest, document_qa, BlixCodeV1Agent(lease)])
+        registry = AgentRegistry(
+            [research, discord_research, curator, document_ingest, document_qa, BlixCodeV1Agent(lease)]
+        )
 
         async def background(task: AgentTask, ref: str) -> str:
             response = await lease.delegate(task, ref, background=True)
