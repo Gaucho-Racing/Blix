@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           sha="${INPUT_SHA:-$CURRENT_SHA}"
-          workflows=(runway knowledge ingestion discord agent-worker web cli sandbox-worker blix-code-v1)
+          workflows=(runway knowledge ingestion discord agent-worker web sandbox-worker blix-code-v1)
           deadline=$((SECONDS + 1800))
           while [ "${#workflows[@]}" -gt 0 ]; do
             pending=()
