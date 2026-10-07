@@ -40,6 +40,7 @@ type Outbox struct {
 	DiscordMessageID          string `gorm:"index"`
 	BindingID                 string `gorm:"index"`
 	ReplyToMessageID          string
+	ReplyToOutboxID           string
 	Reaction                  string
 	RemoveReaction            bool
 	Placeholder               bool

@@ -39,6 +39,12 @@ func NewDiscord(token string) (*Discord, error) {
 func (d *Discord) Channel(ctx context.Context, id string) (*discordgo.Channel, error) {
 	return d.Session.Channel(id, discordgo.WithContext(ctx))
 }
+func (d *Discord) Messages(ctx context.Context, channelID, beforeID string, limit int) ([]*discordgo.Message, error) {
+	return d.Session.ChannelMessages(channelID, limit, beforeID, "", "", discordgo.WithContext(ctx))
+}
+func (d *Discord) Message(ctx context.Context, channelID, messageID string) (*discordgo.Message, error) {
+	return d.Session.ChannelMessage(channelID, messageID, discordgo.WithContext(ctx))
+}
 func (d *Discord) Guild(ctx context.Context, id string) (*discordgo.Guild, error) {
 	if g, err := d.Session.State.Guild(id); err == nil {
 		return g, nil
