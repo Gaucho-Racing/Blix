@@ -1,4 +1,5 @@
 import copy
+import itertools
 import json
 import math
 import os
@@ -361,7 +362,7 @@ class OpenAIResponsesModel:
             raise ValueError("the model continuation does not contain input items")
         if not all(isinstance(item, dict) for item in continuation_items):
             raise ValueError("the model continuation contains invalid input items")
-        return [*cast(list[JsonObject], continuation_items), *self._call_output_items(request.messages)]
+        return [*cast(list[JsonObject], continuation_items), *self._continuation_tail_items(request.messages)]
 
     @staticmethod
     def _run_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
@@ -379,35 +380,35 @@ class OpenAIResponsesModel:
         return items
 
     @staticmethod
-    def _call_output_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
-        call_request_index = next(
-            (
-                index
-                for index in range(len(messages) - 1, -1, -1)
-                if messages[index].role is ModelMessageRole.ASSISTANT and messages[index].call_requests
-            ),
+    def _continuation_tail_items(messages: tuple[ModelMessage, ...]) -> list[JsonObject]:
+        assistant_index = next(
+            (index for index in range(len(messages) - 1, -1, -1) if messages[index].role is ModelMessageRole.ASSISTANT),
             None,
         )
-        if call_request_index is None:
-            raise ValueError("model continuation is missing its callable request message")
+        if assistant_index is None:
+            raise ValueError("model continuation is missing its assistant message")
 
-        call_request_refs = {request.ref for request in messages[call_request_index].call_requests}
-        trailing_messages = messages[call_request_index + 1 :]
-        if not trailing_messages or any(
-            message.role is not ModelMessageRole.CALL_OUTPUT for message in trailing_messages
-        ):
-            raise ValueError("model continuation must be followed by callable output messages")
-        output_refs = {message.call_request_ref for message in trailing_messages}
-        if output_refs != call_request_refs or len(output_refs) != len(trailing_messages):
+        trailing_messages = messages[assistant_index + 1 :]
+        call_outputs = list(itertools.takewhile(lambda m: m.role is ModelMessageRole.CALL_OUTPUT, trailing_messages))
+        user_messages = trailing_messages[len(call_outputs) :]
+        if not trailing_messages or any(message.role is not ModelMessageRole.USER for message in user_messages):
+            raise ValueError("model continuation must be followed by callable outputs or user messages")
+
+        call_request_refs = {request.ref for request in messages[assistant_index].call_requests}
+        output_refs = {message.call_request_ref for message in call_outputs}
+        if output_refs != call_request_refs or len(output_refs) != len(call_outputs):
             raise ValueError("callable outputs do not match the pending model requests")
 
         return [
-            {
-                "type": "function_call_output",
-                "call_id": cast(str, message.call_request_ref),
-                "output": cast(str, message.content),
-            }
-            for message in trailing_messages
+            *(
+                {
+                    "type": "function_call_output",
+                    "call_id": cast(str, message.call_request_ref),
+                    "output": cast(str, message.content),
+                }
+                for message in call_outputs
+            ),
+            *({"role": "user", "content": cast(str, message.content)} for message in user_messages),
         ]
 
     @staticmethod

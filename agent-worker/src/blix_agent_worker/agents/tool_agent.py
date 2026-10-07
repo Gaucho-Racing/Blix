@@ -1,8 +1,10 @@
+import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Iterator
 from typing import ClassVar
+from urllib.parse import urldefrag
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from blix_agent_worker.agents.callables import (
     CallableCatalog,
@@ -30,6 +32,7 @@ from blix_agent_worker.models.common import (
 )
 from blix_agent_worker.models.llm import (
     ModelCallableKind,
+    ModelCallRequest,
     ModelContinuation,
     ModelMessage,
     ModelMessageRole,
@@ -37,9 +40,25 @@ from blix_agent_worker.models.llm import (
     ModelRequest,
     ModelResponse,
 )
-from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolResult, ToolResultStatus
+from blix_agent_worker.models.tool import (
+    ToolCall,
+    ToolDefinition,
+    ToolExecutionMode,
+    ToolImpact,
+    ToolResult,
+    ToolResultStatus,
+)
 from blix_agent_worker.tools import ToolRunner
 from blix_agent_worker.tools.registry import ToolRegistryError
+
+OUTPUT_REPAIR_PROMPT = """Your final output was rejected and has not been returned to the caller.
+
+Problem: {problem}
+
+Fix the problem and return the complete corrected final output. Only call tools if you need evidence to fix it."""
+
+FINALIZE_PROMPT = """You have reached this task's tool call limit, so no more tools are available.
+Return your final output now using only the evidence you have already retrieved, and state what remains unverified."""
 
 
 class AgentOutputValidationError(ValueError):
@@ -48,10 +67,46 @@ class AgentOutputValidationError(ValueError):
         self.code = code
 
 
+def normalize_url(url: str) -> str:
+    return urldefrag(url.strip())[0].rstrip("/")
+
+
+def successful_tool_outputs(
+    messages: list[ModelMessage], tool_ids: Collection[str]
+) -> Iterator[tuple[ModelCallRequest, JsonValue]]:
+    requests = {request.ref: request for message in messages for request in message.call_requests}
+    for message in messages:
+        if message.role is not ModelMessageRole.CALL_OUTPUT or message.call_request_ref not in requests:
+            continue
+        request = requests[message.call_request_ref]
+        if request.callable_id not in tool_ids:
+            continue
+        result = ToolResult.model_validate_json(message.content)
+        if result.status is ToolResultStatus.SUCCEEDED:
+            yield request, result.output
+
+
+def retrieved_urls(messages: list[ModelMessage], tool_ids: Collection[str]) -> frozenset[str]:
+    def urls(value: JsonValue) -> Iterator[str]:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "url" and isinstance(item, str):
+                    yield normalize_url(item)
+                else:
+                    yield from urls(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from urls(item)
+
+    return frozenset(url for _, output in successful_tool_outputs(messages, tool_ids) for url in urls(output))
+
+
 class ToolAgent:
     definition: ClassVar[AgentDefinition]
     input_model: ClassVar[type[ContractModel]]
     output_model: ClassVar[type[ContractModel]]
+    max_tool_calls: ClassVar[int | None] = None
+    max_output_repairs: ClassVar[int] = 2
 
     def initial_messages(self, task: AgentTask, agent_input: ContractModel) -> list[ModelMessage]:
         raise NotImplementedError
@@ -105,7 +160,7 @@ class ToolAgent:
             catalog = CallableCatalog(tools=tool_definitions)
         except (CallableCatalogError, ToolRegistryError) as error:
             return self._failure(task, "agent_configuration_error", str(error))
-        allowed_tool_ids = frozenset(definition.id for definition in tool_definitions)
+        definitions_by_id = {definition.id: definition for definition in tool_definitions}
 
         if state is None:
             messages = self.initial_messages(task, agent_input)
@@ -113,6 +168,8 @@ class ToolAgent:
             continuation: ModelContinuation | None = None
             usage = AgentUsage()
             next_call_index = 0
+            output_repairs = 0
+            finalize_requested = False
         else:
             if state.agent_id != task.agent_id:
                 return self._failure(task, "invalid_execution_state", "The execution state belongs to another agent.")
@@ -121,6 +178,8 @@ class ToolAgent:
             continuation = state.continuation
             usage = state.usage
             next_call_index = state.next_call_index
+            output_repairs = state.output_repairs
+            finalize_requested = state.finalize_requested
 
         if phase is AgentExecutionPhase.WAITING_FOR_AGENT or resume_result is not None:
             return self._failure(
@@ -128,6 +187,18 @@ class ToolAgent:
                 "invalid_execution_state",
                 "This specialist cannot resume an agent delegation.",
                 usage=usage,
+            )
+
+        def snapshot(current_phase: AgentExecutionPhase, call_index: int) -> AgentExecutionState:
+            return AgentExecutionState(
+                agent_id=self.definition.id,
+                phase=current_phase,
+                messages=tuple(messages),
+                continuation=continuation,
+                usage=usage,
+                next_call_index=call_index,
+                output_repairs=output_repairs,
+                finalize_requested=finalize_requested,
             )
 
         while True:
@@ -143,17 +214,25 @@ class ToolAgent:
                 try:
                     output = self.output_model.model_validate_json(response_message.content)
                     self.validate_output(task, output, messages)
-                except ValidationError as error:
-                    return self._failure(
-                        task,
-                        "invalid_agent_output",
-                        f"The model returned an invalid {self.definition.id} result.",
-                        details=validation_error_details(error),
-                        usage=usage,
-                    )
                 except AgentOutputValidationError as error:
                     return self._failure(task, error.code, str(error), usage=usage)
-                except ValueError as error:
+                except (ValidationError, ValueError) as error:
+                    details = validation_error_details(error) if isinstance(error, ValidationError) else None
+                    if output_repairs < self.max_output_repairs:
+                        output_repairs += 1
+                        problem = json.dumps(details, separators=(",", ":")) if details else str(error)
+                        repair_prompt = OUTPUT_REPAIR_PROMPT.format(problem=problem)
+                        messages.append(ModelMessage(role=ModelMessageRole.USER, content=repair_prompt))
+                        phase = AgentExecutionPhase.READY_FOR_MODEL
+                        continue
+                    if details is not None:
+                        return self._failure(
+                            task,
+                            "invalid_agent_output",
+                            f"The model returned an invalid {self.definition.id} result.",
+                            details=details,
+                            usage=usage,
+                        )
                     return self._failure(task, "invalid_agent_output", str(error), usage=usage)
                 return AgentResult(
                     run_id=task.run_id,
@@ -166,12 +245,16 @@ class ToolAgent:
                 )
 
             if phase is AgentExecutionPhase.READY_FOR_MODEL:
+                budget_exhausted = self._tool_budget_remaining(usage) == 0
+                if budget_exhausted and not finalize_requested:
+                    messages.append(ModelMessage(role=ModelMessageRole.USER, content=FINALIZE_PROMPT))
+                    finalize_requested = True
                 model_calls = usage.model_calls + 1
                 try:
                     request = ModelRequest(
                         sequence=model_calls,
                         messages=tuple(messages),
-                        callables=catalog.definitions,
+                        callables=() if budget_exhausted else catalog.definitions,
                         output_format=ModelOutputFormat(
                             id=self.definition.id,
                             json_schema=self.definition.output_schema,
@@ -207,9 +290,8 @@ class ToolAgent:
                     else AgentExecutionPhase.COMPLETED
                 )
                 next_call_index = 0
-                checkpoint_state = self._state(messages, continuation, usage, phase, next_call_index)
                 if self._on_model_response is not None:
-                    await self._on_model_response(model_calls, response, checkpoint_state)
+                    await self._on_model_response(model_calls, response, snapshot(phase, next_call_index))
                 continue
 
             call_batch = self._latest_call_batch(messages)
@@ -217,98 +299,130 @@ class ToolAgent:
                 phase = AgentExecutionPhase.READY_FOR_MODEL
                 next_call_index = 0
                 continue
-            model_call_request = call_batch.call_requests[next_call_index]
-            try:
-                callable_kind = catalog.resolve_kind(model_call_request.callable_id)
-            except CallableNotFoundError:
-                return self._failure(
-                    task,
-                    "unknown_model_callable",
-                    f"The model requested unavailable callable {model_call_request.callable_id!r}.",
-                    usage=usage,
-                )
-            if callable_kind is not ModelCallableKind.TOOL:
-                return self._failure(
-                    task,
-                    "invalid_model_callable",
-                    "This specialist may only call tools.",
-                    usage=usage,
-                )
 
-            usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
-            call = ToolCall(
-                run_id=task.run_id,
-                call_id=new_ulid("call"),
-                parent_session_id=task.session_id,
-                tool_id=model_call_request.callable_id,
-                arguments=model_call_request.arguments,
-                idempotency_key=model_call_request.ref,
-            )
-            if model_call_request.callable_id not in allowed_tool_ids:
-                tool_result = ToolResult(
-                    run_id=call.run_id,
-                    call_id=call.call_id,
-                    parent_session_id=call.parent_session_id,
-                    status=ToolResultStatus.FAILED,
-                    error=ContractError(
-                        code="tool_not_allowed",
-                        message=f"Tool {call.tool_id!r} is not allowed for this execution.",
-                    ),
-                )
-            else:
-                tool_result = await self._tool_runner.execute(call)
+            pending_requests = call_batch.call_requests[next_call_index:]
+            if not self._can_run_concurrently(pending_requests, definitions_by_id):
+                pending_requests = pending_requests[:1]
+            for model_call_request in pending_requests:
+                try:
+                    callable_kind = catalog.resolve_kind(model_call_request.callable_id)
+                except CallableNotFoundError:
+                    return self._failure(
+                        task,
+                        "unknown_model_callable",
+                        f"The model requested unavailable callable {model_call_request.callable_id!r}.",
+                        usage=usage,
+                    )
+                if callable_kind is not ModelCallableKind.TOOL:
+                    return self._failure(
+                        task,
+                        "invalid_model_callable",
+                        "This specialist may only call tools.",
+                        usage=usage,
+                    )
 
-            messages.append(
-                ModelMessage(
-                    role=ModelMessageRole.CALL_OUTPUT,
-                    content=json.dumps(tool_result.model_dump(mode="json"), separators=(",", ":")),
-                    call_request_ref=model_call_request.ref,
+            calls = [
+                ToolCall(
+                    run_id=task.run_id,
+                    call_id=new_ulid("call"),
+                    parent_session_id=task.session_id,
+                    tool_id=model_call_request.callable_id,
+                    arguments=model_call_request.arguments,
+                    idempotency_key=model_call_request.ref,
                 )
+                for model_call_request in pending_requests
+            ]
+            remaining_budget = self._tool_budget_remaining(usage)
+            tool_results = await self._execute_tools(
+                [
+                    (call, call.tool_id in definitions_by_id, remaining_budget is None or index < remaining_budget)
+                    for index, call in enumerate(calls)
+                ]
             )
-            next_call_index += 1
-            phase = (
-                AgentExecutionPhase.PROCESSING_CALLS
-                if next_call_index < len(call_batch.call_requests)
-                else AgentExecutionPhase.READY_FOR_MODEL
-            )
-            checkpoint_state = self._state(
-                messages,
-                continuation,
-                usage,
-                phase,
-                next_call_index if phase is AgentExecutionPhase.PROCESSING_CALLS else 0,
-            )
-            if self._on_tool_result is not None:
-                await self._on_tool_result(call, tool_result, checkpoint_state)
+
+            for model_call_request, call, tool_result in zip(pending_requests, calls, tool_results, strict=True):
+                usage = usage.model_copy(update={"tool_calls": usage.tool_calls + 1})
+                messages.append(
+                    ModelMessage(
+                        role=ModelMessageRole.CALL_OUTPUT,
+                        content=json.dumps(tool_result.model_dump(mode="json"), separators=(",", ":")),
+                        call_request_ref=model_call_request.ref,
+                    )
+                )
+                next_call_index += 1
+                phase = (
+                    AgentExecutionPhase.PROCESSING_CALLS
+                    if next_call_index < len(call_batch.call_requests)
+                    else AgentExecutionPhase.READY_FOR_MODEL
+                )
+                if self._on_tool_result is not None:
+                    await self._on_tool_result(
+                        call,
+                        tool_result,
+                        snapshot(phase, next_call_index if phase is AgentExecutionPhase.PROCESSING_CALLS else 0),
+                    )
+                if (
+                    tool_result.status is ToolResultStatus.FAILED
+                    and tool_result.error is not None
+                    and tool_result.error.code == "tool_not_configured"
+                ):
+                    return self._failure(
+                        task,
+                        tool_result.error.code,
+                        tool_result.error.message,
+                        retryable=tool_result.error.retryable,
+                        details=tool_result.error.details,
+                        usage=usage,
+                    )
+
+    def _tool_budget_remaining(self, usage: AgentUsage) -> int | None:
+        if self.max_tool_calls is None:
+            return None
+        return max(0, self.max_tool_calls - usage.tool_calls)
+
+    @staticmethod
+    def _can_run_concurrently(
+        requests: tuple[ModelCallRequest, ...], definitions_by_id: dict[str, ToolDefinition]
+    ) -> bool:
+        if len(requests) < 2:
+            return False
+        for request in requests:
+            definition = definitions_by_id.get(request.callable_id)
             if (
-                tool_result.status is ToolResultStatus.FAILED
-                and tool_result.error is not None
-                and tool_result.error.code == "tool_not_configured"
+                definition is None
+                or definition.impact is not ToolImpact.READ_ONLY
+                or definition.requires_approval
+                or definition.execution_mode is not ToolExecutionMode.INLINE
             ):
-                return self._failure(
-                    task,
-                    tool_result.error.code,
-                    tool_result.error.message,
-                    retryable=tool_result.error.retryable,
-                    details=tool_result.error.details,
-                    usage=usage,
-                )
+                return False
+        return True
 
-    def _state(
-        self,
-        messages: list[ModelMessage],
-        continuation: ModelContinuation | None,
-        usage: AgentUsage,
-        phase: AgentExecutionPhase,
-        next_call_index: int,
-    ) -> AgentExecutionState:
-        return AgentExecutionState(
-            agent_id=self.definition.id,
-            phase=phase,
-            messages=tuple(messages),
-            continuation=continuation,
-            usage=usage,
-            next_call_index=next_call_index,
+    async def _execute_tools(self, calls: list[tuple[ToolCall, bool, bool]]) -> list[ToolResult]:
+        async def execute(call: ToolCall, allowed: bool, within_budget: bool) -> ToolResult:
+            if not allowed:
+                return self._tool_failure(
+                    call, "tool_not_allowed", f"Tool {call.tool_id!r} is not allowed for this execution."
+                )
+            if not within_budget:
+                return self._tool_failure(
+                    call, "tool_budget_exhausted", "This task has used all of its tool calls. Return the final output."
+                )
+            return await self._tool_runner.execute(call)
+
+        outcomes = await asyncio.gather(*(execute(*call) for call in calls), return_exceptions=True)
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+        return list(outcomes)
+
+    @staticmethod
+    def _tool_failure(call: ToolCall, code: str, message: str) -> ToolResult:
+        return ToolResult(
+            run_id=call.run_id,
+            call_id=call.call_id,
+            parent_session_id=call.parent_session_id,
+            status=ToolResultStatus.FAILED,
+            error=ContractError(code=code, message=message),
         )
 
     @staticmethod

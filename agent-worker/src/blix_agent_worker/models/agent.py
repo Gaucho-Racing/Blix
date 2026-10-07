@@ -118,6 +118,8 @@ class AgentExecutionState(ContractModel):
     usage: AgentUsage = Field(default_factory=AgentUsage)
     next_call_index: Annotated[int, Field(ge=0)] = 0
     pending_agent_call: PendingAgentCall | None = None
+    output_repairs: Annotated[int, Field(ge=0)] = 0
+    finalize_requested: bool = False
 
     @model_validator(mode="after")
     def validate_pending_agent_call(self) -> Self:
