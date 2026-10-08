@@ -176,25 +176,6 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		}
 		c.JSON(http.StatusOK, task)
 	})
-	public.POST("/tasks/:taskID/:operation", func(c *gin.Context) {
-		var r struct {
-			Content string `json:"content"`
-		}
-		if c.Request.ContentLength > 0 && c.ShouldBindJSON(&r) != nil {
-			respondError(c, service.ErrInvalid)
-			return
-		}
-		caller, err := getCaller(c)
-		if err != nil {
-			respondError(c, err)
-			return
-		}
-		if err := h.executions.ControlTask(c.Request.Context(), c.Param("taskID"), caller.EntityID, c.Param("operation"), r.Content); err != nil {
-			respondError(c, err)
-			return
-		}
-		c.Status(http.StatusNoContent)
-	})
 	public.POST("/approvals/:approvalID/:decision", func(c *gin.Context) {
 		var r struct {
 			Note string `json:"note"`
@@ -272,7 +253,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		}
 		c.JSON(http.StatusOK, result)
 	})
-	internal.POST("/tasks/:taskID/:operation", func(c *gin.Context) {
+	internal.POST("/tasks/:taskID/cancel", func(c *gin.Context) {
 		var request struct {
 			Owner string `json:"owner"`
 		}
@@ -280,7 +261,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, service.ErrInvalid)
 			return
 		}
-		if err := h.executions.ControlTask(c.Request.Context(), c.Param("taskID"), request.Owner, c.Param("operation"), ""); err != nil {
+		if err := h.executions.CancelTask(c.Request.Context(), c.Param("taskID"), request.Owner); err != nil {
 			respondError(c, err)
 			return
 		}

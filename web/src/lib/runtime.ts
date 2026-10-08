@@ -106,13 +106,6 @@ export async function appendMessage(
 export async function interruptRun(id: string) {
   await api.post(`/v1/runs/${id}/interrupt`)
 }
-export async function controlTask(
-  id: string,
-  operation: "cancel" | "steer",
-  content = "",
-) {
-  await api.post(`/v1/tasks/${id}/${operation}`, { content })
-}
 export async function decideApproval(
   id: string,
   decision: "approve" | "reject",

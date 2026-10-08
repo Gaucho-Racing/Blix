@@ -142,9 +142,9 @@ class RuntimeModel:
         if self.guidance:
             guidance = ModelMessage(
                 role=ModelMessageRole.USER,
-                content="Additional guidance from the authenticated user:\n" + "\n".join(self.guidance),
+                content="Additional guidance from the Blix lead:\n" + "\n".join(self.guidance),
             )
-            request = request.model_copy(update={"messages": (*request.messages, guidance), "continuation": None})
+            request = request.model_copy(update={"messages": (*request.messages, guidance)})
         self.guidance.clear()
         return request
 

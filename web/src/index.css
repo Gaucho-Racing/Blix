@@ -693,8 +693,6 @@ h1, h2, h3, p { margin-top: 0; }
 .status-succeeded { color: #218454; background: #eaf6ef; }
 .status-failed, .status-cancelled { color: #a34a58; background: #fbeef1; }
 .status-running, .status-waiting { color: #aa3e8a; background: #fceaf7; }
-.runtime-task form { margin-top: 12px; }
-.runtime-task input { width: 100%; font-size: 11px; border: 1px solid #e5e1e8; border-radius: 5px; padding: 8px; }
 .runtime-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
 .runtime-controls button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #a32d80; cursor: pointer; }
 .runtime-task details { margin-top: 12px; font-size: 11px; }

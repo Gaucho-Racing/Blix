@@ -656,8 +656,6 @@ func renderHelpPanel(width int) string {
 		{command: "/help", detail: "Show available commands"},
 		{command: "/reset", detail: "Start a fresh run"},
 		{command: "/tasks", detail: "List run tasks"},
-		{command: "/cancel", detail: "Cancel a task: /cancel <task_id>"},
-		{command: "/steer", detail: "Guide a task: /steer <task_id> <guidance>"},
 		{command: "/approve", detail: "Approve publication: /approve <approval_id>"},
 		{command: "/reject", detail: "Reject publication: /reject <approval_id>"},
 		{command: "/runs", detail: "List saved runs"},

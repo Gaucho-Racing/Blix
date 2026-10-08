@@ -540,7 +540,7 @@ func (s *ExecutionService) cancelTarget(tx *gorm.DB, runID, sessionID, targetID 
 		if err := tx.First(&session, "id = ?", sessionID).Error; err != nil {
 			return err
 		}
-		result := encoded(map[string]any{"schema_version": 1, "run_id": runID, "session_id": sessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": "cancelled", "usage": map[string]any{}, "error": map[string]any{"code": "task_cancelled", "message": "The user cancelled this task."}})
+		result := encoded(map[string]any{"schema_version": 1, "run_id": runID, "session_id": sessionID, "parent_session_id": session.ParentSessionID, "agent_id": session.ProfileID, "status": "cancelled", "usage": map[string]any{}, "error": map[string]any{"code": "task_cancelled", "message": "This task was cancelled."}})
 		if err := tx.Model(&task).Update("result", result).Error; err != nil {
 			return err
 		}
@@ -548,7 +548,7 @@ func (s *ExecutionService) cancelTarget(tx *gorm.DB, runID, sessionID, targetID 
 	}
 	return nil
 }
-func (s *ExecutionService) ControlTask(ctx context.Context, id, owner, operation, content string) error {
+func (s *ExecutionService) CancelTask(ctx context.Context, id, owner string) error {
 	task, err := s.GetTask(ctx, id)
 	if err != nil {
 		return err
@@ -564,7 +564,7 @@ func (s *ExecutionService) ControlTask(ctx context.Context, id, owner, operation
 		if err := tx.First(&task, "id = ?", id).Error; err != nil {
 			return err
 		}
-		return s.controlTask(tx, task, operation, content, "")
+		return s.controlTask(tx, task, "cancel", "", "")
 	})
 }
 func (s *ExecutionService) Commands(ctx context.Context, id string, o Ownership) ([]model.SessionCommand, error) {

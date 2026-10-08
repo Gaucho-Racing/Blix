@@ -14,7 +14,6 @@ import { useAuth } from "@/lib/auth"
 import {
   activeStatus,
   appendMessage,
-  controlTask,
   createRun,
   decideApproval,
   errorMessage,
@@ -26,24 +25,7 @@ import {
 } from "@/lib/runtime"
 import type { RuntimeEvent, RuntimeTask } from "@/lib/runtime"
 
-function TaskCard({
-  task,
-  refresh,
-}: {
-  task: RuntimeTask
-  refresh: () => Promise<void>
-}) {
-  const [direction, setDirection] = useState("")
-  const mutation = useMutation({
-    mutationFn: ({
-      operation,
-      content,
-    }: {
-      operation: "cancel" | "steer"
-      content?: string
-    }) => controlTask(task.task_id, operation, content),
-    onSuccess: refresh,
-  })
+function TaskCard({ task }: { task: RuntimeTask }) {
   const output = task.result?.output
   const summary =
     typeof output?.summary === "string"
@@ -72,37 +54,6 @@ function TaskCard({
           <summary>Full task instructions</summary>
           <p>{task.objective}</p>
         </details>
-      )}
-      {activeStatus(task.status) && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (direction.trim())
-              mutation.mutate({ operation: "steer", content: direction })
-          }}
-        >
-          <input
-            aria-label="Task direction"
-            onChange={(event) => setDirection(event.target.value)}
-            placeholder="Give this task direction…"
-            value={direction}
-          />
-          <div className="runtime-controls">
-            <button
-              disabled={mutation.isPending || !direction.trim()}
-              type="submit"
-            >
-              Send direction
-            </button>
-            <button
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate({ operation: "cancel" })}
-              type="button"
-            >
-              Cancel task
-            </button>
-          </div>
-        </form>
       )}
       {summary && (
         <details>
@@ -136,11 +87,6 @@ function TaskCard({
       {task.error?.message && (
         <p role="alert" className="runtime-error">
           {task.error.message}
-        </p>
-      )}
-      {mutation.error && (
-        <p role="alert" className="runtime-error">
-          {errorMessage(mutation.error)}
         </p>
       )}
     </article>
@@ -507,7 +453,7 @@ function RunChat({ runID }: { runID: string }) {
             </h2>
             {data?.tasks.length ? (
               data.tasks.map((task) => (
-                <TaskCard key={task.task_id} task={task} refresh={refresh} />
+                <TaskCard key={task.task_id} task={task} />
               ))
             ) : (
               <p>Delegated research and curation will appear here.</p>

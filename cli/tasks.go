@@ -71,22 +71,14 @@ func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
 			}
 			return taskCommandMsg{content: strings.Join(lines, "\n\n"), err: err}
 		}, true
-	case "/cancel", "/steer", "/approve", "/reject":
-		if len(fields) < 2 || (fields[0] == "/steer" && len(fields) < 3) {
-			m.appendBlock(transcriptError, "Usage: /cancel <task_id>, /steer <task_id> <guidance>, /approve <approval_id>, /reject <approval_id> [reason]", nil)
+	case "/approve", "/reject":
+		if len(fields) < 2 {
+			m.appendBlock(transcriptError, "Usage: /approve <approval_id>, /reject <approval_id> [reason]", nil)
 			return nil, true
 		}
 		operation := strings.TrimPrefix(fields[0], "/")
-		id := url.PathEscape(fields[1])
-		payload := map[string]string{}
-		path := "/api/v1/tasks/" + id + "/" + operation
-		if operation == "steer" {
-			payload["content"] = strings.Join(fields[2:], " ")
-		}
-		if operation == "approve" || operation == "reject" {
-			path = "/api/v1/approvals/" + id + "/" + operation
-			payload["note"] = strings.Join(fields[2:], " ")
-		}
+		path := "/api/v1/approvals/" + url.PathEscape(fields[1]) + "/" + operation
+		payload := map[string]string{"note": strings.Join(fields[2:], " ")}
 		return func() tea.Msg {
 			err := m.api.request(m.ctx, http.MethodPost, path, payload, nil)
 			return taskCommandMsg{content: operation + " accepted for " + fields[1], err: err}
