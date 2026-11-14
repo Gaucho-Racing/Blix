@@ -20,6 +20,7 @@ type Client struct {
 	Dimensions     int
 	SendDimensions bool
 	HTTP           *http.Client
+	OnUsage        func(model string, inputTokens int)
 }
 
 func (c *Client) ModelName() string { return c.Model }
@@ -65,9 +66,15 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 			Index  int       `json:"index"`
 			Vector []float32 `json:"embedding"`
 		} `json:"data"`
+		Usage struct {
+			PromptTokens int `json:"prompt_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(&response); err != nil {
 		return nil, fmt.Errorf("invalid embedding response")
+	}
+	if c.OnUsage != nil {
+		c.OnUsage(c.Model, response.Usage.PromptTokens)
 	}
 	if len(response.Data) != len(texts) {
 		return nil, fmt.Errorf("embedding response count mismatch")

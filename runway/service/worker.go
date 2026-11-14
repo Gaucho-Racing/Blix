@@ -8,6 +8,7 @@ import (
 	"github.com/gaucho-racing/blix/runway/config"
 	"github.com/gaucho-racing/blix/runway/model"
 	"github.com/gaucho-racing/blix/runway/pkg/identifier"
+	"github.com/gaucho-racing/blix/runway/pricing"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -53,6 +54,7 @@ type WorkerSummary struct {
 	ToolCalls            uint64    `json:"tool_calls"`
 	InputTokens          uint64    `json:"input_tokens"`
 	OutputTokens         uint64    `json:"output_tokens"`
+	CostUSD              float64   `json:"cost_usd"`
 	RegisteredAt         time.Time `json:"registered_at"`
 	LastSeenAt           time.Time `json:"last_seen_at"`
 	HeartbeatExpiresAt   time.Time `json:"heartbeat_expires_at"`
@@ -70,6 +72,7 @@ type workerSummaryRow struct {
 	ToolCalls           uint64
 	InputTokens         uint64
 	OutputTokens        uint64
+	CostNanos           int64
 	RegisteredAt        time.Time
 	LastSeenAt          time.Time
 	ActiveExecutions    uint64
@@ -191,7 +194,12 @@ func (s *WorkerService) workerSummaryQuery(ctx context.Context) *gorm.DB {
 				WHERE execution.worker_id = worker.id
 					AND execution.status = ?
 					AND execution.lease_expires_at > ?
-			) AS active_executions
+			) AS active_executions,
+			(
+				SELECT COALESCE(SUM(usage.cost_nanos), 0)
+				FROM runway_usage_record usage
+				WHERE usage.worker_id = worker.id
+			) AS cost_nanos
 		`, model.StatusRunning, time.Now().UTC())
 }
 
@@ -226,6 +234,7 @@ func (s *WorkerService) summarize(row workerSummaryRow, now time.Time) WorkerSum
 		ToolCalls:            row.ToolCalls,
 		InputTokens:          row.InputTokens,
 		OutputTokens:         row.OutputTokens,
+		CostUSD:              pricing.NanosToUSD(row.CostNanos),
 		RegisteredAt:         row.RegisteredAt,
 		LastSeenAt:           row.LastSeenAt,
 		HeartbeatExpiresAt:   heartbeatExpiresAt,

@@ -13,6 +13,7 @@ import (
 	"github.com/gaucho-racing/blix/runway/mqtt"
 	"github.com/gaucho-racing/blix/runway/pkg/logger"
 	"github.com/gaucho-racing/blix/runway/pkg/sentinel"
+	"github.com/gaucho-racing/blix/runway/pricing"
 	"github.com/gaucho-racing/blix/runway/service"
 )
 
@@ -63,7 +64,19 @@ func run(configuration config.Config) error {
 	}
 	auth := service.NewAuthService(sentinelClient, configuration.SentinelScopes)
 	identities := service.NewIdentityService(sentinelClient, configuration.SentinelServiceToken)
-	executions := service.NewExecutionService(db, workers, configuration)
+	prices, err := pricing.Load()
+	if err != nil {
+		return err
+	}
+	usage := service.NewUsageService(db, prices)
+	go func() {
+		if count, err := usage.Backfill(ctx); err != nil {
+			logger.SugarLogger.Warnf("backfill usage records: %v", err)
+		} else if count > 0 {
+			logger.SugarLogger.Infof("backfilled %d usage records from model events", count)
+		}
+	}()
+	executions := service.NewExecutionService(db, workers, usage, configuration)
 	executions.SetDocumentScopeValidator(service.NewKnowledgeDocumentClient(os.Getenv("KNOWLEDGE_URL"), os.Getenv("BLIX_INTERNAL_TOKEN")))
 	outbox := service.NewOutboxDispatcher(db, publisher, configuration.OutboxPollInterval)
 	executions.SetDispatchNotifier(outbox.Notify)
@@ -79,6 +92,7 @@ func run(configuration config.Config) error {
 		identities,
 		executions,
 		workers,
+		usage,
 		eventHub,
 		workerHub,
 	)

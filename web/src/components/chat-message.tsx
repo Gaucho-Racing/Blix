@@ -2,19 +2,22 @@ import { DocumentPageImage } from "@/components/document-page-image"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+const depotPublicImage = /^https:\/\/depot\.gauchoracing\.com\/api\/download\/file_[0-9A-Za-z]{26}$/
+
 interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
   userAvatarURL?: string
+  userLabel?: string
   messageID?: string
 }
 
-export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMessageProps) {
+export function ChatMessage({ role, content, userAvatarURL, userLabel = "You", messageID }: ChatMessageProps) {
   if (role === "user") {
     return (
       <article className="chat-message chat-message-user">
         <div className="chat-message-user-copy">{content}</div>
-        {userAvatarURL ? <img alt="" className="chat-message-avatar" src={userAvatarURL} /> : <span className="chat-message-avatar chat-message-avatar-fallback">You</span>}
+        {userAvatarURL ? <img alt="" className="chat-message-avatar" src={userAvatarURL} /> : <span className="chat-message-avatar chat-message-avatar-fallback">{userLabel}</span>}
       </article>
     )
   }
@@ -26,7 +29,9 @@ export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMes
         <span className="chat-message-author">Blix</span>
         <Markdown
           components={{
-            img: ({ src, alt }) => <DocumentPageImage src={src} alt={alt} />,
+            img: ({ src, alt }) => typeof src === "string" && depotPublicImage.test(src)
+              ? <a className="chat-message-image" href={src} target="_blank" rel="noreferrer"><img src={src} alt={alt || "Chart"} loading="lazy" /></a>
+              : <DocumentPageImage src={src} alt={alt} />,
             a: ({ children, ...properties }) => <a {...properties} rel="noreferrer" target="_blank">{children}</a>,
           }}
           remarkPlugins={[remarkGfm]}

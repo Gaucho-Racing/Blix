@@ -8,6 +8,7 @@ export interface Run {
   name: string
   status: string
   lead_session_id: string
+  caller_entity_id: string
   updated_at: string
   created_at: string
 }
@@ -76,8 +77,8 @@ export async function listChatRuns() {
 }
 export async function listAdminRuns() {
   return (
-    await api.get<{ runs: Run[] }>("/v1/admin/runs")
-  ).data.runs
+    await api.get<{ runs: Run[]; costs: Record<string, number> }>("/v1/admin/runs")
+  ).data
 }
 export async function createRun(documentIDs: string[] = []) {
   return (

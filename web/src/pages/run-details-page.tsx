@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom"
 import { getRun, loadEvents, errorMessage } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/lib/runtime"
 import { RunTrace } from "@/components/run-trace"
+import { RunCostPanel } from "@/components/run-cost-panel"
 import { traceTone } from "@/lib/run-trace"
 
 export function RunDetailsPage() {
@@ -58,6 +59,7 @@ export function RunDetailsPage() {
         <span>{events.data?.length.toLocaleString() ?? 0} events</span>
         <span>Auto-refresh · 2.5s</span>
       </div>
+      <RunCostPanel runID={runID} />
       {events.isPending && <p className="loading-state">Loading trace…</p>}
       <RunTrace key={runID} detail={detail.data} events={events.data ?? []} />
     </div>

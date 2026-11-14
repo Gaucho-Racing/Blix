@@ -29,6 +29,7 @@ var (
 type ExecutionService struct {
 	database          *gorm.DB
 	workers           *WorkerService
+	usage             *UsageService
 	leaseDuration     time.Duration
 	attemptReadyTopic string
 	eventTopic        string
@@ -36,8 +37,8 @@ type ExecutionService struct {
 	documents         DocumentScopeValidator
 }
 
-func NewExecutionService(db *gorm.DB, workers *WorkerService, cfg config.Config) *ExecutionService {
-	return &ExecutionService{database: db, workers: workers, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTRunEventTopicPrefix, notify: func() {}}
+func NewExecutionService(db *gorm.DB, workers *WorkerService, usage *UsageService, cfg config.Config) *ExecutionService {
+	return &ExecutionService{database: db, workers: workers, usage: usage, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTRunEventTopicPrefix, notify: func() {}}
 }
 func (s *ExecutionService) SetDispatchNotifier(notify func()) { s.notify = notify }
 func mapDatabaseError(err error) error {
@@ -93,6 +94,9 @@ func (s *ExecutionService) event(tx *gorm.DB, a model.ExecutionAttempt, kind, en
 			return event, ErrInvalid
 		}
 		if err := s.workers.recordModelCall(tx, a.WorkerID, usage.InputTokens, usage.OutputTokens); err != nil {
+			return event, err
+		}
+		if err := s.usage.recordModelResponse(tx, a, event.ID, json.RawMessage(event.Payload)); err != nil {
 			return event, err
 		}
 	}
@@ -596,17 +600,14 @@ func (s *ExecutionService) AuthorizeRunAccess(ctx context.Context, runID, owner 
 	}
 	return nil
 }
-func (s *ExecutionService) ListRuns(ctx context.Context, owner string, admin bool, kind string) ([]model.Run, error) {
+func (s *ExecutionService) ListRuns(ctx context.Context, owner string, kind string) ([]model.Run, error) {
 	if kind != "" && kind != model.RunKindChat && kind != model.RunKindInternal {
 		return nil, ErrInvalid
 	}
 	rows := []model.Run{}
-	q := s.database.WithContext(ctx)
+	q := s.database.WithContext(ctx).Where("caller_entity_id = ?", owner)
 	if kind != "" {
 		q = q.Where("kind = ?", kind)
-	}
-	if !admin {
-		q = q.Where("caller_entity_id = ?", owner)
 	}
 	err := q.Order("updated_at DESC").Limit(100).Find(&rows).Error
 	return rows, err

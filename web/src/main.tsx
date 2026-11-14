@@ -11,6 +11,7 @@ import { RequireAdmin } from "@/components/require-admin"
 import { AdminOverviewPage } from "@/pages/admin-overview-page"
 import { AutomationsPage } from "@/pages/automations-page"
 import { ChatPage } from "@/pages/chat-page"
+import { CostsPage } from "@/pages/costs-page"
 import { DocumentDetailsPage } from "@/pages/document-details-page"
 import { WikiPage } from "@/pages/wiki-page"
 import { KnowledgePage } from "@/pages/knowledge-page"
@@ -62,6 +63,7 @@ const router = createBrowserRouter([
           { path: "runs", element: <RunsPage /> },
           { path: "runs/:runID", element: <RunDetailsPage /> },
           { path: "workers", element: <WorkersPage /> },
+          { path: "costs", element: <CostsPage /> },
           { path: "knowledge", element: <KnowledgeReviewsPage /> },
           {
             path: "knowledge/changesets/:changesetID",

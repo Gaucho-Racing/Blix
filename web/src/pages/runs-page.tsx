@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Link } from "react-router-dom"
 import { listAdminRuns, errorMessage } from "@/lib/runtime"
 import { formatTimestamp } from "@/lib/format"
+import { formatUSD } from "@/lib/costs"
 
 export function RunsPage() {
   const [search, setSearch] = useState("")
@@ -12,7 +13,8 @@ export function RunsPage() {
     queryFn: listAdminRuns,
     refetchInterval: 5000,
   })
-  const filtered = query.data?.filter((run) =>
+  const costs = query.data?.costs ?? {}
+  const filtered = query.data?.runs.filter((run) =>
     `${run.name} ${run.run_id}`
       .toLowerCase()
       .includes(search.toLowerCase()),
@@ -57,6 +59,7 @@ export function RunsPage() {
                 <th>Run</th>
                 <th>Status</th>
                 <th>Last activity</th>
+                <th className="cost-amount">Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -73,6 +76,7 @@ export function RunsPage() {
                   </td>
                   <td>{run.status}</td>
                   <td>{formatTimestamp(run.updated_at)}</td>
+                  <td className="cost-amount">{formatUSD(costs[run.run_id] ?? 0)}</td>
                 </tr>
               ))}
             </tbody>

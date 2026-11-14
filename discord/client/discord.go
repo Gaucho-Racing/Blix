@@ -117,6 +117,27 @@ func truncate(text string, limit int) string {
 }
 
 var userMentionPattern = regexp.MustCompile(`<@!?([1-9][0-9]{0,19})>`)
+var markdownImagePattern = regexp.MustCompile(`!\[([^\]\n]{0,200})\]\((https://[^\s()<>]{1,1000})\)`)
+var excessBlankLines = regexp.MustCompile(`\n{3,}`)
+
+const maxGalleryItems = 10
+
+func ExtractImages(content string) (string, []discordgo.MediaGalleryItem) {
+	items := []discordgo.MediaGalleryItem{}
+	text := markdownImagePattern.ReplaceAllStringFunc(content, func(match string) string {
+		if len(items) >= maxGalleryItems {
+			return match
+		}
+		parts := markdownImagePattern.FindStringSubmatch(match)
+		item := discordgo.MediaGalleryItem{Media: discordgo.UnfurledMediaItem{URL: parts[2]}}
+		if alt := strings.TrimSpace(parts[1]); alt != "" {
+			item.Description = &alt
+		}
+		items = append(items, item)
+		return ""
+	})
+	return strings.TrimSpace(excessBlankLines.ReplaceAllString(text, "\n\n")), items
+}
 
 func UserMentionIDs(content string) []string {
 	ids := []string{}
@@ -132,11 +153,20 @@ func UserMentionIDs(content string) []string {
 }
 
 func (d *Discord) Send(ctx context.Context, id, channelID, replyToMessageID, content, runURL, sourcesURL string, allowedUserIDs []string) (string, error) {
-	text := Preview(content)
+	text, images := ExtractImages(content)
+	if text != "" || len(images) == 0 {
+		text = Preview(text)
+	}
 	message := discordgo.MessageSend{
-		Components:      []discordgo.MessageComponent{discordgo.TextDisplay{Content: text}},
+		Components:      []discordgo.MessageComponent{},
 		AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}},
 		Flags:           discordgo.MessageFlagsIsComponentsV2 | discordgo.MessageFlagsSuppressEmbeds,
+	}
+	if text != "" {
+		message.Components = append(message.Components, discordgo.TextDisplay{Content: text})
+	}
+	if len(images) > 0 {
+		message.Components = append(message.Components, discordgo.MediaGallery{Items: images})
 	}
 	allowed := map[string]bool{}
 	for _, id := range allowedUserIDs {

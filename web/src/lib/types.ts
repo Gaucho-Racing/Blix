@@ -103,6 +103,7 @@ export interface WorkerSummary {
   tool_calls: number
   input_tokens: number
   output_tokens: number
+  cost_usd: number
   registered_at: string
   last_seen_at: string
   heartbeat_expires_at: string
