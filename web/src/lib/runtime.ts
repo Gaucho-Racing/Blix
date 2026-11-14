@@ -8,6 +8,7 @@ export interface Run {
   name: string
   status: string
   lead_session_id: string
+  caller_entity_id: string
   updated_at: string
   created_at: string
 }

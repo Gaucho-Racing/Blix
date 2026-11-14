@@ -96,7 +96,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 			respondError(c, err)
 			return
 		}
-		result, err := h.executions.ListRuns(c.Request.Context(), caller.EntityID, callerHasGroup(caller, adminGroup), c.Query("kind"))
+		result, err := h.executions.ListRuns(c.Request.Context(), caller.EntityID, c.Query("kind"))
 		if err != nil {
 			respondError(c, err)
 			return

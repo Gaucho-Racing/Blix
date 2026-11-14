@@ -600,17 +600,14 @@ func (s *ExecutionService) AuthorizeRunAccess(ctx context.Context, runID, owner 
 	}
 	return nil
 }
-func (s *ExecutionService) ListRuns(ctx context.Context, owner string, admin bool, kind string) ([]model.Run, error) {
+func (s *ExecutionService) ListRuns(ctx context.Context, owner string, kind string) ([]model.Run, error) {
 	if kind != "" && kind != model.RunKindChat && kind != model.RunKindInternal {
 		return nil, ErrInvalid
 	}
 	rows := []model.Run{}
-	q := s.database.WithContext(ctx)
+	q := s.database.WithContext(ctx).Where("caller_entity_id = ?", owner)
 	if kind != "" {
 		q = q.Where("kind = ?", kind)
-	}
-	if !admin {
-		q = q.Where("caller_entity_id = ?", owner)
 	}
 	err := q.Order("updated_at DESC").Limit(100).Find(&rows).Error
 	return rows, err

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import { ChatMessage } from "@/components/chat-message"
 import { useAuth } from "@/lib/auth"
+import { useIdentities } from "@/lib/identity"
 import {
   activeStatus,
   appendMessage,
@@ -138,6 +139,18 @@ function RunChat({ runID }: { runID: string }) {
     refetchInterval: 1000,
   })
   const data = detail.data
+  const runOwner = data?.run.caller_entity_id ?? ""
+  const ownRun = !runOwner || runOwner === auth.user?.entity_id
+  const owner = useIdentities(ownRun ? [] : [runOwner])
+  const ownerIdentity = owner.identities.find((identity) => identity.id === runOwner)
+  const authorAvatarURL = ownRun ? auth.user?.avatar_url : ownerIdentity?.avatar_url
+  const authorInitials = (ownerIdentity?.name ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "?"
   const events = eventQuery.data ?? []
   const streaming = liveOutputs(events, data)
   const working = data?.turns.some((turn) => activeStatus(turn.status)) ?? false
@@ -283,7 +296,8 @@ function RunChat({ runID }: { runID: string }) {
                 messageID={message.message_id}
                 role={message.role}
                 content={message.display_content || message.content}
-                userAvatarURL={auth.user?.avatar_url}
+                userAvatarURL={authorAvatarURL}
+                userLabel={ownRun ? "You" : authorInitials}
               />
             ))}
             {streaming.map(([id, content]) => (

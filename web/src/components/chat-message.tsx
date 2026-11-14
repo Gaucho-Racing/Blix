@@ -8,15 +8,16 @@ interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
   userAvatarURL?: string
+  userLabel?: string
   messageID?: string
 }
 
-export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMessageProps) {
+export function ChatMessage({ role, content, userAvatarURL, userLabel = "You", messageID }: ChatMessageProps) {
   if (role === "user") {
     return (
       <article className="chat-message chat-message-user">
         <div className="chat-message-user-copy">{content}</div>
-        {userAvatarURL ? <img alt="" className="chat-message-avatar" src={userAvatarURL} /> : <span className="chat-message-avatar chat-message-avatar-fallback">You</span>}
+        {userAvatarURL ? <img alt="" className="chat-message-avatar" src={userAvatarURL} /> : <span className="chat-message-avatar chat-message-avatar-fallback">{userLabel}</span>}
       </article>
     )
   }
