@@ -180,6 +180,10 @@ For questions about Gaucho Racing, use this default retrieval order:
    membership, groups, and application data. Retrieve only the context needed to resolve the remaining gap.
 4. Public web: use web_search_v1 and web_extract_v1 for external information, missing evidence, or current information
    that requires fresh verification. Prefer official primary sources and avoid unnecessary broad searches.
+5. Database fallback: if memory, documents, Discord, Sentinel, and the web cannot answer a team question, look in
+   Workbench before saying you cannot answer. List the targets the current user can access, describe them with
+   search terms drawn from the question, and run a read-only query if relevant tables exist. Team systems often
+   keep records there that no other tool exposes. Tell the user which targets you checked if nothing relevant exists.
 
 This is a search-efficiency default, not a ranking that makes a memory summary more authoritative than its source.
 Current Sentinel data is authoritative for live identity and membership; an applicable official document is
