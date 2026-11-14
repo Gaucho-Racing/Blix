@@ -99,6 +99,7 @@ class BlixV1Agent:
         output_schema=BlixV1Output.model_json_schema(mode="serialization"),
         model_profile="general_reasoning",
         tool_ids=(
+            "chart_render_v1",
             "current_time_v1",
             "agent_execution_v1",
             "discord_read_v1",
@@ -112,6 +113,8 @@ class BlixV1Agent:
             "sentinel_impersonate_v1",
             "web_extract_v1",
             "web_search_v1",
+            "workbench_catalog_v1",
+            "workbench_query_v1",
         ),
         subagent_ids=("deep_research_v1", "discord_research_v1", "knowledge_curator_v1", "blix_code_v1"),
     )

@@ -257,5 +257,5 @@ func (s *ExecutionService) DecideApproval(ctx context.Context, id, owner, decisi
 }
 
 func safeActionReplay(toolID string) bool {
-	return contains([]string{"current_time_v1", "agent_ask_v1", "agent_execution_v1", "discord_read_v1", "discord_search_v1", "knowledge_remember_v1", "knowledge_read_v1", "knowledge_evidence_read_v1", "knowledge_source_create_v1", "knowledge_source_record_create_v1", "knowledge_apply_v1", "sentinel_api_v1", "sentinel_identity_resolve_v1", "web_extract_v1", "web_search_v1"}, toolID)
+	return contains([]string{"current_time_v1", "agent_ask_v1", "agent_execution_v1", "discord_read_v1", "discord_search_v1", "knowledge_remember_v1", "knowledge_read_v1", "knowledge_evidence_read_v1", "knowledge_source_create_v1", "knowledge_source_record_create_v1", "knowledge_apply_v1", "sentinel_api_v1", "sentinel_identity_resolve_v1", "web_extract_v1", "web_search_v1", "workbench_catalog_v1", "chart_render_v1"}, toolID)
 }

@@ -32,10 +32,12 @@ from blix_agent_worker.clients import (
     TavilyClient,
     WorkerRegistration,
 )
+from blix_agent_worker.clients.depot import DepotClient
 from blix_agent_worker.clients.discord import DiscordClient
 from blix_agent_worker.clients.knowledge import KnowledgeClient
 from blix_agent_worker.clients.runway import AttemptLease
 from blix_agent_worker.clients.sandbox import CodingInput
+from blix_agent_worker.clients.workbench import WorkbenchClient
 from blix_agent_worker.llm import OpenAIResponsesModel
 from blix_agent_worker.llm.document_images import hydrate_document_images
 from blix_agent_worker.llm.retrying import RetryingModel
@@ -53,6 +55,7 @@ from blix_agent_worker.models.tool import ToolCall, ToolDefinition, ToolImpact, 
 from blix_agent_worker.tools import ToolRegistry, ToolRunner
 from blix_agent_worker.tools.agent_ask import AgentAskV1Tool, TaskInputRequiredError
 from blix_agent_worker.tools.agent_execution import AgentExecutionV1Tool
+from blix_agent_worker.tools.chart_render import ChartRenderV1Tool
 from blix_agent_worker.tools.current_time import CurrentTimeV1Tool
 from blix_agent_worker.tools.discord import DiscordReadV1Tool, DiscordSearchV1Tool, DiscordWebhookSendV1Tool
 from blix_agent_worker.tools.knowledge import (
@@ -71,6 +74,7 @@ from blix_agent_worker.tools.sentinel_identity import SentinelIdentityResolveV1T
 from blix_agent_worker.tools.sentinel_impersonate import SentinelImpersonateV1Tool
 from blix_agent_worker.tools.web_extract import WebExtractV1Tool
 from blix_agent_worker.tools.web_search import WebSearchV1Tool
+from blix_agent_worker.tools.workbench import WorkbenchAccess, WorkbenchCatalogV1Tool, WorkbenchQueryV1Tool
 
 logger = logging.getLogger("blix_agent_worker")
 DEFAULT_AGENT_WORKER_CONCURRENCY = 4
@@ -165,6 +169,8 @@ class ApiRuntime:
         sentinel: SentinelClient,
         knowledge: KnowledgeClient,
         discord: DiscordClient,
+        workbench: WorkbenchClient,
+        depot: DepotClient,
     ) -> None:
         self.models = models
         self.runway = runway
@@ -172,6 +178,8 @@ class ApiRuntime:
         self.sentinel = sentinel
         self.knowledge = knowledge
         self.discord = discord
+        self.workbench = workbench
+        self.depot = depot
 
     async def resolve_caller(self, execution: ExecutionContext) -> SentinelUser:
         token = os.environ.get("SENTINEL_SERVICE_ACCOUNT_TOKEN", "").strip()
@@ -386,10 +394,12 @@ class ApiRuntime:
         async def finish_action(call: ToolCall, result: ToolResult) -> None:
             await lease.post(f"actions/{action_ids[call.call_id]}/complete", {"result": result.model_dump(mode="json")})
 
+        workbench_access = WorkbenchAccess(self.workbench, self.sentinel, caller.id)
         tools = ToolRunner(
             ToolRegistry(
                 [
                     CurrentTimeV1Tool(),
+                    ChartRenderV1Tool(workbench_access, self.depot),
                     AgentExecutionV1Tool(lease),
                     AgentAskV1Tool(lease, model.acknowledged.append),
                     DiscordReadV1Tool(self.discord, self.sentinel),
@@ -409,6 +419,8 @@ class ApiRuntime:
                     SentinelImpersonateV1Tool(self.sentinel, caller.id),
                     WebExtractV1Tool(self.tavily),
                     WebSearchV1Tool(self.tavily),
+                    WorkbenchCatalogV1Tool(workbench_access),
+                    WorkbenchQueryV1Tool(workbench_access),
                 ]
             ),
             authorize=authorize,
@@ -766,13 +778,19 @@ async def run() -> None:
         sentinel = await stack.enter_async_context(SentinelClient())
         knowledge = await stack.enter_async_context(KnowledgeClient())
         discord = await stack.enter_async_context(DiscordClient())
+        workbench = await stack.enter_async_context(WorkbenchClient())
+        depot = await stack.enter_async_context(DepotClient())
         registration = await _register_worker(runway, worker_id, concurrency, concurrency - interactive)
         heartbeat = asyncio.create_task(
             _maintain_worker_registration(
                 runway, worker_id, concurrency, concurrency - interactive, registration.heartbeat_interval_ms
             )
         )
-        worker = AgentWorker(runway, worker_id, ApiRuntime(models, runway, tavily, sentinel, knowledge, discord))
+        worker = AgentWorker(
+            runway,
+            worker_id,
+            ApiRuntime(models, runway, tavily, sentinel, knowledge, discord, workbench, depot),
+        )
         semaphores = {
             "interactive": asyncio.Semaphore(interactive),
             "background": asyncio.Semaphore(concurrency - interactive),

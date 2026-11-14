@@ -1011,6 +1011,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 
 .document-page-image { display: block; margin-top: 12px; }
 .document-page-image img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: 10px; }
+.chat-message-image { display: block; margin-top: 12px; }
+.chat-message-image img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 10px; }
 .document-source-visual { margin-bottom: 16px; font-size: 14px; }
 .document-source-visual summary { cursor: pointer; font-weight: 600; }
 .document-source-visual pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }

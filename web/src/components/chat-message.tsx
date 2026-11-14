@@ -2,6 +2,8 @@ import { DocumentPageImage } from "@/components/document-page-image"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
+const depotPublicImage = /^https:\/\/depot\.gauchoracing\.com\/api\/download\/file_[0-9A-Za-z]{26}$/
+
 interface ChatMessageProps {
   role: "user" | "assistant"
   content: string
@@ -26,7 +28,9 @@ export function ChatMessage({ role, content, userAvatarURL, messageID }: ChatMes
         <span className="chat-message-author">Blix</span>
         <Markdown
           components={{
-            img: ({ src, alt }) => <DocumentPageImage src={src} alt={alt} />,
+            img: ({ src, alt }) => typeof src === "string" && depotPublicImage.test(src)
+              ? <a className="chat-message-image" href={src} target="_blank" rel="noreferrer"><img src={src} alt={alt || "Chart"} loading="lazy" /></a>
+              : <DocumentPageImage src={src} alt={alt} />,
             a: ({ children, ...properties }) => <a {...properties} rel="noreferrer" target="_blank">{children}</a>,
           }}
           remarkPlugins={[remarkGfm]}
