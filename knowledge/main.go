@@ -61,6 +61,16 @@ func run(configuration config.Config) error {
 	if configuration.EmbeddingAPIKey != "" {
 		client := embedding.New(configuration.EmbeddingEndpoint, configuration.EmbeddingAPIKey, configuration.EmbeddingModel, configuration.EmbeddingDimensions)
 		client.SendDimensions = configuration.EmbeddingSendDimensions
+		usage := service.NewUsageReporter(service.NewDocumentRuntimeClient(configuration.RunwayURL, os.Getenv("BLIX_INTERNAL_TOKEN")), func(err error) {
+			logger.SugarLogger.Warnf("embedding usage report: %v", err)
+		})
+		client.OnUsage = usage.RecordEmbedding
+		usageDone := make(chan struct{})
+		go func() {
+			defer close(usageDone)
+			usage.Run(ctx)
+		}()
+		defer func() { stop(); <-usageDone }()
 		namespace := client.Namespace(configuration.EmbeddingRevision)
 		embeddings = service.NewEmbeddingService(db, client, namespace, configuration.EmbeddingDimensions)
 		done := make(chan struct{})

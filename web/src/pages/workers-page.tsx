@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
-import { Activity, Boxes, Cpu, LoaderCircle, Search, ServerCog } from "lucide-react"
+import { Activity, Boxes, CircleDollarSign, Cpu, LoaderCircle, Search, ServerCog } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
 import { WorkerListEventStream } from "@/components/event-stream"
 import { StatusBadge } from "@/components/status-badge"
 import { listWorkers } from "@/lib/api"
+import { formatUSD } from "@/lib/costs"
 import { formatCompactNumber, formatDuration, formatRelative, formatTimestamp } from "@/lib/format"
 import type { WorkerStatus, WorkerSummary } from "@/lib/types"
 
@@ -46,6 +47,7 @@ export function WorkersPage() {
   const activeExecutions = onlineWorkers.reduce((total, worker) => total + worker.active_executions, 0)
   const totalCapacity = onlineWorkers.reduce((total, worker) => total + worker.concurrency, 0)
   const availableCapacity = Math.max(0, totalCapacity - activeExecutions)
+  const lifetimeSpend = workers.reduce((total, worker) => total + worker.cost_usd, 0)
 
   return (
     <div className="page workers-page">
@@ -63,6 +65,7 @@ export function WorkersPage() {
         <article className="stat-card"><Activity size={17} /><div><span>Active executions</span><strong>{activeExecutions}</strong></div></article>
         <article className="stat-card"><Boxes size={17} /><div><span>Available slots</span><strong>{availableCapacity}</strong></div></article>
         <article className="stat-card"><Cpu size={17} /><div><span>Total capacity</span><strong>{totalCapacity}</strong></div></article>
+        <article className="stat-card"><CircleDollarSign size={17} /><div><span>Lifetime spend</span><strong>{formatUSD(lifetimeSpend)}</strong></div></article>
       </section>
 
       <section className="panel workers-panel">
@@ -94,10 +97,11 @@ export function WorkersPage() {
                 <col className="worker-column-outcomes" />
                 <col className="worker-column-calls" />
                 <col className="worker-column-tokens" />
+                <col className="worker-column-cost" />
                 <col className="worker-column-heartbeat" />
               </colgroup>
               <thead>
-                <tr><th>Worker</th><th>Status</th><th>Lifetime</th><th>Workload</th><th>Outcomes</th><th>Calls</th><th>Tokens</th><th>Heartbeat</th></tr>
+                <tr><th>Worker</th><th>Status</th><th>Lifetime</th><th>Workload</th><th>Outcomes</th><th>Calls</th><th>Tokens</th><th>Spend</th><th>Heartbeat</th></tr>
               </thead>
               <tbody>
                 {visibleWorkers.map((worker) => {
@@ -126,6 +130,10 @@ export function WorkersPage() {
                       <td>
                         <strong className="table-primary">{formatCompactNumber(worker.input_tokens + worker.output_tokens)}</strong>
                         <span className="table-secondary">{formatCompactNumber(worker.input_tokens)} in · {formatCompactNumber(worker.output_tokens)} out</span>
+                      </td>
+                      <td>
+                        <strong className="table-primary">{formatUSD(worker.cost_usd)}</strong>
+                        <span className="table-secondary">models + tools</span>
                       </td>
                       <td title={formatTimestamp(worker.last_seen_at)}>
                         <strong className="table-primary">{formatRelative(worker.last_seen_at)}</strong>

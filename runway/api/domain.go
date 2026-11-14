@@ -267,6 +267,7 @@ func initializeDomainRoutes(router *gin.Engine, h *Handler, auth *service.AuthSe
 		}
 		c.JSON(http.StatusOK, gin.H{})
 	})
+	internal.POST("/usage", h.RecordExternalUsage)
 	internal.POST("/workers/register", h.RegisterWorker)
 	internal.POST("/workers/:workerID/heartbeat", h.HeartbeatWorker)
 	internal.POST("/attempts/:attemptID/claim", func(c *gin.Context) {
@@ -484,7 +485,16 @@ func (h *Handler) ListAdminRuns(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"runs": result})
+	ids := make([]string, 0, len(result))
+	for _, run := range result {
+		ids = append(ids, run.ID)
+	}
+	costs, err := h.usage.RunCosts(c.Request.Context(), ids)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runs": result, "costs": costs})
 }
 
 func (h *Handler) ListRunEvents(c *gin.Context) {

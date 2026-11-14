@@ -1,5 +1,7 @@
-import { Bot, ChevronRight, GitPullRequest, ServerCog, Workflow, Wrench } from "lucide-react"
+import { Bot, ChevronRight, CircleDollarSign, GitPullRequest, ServerCog, Workflow, Wrench } from "lucide-react"
 import { Link } from "react-router-dom"
+
+import { SpendOverview } from "@/components/spend-overview"
 
 const destinations = [
   {
@@ -21,6 +23,13 @@ const destinations = [
     href: "/admin/workers",
     icon: ServerCog,
     label: "Workers",
+    status: "Live",
+  },
+  {
+    description: "Track estimated spend by model, tool, agent, person, and run.",
+    href: "/admin/costs",
+    icon: CircleDollarSign,
+    label: "Costs",
     status: "Live",
   },
   {
@@ -49,6 +58,8 @@ export function AdminOverviewPage() {
           <p>Inspect and manage the services that power Blix.</p>
         </div>
       </header>
+
+      <SpendOverview description="Models, web tools, and embeddings, estimated from the price table" title="Spend" />
 
       <section className="admin-destination-grid" aria-label="Admin views">
         {destinations.map(({ description, href, icon: Icon, label, status }) => (

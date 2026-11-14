@@ -347,8 +347,7 @@ class ApiRuntime:
                         "payload": {
                             "sequence": sequence,
                             "model": base_model.model,
-                            "input_tokens": response.usage.input_tokens,
-                            "output_tokens": response.usage.output_tokens,
+                            **response.usage.model_dump(mode="json"),
                             "response": response.model_dump(mode="json", exclude={"continuation"}),
                         },
                     }
@@ -459,8 +458,7 @@ class ApiRuntime:
                             "payload": {
                                 "sequence": sequence,
                                 "model": model_name,
-                                "input_tokens": response.usage.input_tokens,
-                                "output_tokens": response.usage.output_tokens,
+                                **response.usage.model_dump(mode="json"),
                                 "response": response.model_dump(mode="json", exclude={"continuation"}),
                             },
                         }

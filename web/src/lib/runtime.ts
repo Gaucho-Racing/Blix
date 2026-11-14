@@ -76,8 +76,8 @@ export async function listChatRuns() {
 }
 export async function listAdminRuns() {
   return (
-    await api.get<{ runs: Run[] }>("/v1/admin/runs")
-  ).data.runs
+    await api.get<{ runs: Run[]; costs: Record<string, number> }>("/v1/admin/runs")
+  ).data
 }
 export async function createRun(documentIDs: string[] = []) {
   return (

@@ -100,7 +100,9 @@ class ModelMessage(ContractModel):
 
 class ModelUsage(ContractModel):
     input_tokens: Annotated[int, Field(ge=0)] = 0
+    cached_input_tokens: Annotated[int, Field(ge=0)] = 0
     output_tokens: Annotated[int, Field(ge=0)] = 0
+    reasoning_tokens: Annotated[int, Field(ge=0)] = 0
 
 
 class ModelContinuation(ContractModel):

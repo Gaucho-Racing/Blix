@@ -19,6 +19,7 @@ type Handler struct {
 	identities    *service.IdentityService
 	executions    *service.ExecutionService
 	workers       *service.WorkerService
+	usage         *service.UsageService
 	events        *service.EventHub
 	workerUpdates *service.WorkerHub
 }
@@ -31,11 +32,12 @@ func Run(
 	identities *service.IdentityService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
+	usage *service.UsageService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) error {
 	api := InitializeRouter(production)
-	InitializeRoutes(api, auth, identities, executions, workers, events, workerUpdates)
+	InitializeRoutes(api, auth, identities, executions, workers, usage, events, workerUpdates)
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           api,
@@ -76,6 +78,7 @@ func InitializeRoutes(
 	identities *service.IdentityService,
 	executions *service.ExecutionService,
 	workers *service.WorkerService,
+	usage *service.UsageService,
 	events *service.EventHub,
 	workerUpdates *service.WorkerHub,
 ) {
@@ -84,6 +87,7 @@ func InitializeRoutes(
 		identities:    identities,
 		executions:    executions,
 		workers:       workers,
+		usage:         usage,
 		events:        events,
 		workerUpdates: workerUpdates,
 	}
@@ -98,5 +102,7 @@ func InitializeRoutes(
 	router.GET("/v1/events/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamAllEvents)
 	router.GET("/v1/workers", RequireAuthentication(auth), RequireGroup(adminGroup), handler.ListWorkers)
 	router.GET("/v1/workers/stream", RequireStreamAuthentication(auth), RequireGroup(adminGroup), handler.StreamWorkers)
+	router.GET("/v1/admin/costs", RequireAuthentication(auth), RequireGroup(adminGroup), handler.GetCostSummary)
+	router.GET("/v1/admin/runs/:runID/costs", RequireAuthentication(auth), RequireGroup(adminGroup), handler.GetRunCosts)
 	initializeDomainRoutes(router, handler, auth)
 }

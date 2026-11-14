@@ -140,6 +140,9 @@ func (s *ExecutionService) FinishAction(ctx context.Context, id, actionID string
 		if err := tx.Save(&action).Error; err != nil {
 			return err
 		}
+		if err := s.usage.recordToolResult(tx, a, action, result); err != nil {
+			return err
+		}
 		if _, err := s.event(tx, a, "tool.result_v1", action.ID, json.RawMessage(result)); err != nil {
 			return err
 		}

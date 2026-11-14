@@ -29,6 +29,7 @@ var (
 type ExecutionService struct {
 	database          *gorm.DB
 	workers           *WorkerService
+	usage             *UsageService
 	leaseDuration     time.Duration
 	attemptReadyTopic string
 	eventTopic        string
@@ -36,8 +37,8 @@ type ExecutionService struct {
 	documents         DocumentScopeValidator
 }
 
-func NewExecutionService(db *gorm.DB, workers *WorkerService, cfg config.Config) *ExecutionService {
-	return &ExecutionService{database: db, workers: workers, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTRunEventTopicPrefix, notify: func() {}}
+func NewExecutionService(db *gorm.DB, workers *WorkerService, usage *UsageService, cfg config.Config) *ExecutionService {
+	return &ExecutionService{database: db, workers: workers, usage: usage, leaseDuration: cfg.ExecutionLeaseDuration, attemptReadyTopic: cfg.MQTTAttemptReadyTopic, eventTopic: cfg.MQTTRunEventTopicPrefix, notify: func() {}}
 }
 func (s *ExecutionService) SetDispatchNotifier(notify func()) { s.notify = notify }
 func mapDatabaseError(err error) error {
@@ -93,6 +94,9 @@ func (s *ExecutionService) event(tx *gorm.DB, a model.ExecutionAttempt, kind, en
 			return event, ErrInvalid
 		}
 		if err := s.workers.recordModelCall(tx, a.WorkerID, usage.InputTokens, usage.OutputTokens); err != nil {
+			return event, err
+		}
+		if err := s.usage.recordModelResponse(tx, a, event.ID, json.RawMessage(event.Payload)); err != nil {
 			return event, err
 		}
 	}

@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { Link, useSearchParams } from "react-router-dom"
 
+import { SpendOverview } from "@/components/spend-overview"
 import { StatusBadge } from "@/components/status-badge"
 import { formatTimestamp } from "@/lib/format"
 import { listChangesets } from "@/lib/knowledge"
@@ -77,6 +78,11 @@ export function KnowledgeReviewsPage() {
           </p>
         </div>
       </div>
+      <SpendOverview
+        category="embedding"
+        description="Indexing documents and wiki pages, plus search queries"
+        title="Embedding spend"
+      />
       <section className="panel knowledge-review-list">
         <div
           className="knowledge-review-filters"

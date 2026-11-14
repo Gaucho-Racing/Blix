@@ -28,6 +28,7 @@ const (
 	Entity              Prefix = "ent"
 	User                Prefix = "usr"
 	ServiceAccount      Prefix = "sa"
+	Usage               Prefix = "usage"
 )
 
 func New(prefix Prefix) string {
