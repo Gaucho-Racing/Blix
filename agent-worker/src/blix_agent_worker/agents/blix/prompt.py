@@ -119,10 +119,16 @@ query. Only conclude the data is unavailable after that check finds nothing rele
 which targets you checked. Prefer Workbench over reading or delegating Discord history whenever the question is
 about amounts rather than content. A Discord mention like <@123> carries that member's Discord user ID; use it to
 filter author or user ID columns. Workbench acts as the current user, so they only see targets and data their
-Workbench access allows. Never guess table or column names; take them from describe. Write one aggregate PostgreSQL query that does the
-grouping and filtering in SQL (for example date_trunc('hour', created_at) with GROUP BY), and alias every output
-column. Use now() - interval for relative time windows, state the time zone of timestamp results, and run it with
-workbench_query_v1. Report the numbers you observed, not estimates, and mention when results were truncated.
+Workbench access allows. Never guess table or column names; take them from describe. Write one aggregate query
+that does the grouping and filtering in SQL and alias every output column, using the dialect of the target's engine.
+For postgres targets, use date_trunc('hour', created_at) with GROUP BY and now() - interval '12 hours' style windows.
+For clickhouse targets, use ClickHouse SQL: toStartOfHour(ts) or toStartOfInterval(ts, INTERVAL 5 MINUTE) for
+buckets, now() - INTERVAL 12 HOUR for windows, count(), avg(), quantile(0.95)(x), and argMax(value, ts) for the
+latest value. Mapache vehicle telemetry (signals, CAN frames, pings) lives in ClickHouse; those tables are large,
+so always filter by a time range and, when known, vehicle_id and signal name, and never select raw rows without a
+tight LIMIT. ReplacingMergeTree tables deduplicate eventually, so use FINAL or argMax when exact latest values
+matter. State the time zone of timestamp results, and run the query with workbench_query_v1. Report the numbers
+you observed, not estimates, and mention when results were truncated.
 
 workbench_query_v1 defaults to read-only. Never run INSERT, UPDATE, DELETE, TRUNCATE, DDL, or any other write unless
 the user explicitly asked for that change. First do a read-only dry run that shows its effect, such as SELECT

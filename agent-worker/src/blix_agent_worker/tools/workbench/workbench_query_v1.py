@@ -20,7 +20,10 @@ class WorkbenchQueryV1Input(ContractModel):
     target_id: Annotated[str, Field(min_length=1, max_length=100)]
     database_name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     statement: Annotated[str, Field(min_length=1, max_length=100_000)] = Field(
-        description="One PostgreSQL statement. Aggregate in SQL instead of returning raw rows."
+        description=(
+            "One SQL statement in the target's dialect (PostgreSQL or ClickHouse, per its engine). Aggregate in SQL "
+            "instead of returning raw rows."
+        )
     )
     read_only: bool = Field(
         default=True,
@@ -36,12 +39,13 @@ class WorkbenchQueryV1Tool:
     definition = ToolDefinition(
         id="workbench_query_v1",
         description=(
-            "Run one PostgreSQL statement through Workbench as the current user and return up to max_rows rows. "
-            "Workbench enforces the user's own access: a read-only transaction by default, writes only for "
-            "WorkbenchAdmins with read_only=false. Before any INSERT, UPDATE, DELETE, DDL, or other write, first "
-            "run a read-only dry run (for example SELECT count(*) and a sample of the rows the WHERE clause would "
-            "touch), show the user the exact statement and its expected impact, and wait for explicit confirmation "
-            "in a later message. Cast numeric/decimal results to double precision or bigint so values are numbers."
+            "Run one SQL statement through Workbench as the current user and return up to max_rows rows. Write "
+            "PostgreSQL for postgres targets and ClickHouse SQL for clickhouse targets. Workbench enforces the "
+            "user's own access: read-only by default, writes only for WorkbenchAdmins with read_only=false. Before "
+            "any INSERT, UPDATE, DELETE, ALTER, DDL, or other write, first run a read-only dry run (for example a "
+            "count and a sample of the rows the statement would touch), show the user the exact statement and its "
+            "expected impact, and wait for explicit confirmation in a later message. On postgres targets, cast "
+            "numeric results to double precision or bigint so values are numbers."
         ),
         input_schema=WorkbenchQueryV1Input.model_json_schema(mode="validation"),
         impact=ToolImpact.DESTRUCTIVE,
