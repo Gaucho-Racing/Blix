@@ -2,9 +2,11 @@ import asyncio
 import json
 import logging
 import os
+import ssl
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import aiomqtt
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -78,6 +80,7 @@ from blix_agent_worker.tools.workbench import WorkbenchAccess, WorkbenchCatalogV
 
 logger = logging.getLogger("blix_agent_worker")
 DEFAULT_AGENT_WORKER_CONCURRENCY = 4
+ATTEMPT_READY_TOPIC = "blix/v1/attempts/ready"
 DEFAULT_SENTINEL_URL = "https://sso.gauchoracing.com"
 REQUIRED_BLIX_GROUP = "BlixUsers"
 
@@ -808,17 +811,22 @@ async def run() -> None:
                 pending.discard(dispatch.attempt_id)
                 pending_by_queue[dispatch.queue] -= 1
 
-        topic = os.environ.get("MQTT_ATTEMPT_READY_TOPIC", "blix/v1/attempts/ready").strip()
+        broker = urlsplit(os.environ.get("MQTT_URL", "mqtt://localhost:1883").strip())
+        if broker.scheme not in {"mqtt", "mqtts"} or not broker.hostname:
+            raise ValueError("MQTT_URL must be an mqtt:// or mqtts:// URL with a host.")
+        broker_port = broker.port or (8883 if broker.scheme == "mqtts" else 1883)
+        broker_tls = ssl.create_default_context() if broker.scheme == "mqtts" else None
         try:
             while True:
                 try:
                     async with aiomqtt.Client(
-                        os.environ.get("MQTT_HOST", "localhost"),
-                        port=int(os.environ.get("MQTT_PORT", "1883")),
+                        broker.hostname,
+                        port=broker_port,
                         identifier=worker_id,
+                        tls_context=broker_tls,
                     ) as client:
                         for queue in semaphores:
-                            await client.subscribe(f"$share/blix-api-{queue}/{topic}/{queue}", qos=1)
+                            await client.subscribe(f"$share/blix-api-{queue}/{ATTEMPT_READY_TOPIC}/{queue}", qos=1)
                         async for message in client.messages:
                             try:
                                 dispatch = DispatchMessage.model_validate_json(message.payload)

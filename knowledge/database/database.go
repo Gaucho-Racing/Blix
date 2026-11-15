@@ -13,12 +13,13 @@ import (
 
 func Open(ctx context.Context, configuration config.Config) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC",
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
 		configuration.DatabaseHost,
 		configuration.DatabaseUser,
 		configuration.DatabasePassword,
 		configuration.DatabaseName,
 		configuration.DatabasePort,
+		configuration.DatabaseSSLMode,
 	)
 	var db *gorm.DB
 	var err error
