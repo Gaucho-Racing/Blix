@@ -7,13 +7,6 @@ export type ExecutionStatus =
   | "failed"
   | "cancelled"
 
-export interface CallerContext {
-  entity_id?: string
-  entity_type?: "USER" | "SERVICE_ACCOUNT" | string
-  user_id?: string
-  service_account_id?: string
-}
-
 export interface IdentityApplicationSummary {
   id: string
   name: string
@@ -28,63 +21,6 @@ export interface IdentitySummary {
   username?: string
   avatar_url?: string
   application?: IdentityApplicationSummary
-}
-
-export interface VerifiedCallerUser {
-  id: string
-  entity_id: string
-  username?: string
-  first_name?: string
-  last_name?: string
-  email?: string
-  avatar_url?: string
-  initial_role?: string
-  major?: string
-  graduation_year?: number
-  groups?: string[]
-}
-
-export interface CallerVerifiedPayload {
-  caller_context: CallerContext
-  required_group: string
-  user: VerifiedCallerUser
-  worker_id: string
-}
-
-export interface ExecutionSummary {
-  execution_id: string
-  run_id: string
-  parent_execution_id: string | null
-  detached: boolean
-  agent_id: string
-  status: ExecutionStatus
-  version: number
-  claimed_by?: string
-  claimed_at?: string
-  lease_expires_at?: string
-  waiting_on_execution_id?: string
-  completed_at?: string
-  created_at: string
-  updated_at: string
-}
-
-export interface ExecutionDetails {
-  execution: ExecutionSummary
-  task?: unknown
-  state?: unknown
-  result?: unknown
-  has_provider_continuation: boolean
-}
-
-export interface ExecutionEvent {
-  position: number
-  event_id: string
-  run_id: string
-  execution_id: string
-  type: string
-  entity_id: string
-  payload: Record<string, unknown>
-  created_at: string
 }
 
 export type WorkerStatus = "offline" | "idle" | "active" | "saturated"

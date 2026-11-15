@@ -136,6 +136,47 @@ type modelDeltaPayload struct {
 	Delta string `json:"delta"`
 }
 
+type progressPayload struct {
+	Status string `json:"status"`
+}
+
+type codingTracePayload struct {
+	Kind    string `json:"kind"`
+	Content string `json:"content"`
+}
+
+type questionPayload struct {
+	ID        string `json:"id"`
+	Questions []struct {
+		Question string `json:"question"`
+	} `json:"questions"`
+}
+
+type modelFailurePayload struct {
+	Sequence       uint64   `json:"sequence"`
+	Attempt        uint64   `json:"attempt"`
+	MaxAttempts    uint64   `json:"max_attempts"`
+	RetryInSeconds *float64 `json:"retry_in_seconds"`
+	Error          struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
+type suspendedPayload struct {
+	WaitingTaskID string `json:"waiting_task_id"`
+	WaitingReason string `json:"waiting_reason"`
+}
+
+type approvalDecidedPayload struct {
+	ApprovalID string `json:"approval_id"`
+	Status     string `json:"status"`
+}
+
+type artifactPayload struct {
+	ArtifactID string `json:"artifact_id"`
+	Kind       string `json:"kind"`
+}
+
 type failedPayload struct {
 	Error struct {
 		Code    string `json:"code"`
@@ -168,6 +209,7 @@ type renderedActivity struct {
 type activityTree struct {
 	depthByExecution map[string]int
 	agentByExecution map[string]string
+	sessionByTask    map[string]string
 }
 
 func main() {
@@ -253,6 +295,7 @@ func newActivityTree(leadSessionID string) *activityTree {
 	return &activityTree{
 		depthByExecution: map[string]int{leadSessionID: 0},
 		agentByExecution: map[string]string{leadSessionID: agentID},
+		sessionByTask:    map[string]string{},
 	}
 }
 
@@ -271,6 +314,24 @@ func (t *activityTree) agentCall(parentSessionID string, childSessionID string, 
 	return parentDepth
 }
 
+func (t *activityTree) agentActivity(sessionID string, status string) (renderedActivity, bool) {
+	agent, ok := t.agentByExecution[sessionID]
+	depth := t.executionDepth(sessionID) - 1
+	if !ok || sessionID == "" || depth < 0 {
+		return renderedActivity{}, false
+	}
+	return newRenderedActivity("agent:"+sessionID, sessionID, depth, "agent", agent, status), true
+}
+
+func singleLine(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
 func applyEvent(
 	event executionEvent,
 	toolIDs map[string]string,
@@ -281,6 +342,9 @@ func applyEvent(
 		var payload agentCallPayload
 		if json.Unmarshal(event.Payload, &payload) == nil {
 			depth := tree.agentCall(event.SessionID, event.EntityID, payload.AgentID)
+			if payload.TaskID != "" {
+				tree.sessionByTask[payload.TaskID] = event.EntityID
+			}
 			label := payload.AgentID
 			if payload.Background {
 				label += " · background"
@@ -371,6 +435,111 @@ func applyEvent(
 			return "", nil, true, errors.New("Blix returned an invalid assistant message event")
 		}
 		return payload.Content, nil, true, nil
+	case "runtime.progress_v1":
+		var payload progressPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.Status != "" {
+			if activity, ok := tree.agentActivity(event.EntityID, strings.ReplaceAll(payload.Status, "_", " ")); ok {
+				return "", &activity, false, nil
+			}
+		}
+	case "runtime.coding_trace_v1":
+		var payload codingTracePayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.Content != "" {
+			activity := newRenderedActivity(
+				"trace:"+event.SessionID,
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"code",
+				singleLine(payload.Content, 96),
+				"",
+			)
+			return "", &activity, false, nil
+		}
+	case "runtime.question_v1":
+		var payload questionPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && len(payload.Questions) > 0 {
+			activity := newRenderedActivity(
+				"question:"+payload.ID,
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"question",
+				singleLine(payload.Questions[0].Question, 96),
+				"waiting",
+			)
+			return "", &activity, false, nil
+		}
+	case "task.steered_v1", "task.answered_v1":
+		status := "steered"
+		if event.Type == "task.answered_v1" {
+			status = "answered"
+		}
+		if activity, ok := tree.agentActivity(tree.sessionByTask[event.EntityID], status); ok {
+			return "", &activity, false, nil
+		}
+	case "model.failure_v1":
+		var payload modelFailurePayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			status := "failed"
+			if payload.RetryInSeconds != nil {
+				status = fmt.Sprintf("retrying in %.0fs", *payload.RetryInSeconds)
+			}
+			label := fmt.Sprintf("call %d", payload.Sequence)
+			if payload.Error.Code != "" {
+				label += " · " + payload.Error.Code
+			}
+			activity := newRenderedActivity(
+				fmt.Sprintf("model:%s:%d", event.SessionID, payload.Sequence),
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"model",
+				label,
+				status,
+			)
+			return "", &activity, false, nil
+		}
+	case "attempt.suspended_v1":
+		var payload suspendedPayload
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			label := "waiting for input"
+			if payload.WaitingTaskID != "" {
+				label = "waiting on " + tree.agentByExecution[tree.sessionByTask[payload.WaitingTaskID]]
+			}
+			activity := newRenderedActivity(
+				"execution:"+event.SessionID,
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"runtime",
+				strings.TrimSpace(label),
+				"suspended",
+			)
+			return "", &activity, false, nil
+		}
+	case "approval.decided_v1":
+		var payload approvalDecidedPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.ApprovalID != "" {
+			activity := newRenderedActivity(
+				"approval:"+payload.ApprovalID,
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"approval",
+				payload.ApprovalID,
+				payload.Status,
+			)
+			return "", &activity, false, nil
+		}
+	case "artifact.created_v1":
+		var payload artifactPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.ArtifactID != "" {
+			activity := newRenderedActivity(
+				"artifact:"+payload.ArtifactID,
+				event.SessionID,
+				tree.executionDepth(event.SessionID),
+				"artifact",
+				payload.Kind,
+				"created",
+			)
+			return "", &activity, false, nil
+		}
 	case "attempt.cancelled_v1":
 		return "", nil, true, errors.New("Turn cancelled")
 	case "attempt.failed_v1":
@@ -656,8 +825,8 @@ func renderHelpPanel(width int) string {
 		{command: "/help", detail: "Show available commands"},
 		{command: "/reset", detail: "Start a fresh run"},
 		{command: "/tasks", detail: "List run tasks"},
-		{command: "/approve", detail: "Approve publication: /approve <approval_id>"},
-		{command: "/reject", detail: "Reject publication: /reject <approval_id>"},
+		{command: "/approve", detail: "Approve a pending action: /approve <approval_id>"},
+		{command: "/reject", detail: "Reject a pending action: /reject <approval_id> [reason]"},
 		{command: "/runs", detail: "List saved runs"},
 		{command: "/resume", detail: "Continue: /resume <run_id>"},
 		{command: "/quit", detail: "End the session"},

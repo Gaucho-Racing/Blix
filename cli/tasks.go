@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -19,12 +20,59 @@ type runResumedMsg struct {
 	messages  []historyMessage
 	cursor    uint64
 	approvals []pendingApproval
+	actions   []approvalAction
 	err       error
 }
 type pendingApproval struct {
 	ID       string `json:"approval_id"`
 	ActionID string `json:"action_id"`
 }
+type approvalAction struct {
+	ID        string          `json:"action_id"`
+	ToolID    string          `json:"tool_id"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+const maxApprovalArgumentChars = 1200
+
+func approvalNotice(approvalID string, toolID string, arguments json.RawMessage) string {
+	if toolID == "" {
+		toolID = "unknown tool"
+	}
+	lines := []string{"Approval required  " + toolID}
+	var decoded map[string]any
+	if json.Unmarshal(arguments, &decoded) == nil && len(decoded) > 0 {
+		keys := make([]string, 0, len(decoded))
+		for key := range decoded {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			value, _ := json.Marshal(decoded[key])
+			if text, ok := decoded[key].(string); ok {
+				value = []byte(text)
+			}
+			lines = append(lines, "  "+key+": "+singleLine(string(value), 160))
+		}
+	} else if len(arguments) > 0 {
+		lines = append(lines, "  "+singleLine(string(arguments), maxApprovalArgumentChars))
+	}
+	lines = append(lines, "/approve "+approvalID+"  or  /reject "+approvalID+" [reason]")
+	return strings.Join(lines, "\n")
+}
+
+func (m *tuiModel) showApprovalDecision(event executionEvent) {
+	var payload approvalDecidedPayload
+	if json.Unmarshal(event.Payload, &payload) != nil || payload.ApprovalID == "" {
+		return
+	}
+	kind := transcriptNotice
+	if payload.Status != "approved" {
+		kind = transcriptError
+	}
+	m.appendBlock(kind, "Approval "+payload.ApprovalID+" "+payload.Status, nil)
+}
+
 type historyMessage struct {
 	Role     string `json:"role"`
 	Content  string `json:"content"`
@@ -38,7 +86,7 @@ func (m *tuiModel) showApproval(event executionEvent) {
 		Arguments  json.RawMessage `json:"arguments"`
 	}
 	if json.Unmarshal(event.Payload, &payload) == nil {
-		m.appendBlock(transcriptNotice, fmt.Sprintf("Approval required: %s\n%s\n/approve %s  or  /reject %s", payload.ToolID, payload.Arguments, payload.ApprovalID, payload.ApprovalID), nil)
+		m.appendBlock(transcriptNotice, approvalNotice(payload.ApprovalID, payload.ToolID, payload.Arguments), nil)
 	}
 }
 func (m *tuiModel) handleTaskCommand(command string) (tea.Cmd, bool) {
@@ -113,12 +161,13 @@ func resumeRunCmd(ctx context.Context, api *client, id string) tea.Cmd {
 			Run       run               `json:"run"`
 			Messages  []historyMessage  `json:"messages"`
 			Approvals []pendingApproval `json:"pending_approvals"`
+			Actions   []approvalAction  `json:"approval_actions"`
 		}
 		err := api.request(ctx, http.MethodGet, "/api/v1/runs/"+url.PathEscape(id), nil, &response)
 		var cursor uint64
 		for _, message := range response.Messages {
 			cursor = max(cursor, message.Position)
 		}
-		return runResumedMsg{current: createdRun{Run: response.Run, Session: agentSession{ID: response.Run.LeadSessionID}}, messages: response.Messages, cursor: cursor, approvals: response.Approvals, err: err}
+		return runResumedMsg{current: createdRun{Run: response.Run, Session: agentSession{ID: response.Run.LeadSessionID}}, messages: response.Messages, cursor: cursor, approvals: response.Approvals, actions: response.Actions, err: err}
 	}
 }

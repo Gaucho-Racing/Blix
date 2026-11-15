@@ -137,31 +137,10 @@ h1, h2, h3, p { margin-top: 0; }
 .chat-message-body table { width: 100%; border-collapse: collapse; }
 .chat-message-body th, .chat-message-body td { padding: 7px 9px; border: 1px solid var(--border); text-align: left; }
 .chat-message-body th { background: var(--surface-subtle); }
-.chat-activity { margin-left: 43px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
-.chat-activity summary { min-height: 42px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); cursor: pointer; list-style: none; font-size: 11px; font-weight: 620; }
-.chat-activity summary::-webkit-details-marker { display: none; }
-.chat-activity.active { border-color: var(--border-strong); background: var(--surface-subtle); }
-.chat-activity.failed { border-color: #f3cbd2; background: var(--red-soft); }
-.chat-activity-state { display: inline-flex; align-items: center; gap: 9px; }
-.chat-activity-summary-meta { display: inline-flex; align-items: center; gap: 12px; color: var(--dim); font: 9px "Geist Mono Variable"; white-space: nowrap; }
-.chat-activity.active .chat-activity-state { color: var(--muted); }
-.chat-activity.failed .chat-activity-state { color: var(--red); }
-.chat-activity-chevron { color: var(--dim); transition: transform .15s ease; }
-.chat-activity[open] .chat-activity-chevron { transform: rotate(180deg); }
 .thinking-orbit { width: 18px; display: flex; align-items: center; justify-content: space-between; }
 .thinking-orbit i { width: 4px; height: 4px; border-radius: 50%; background: var(--dim); animation: thinking-bounce 1s ease-in-out infinite; }
 .thinking-orbit i:nth-child(2) { animation-delay: .14s; }
 .thinking-orbit i:nth-child(3) { animation-delay: .28s; }
-.chat-activity-list { padding: 3px 11px 9px; display: grid; align-content: start; }
-.chat-activity[open] .chat-activity-list { max-height: 184px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.chat-activity-item { min-height: 45px; padding: 7px 1px; display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--border); }
-.chat-activity-icon { width: 27px; height: 27px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; color: var(--dim); background: var(--surface-raised); }
-.chat-activity-copy { min-width: 0; flex: 1; display: grid; gap: 2px; }
-.chat-activity-copy strong, .chat-activity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-activity-copy strong { color: var(--text); font-size: 10px; font-weight: 620; }
-.chat-activity-copy small { color: var(--dim); font-size: 9px; }
-.chat-activity-status { flex: 0 0 auto; color: var(--dim); font: 8px "Geist Mono Variable"; text-transform: uppercase; }
-.chat-activity-item.danger .chat-activity-icon, .chat-activity-item.danger .chat-activity-status { color: var(--red); }
 .chat-response-error { margin-left: 43px; padding: 11px 12px; display: flex; align-items: flex-start; gap: 8px; border: 1px solid #f3cbd2; border-radius: 9px; color: var(--red); background: var(--red-soft); font-size: 11px; line-height: 1.5; }
 .chat-response-error svg { flex: 0 0 auto; margin-top: 1px; }
 .prompt-composer { width: min(780px, 100%); margin: auto auto 0; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-md); transition: border-color .15s ease, box-shadow .15s ease; }
@@ -650,7 +629,7 @@ h1, h2, h3, p { margin-top: 0; }
   .chat-scroll { padding: 34px 20px 24px; }
   .chat-prompt-composer { margin: 0 13px 13px; }
   .composer-hint { display: none; }
-  .chat-activity, .chat-response-error { margin-left: 0; }
+  .chat-response-error { margin-left: 0; }
   .chat-welcome h2 { font-size: 29px; }
   .source-strip span:last-child { display: none; }
   .prompt-grid { grid-template-columns: 1fr; }

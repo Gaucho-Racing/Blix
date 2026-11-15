@@ -99,6 +99,56 @@ export function ChatPage() {
   return <RunChat key={runID || "new"} runID={runID} />
 }
 
+const activityTypes = new Set([
+  "tool.call_v1",
+  "tool.result_v1",
+  "task.created_v1",
+  "task.result_v1",
+  "runtime.progress_v1",
+  "model.failure_v1",
+  "approval.decided_v1",
+  "attempt.lease_expired_v1",
+  "attempt.failed_v1",
+])
+
+function readableID(value: unknown, fallback: string) {
+  return typeof value === "string" && value
+    ? value.replace(/_v\d+$/, "").replaceAll("_", " ")
+    : fallback
+}
+
+function activityLabel(event: RuntimeEvent): [string, string] {
+  const payload = event.payload
+  const status = typeof payload.status === "string" ? payload.status.replaceAll("_", " ") : ""
+  switch (event.type) {
+    case "tool.call_v1":
+      return [readableID(payload.tool_id, "tool"), "started"]
+    case "tool.result_v1":
+      return [readableID(payload.tool_id, "tool"), status || "finished"]
+    case "task.created_v1":
+      return [readableID(payload.agent_id, "agent"), payload.background === true ? "started in background" : "started"]
+    case "task.result_v1":
+      return [readableID(payload.agent_id, "agent"), status || "finished"]
+    case "runtime.progress_v1":
+      return ["coding agent", status || "working"]
+    case "model.failure_v1":
+      return [
+        "model call",
+        typeof payload.retry_in_seconds === "number"
+          ? `retrying in ${Math.round(payload.retry_in_seconds)}s`
+          : "failed",
+      ]
+    case "approval.decided_v1":
+      return ["approval", status || "decided"]
+    case "attempt.lease_expired_v1":
+      return ["agent attempt", "requeued"]
+    case "attempt.failed_v1":
+      return ["agent attempt", "failed"]
+    default:
+      return [event.type, status]
+  }
+}
+
 function RunChat({ runID }: { runID: string }) {
   const auth = useAuth()
   const navigate = useNavigate()
@@ -194,14 +244,7 @@ function RunChat({ runID }: { runID: string }) {
     onSuccess: refresh,
   })
   const activity = events
-    .filter((event) =>
-      [
-        "tool.call_v1",
-        "tool.result_v1",
-        "task.created_v1",
-        "attempt.failed_v1",
-      ].includes(event.type),
-    )
+    .filter((event) => activityTypes.has(event.type))
     .slice(-8)
   useEffect(() => {
     if (hash && focusedMessage.current !== hash) {
@@ -477,22 +520,14 @@ function RunChat({ runID }: { runID: string }) {
             <details>
               <summary>Recent activity</summary>
               <ul className="runtime-activity">
-                {activity.map((event) => (
-                  <li key={event.event_id}>
-                    {typeof event.payload.tool_id === "string"
-                      ? event.payload.tool_id
-                          .replaceAll("_v1", "")
-                          .replaceAll("_", " ")
-                      : event.type.split(".")[0]}{" "}
-                    <small>
-                      {typeof event.payload.status === "string"
-                        ? event.payload.status
-                        : event.type.includes("result")
-                          ? "finished"
-                          : "started"}
-                    </small>
-                  </li>
-                ))}
+                {activity.map((event) => {
+                  const [label, status] = activityLabel(event)
+                  return (
+                    <li key={event.event_id}>
+                      {label} <small>{status}</small>
+                    </li>
+                  )
+                })}
               </ul>
             </details>
           )}

@@ -212,8 +212,13 @@ func (m *tuiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.appendBlock(transcriptTurn, "", &turnView{startedAt: time.Now(), finishedAt: time.Now(), response: entry.Content})
 			}
 		}
+		actions := make(map[string]approvalAction, len(message.actions))
+		for _, action := range message.actions {
+			actions[action.ID] = action
+		}
 		for _, approval := range message.approvals {
-			m.appendBlock(transcriptNotice, fmt.Sprintf("Pending approval %s for action %s\n/approve %s or /reject %s", approval.ID, approval.ActionID, approval.ID, approval.ID), nil)
+			action := actions[approval.ActionID]
+			m.appendBlock(transcriptNotice, approvalNotice(approval.ID, action.ToolID, action.Arguments), nil)
 		}
 		return m, pollBackgroundEventsCmd(m.ctx, m.api, m.current.Run.ID, message.cursor)
 	case spinner.TickMsg:
@@ -495,6 +500,9 @@ func (m *tuiModel) handleExecutionEvents(message executionEventsMsg) tea.Cmd {
 		if event.Type == "approval.requested_v1" {
 			m.showApproval(event)
 		}
+		if event.Type == "approval.decided_v1" {
+			m.showApprovalDecision(event)
+		}
 		if event.Type == "message.assistant_v1" && event.TurnID != m.activeTurn.backendTurnID {
 			var payload assistantPayload
 			if json.Unmarshal(event.Payload, &payload) == nil {
@@ -562,6 +570,8 @@ func (m *tuiModel) handleBackgroundEvents(message backgroundEventsMsg) tea.Cmd {
 		switch event.Type {
 		case "approval.requested_v1":
 			m.showApproval(event)
+		case "approval.decided_v1":
+			m.showApprovalDecision(event)
 		case "task.created_v1":
 			var payload agentCallPayload
 			if json.Unmarshal(event.Payload, &payload) == nil && payload.Background {
@@ -1096,12 +1106,15 @@ func renderActivityLine(activity renderedActivity, width int) string {
 
 	status := strings.ToLower(strings.TrimSpace(activity.status))
 	statusStyle := mutedStyle
-	switch status {
-	case "succeeded", "completed", "complete", "done", "ok":
-		statusStyle = lipgloss.NewStyle().Foreground(green)
-	case "queued", "waiting", "requeued":
+	if strings.HasPrefix(status, "retrying") {
 		statusStyle = lipgloss.NewStyle().Foreground(amber)
-	case "failed", "error":
+	}
+	switch status {
+	case "succeeded", "completed", "complete", "done", "ok", "approved", "answered", "created":
+		statusStyle = lipgloss.NewStyle().Foreground(green)
+	case "queued", "waiting", "requeued", "suspended", "steered", "waiting for input":
+		statusStyle = lipgloss.NewStyle().Foreground(amber)
+	case "failed", "error", "rejected", "denied", "cancelled":
 		statusStyle = lipgloss.NewStyle().Foreground(red)
 	case "running", "working":
 		statusStyle = lipgloss.NewStyle().Foreground(pink)
