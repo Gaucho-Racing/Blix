@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
 const knowledgeProxy = {
-  target: process.env.WEB_KNOWLEDGE_URL ?? "http://knowledge:9988",
+  target: process.env.KNOWLEDGE_URL ?? "http://knowledge:9988",
   changeOrigin: true,
   rewrite: (requestPath: string) => requestPath.replace(/^\/api\/knowledge/, ""),
 }
@@ -28,7 +28,7 @@ export default defineConfig({
       "/api/knowledge/v1": knowledgeProxy,
       "/api/knowledge/ping": knowledgeProxy,
       "/api": {
-        target: process.env.WEB_RUNWAY_URL ?? "http://127.0.0.1:10400",
+        target: process.env.RUNWAY_URL ?? "http://127.0.0.1:10400",
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/api/, ""),
       },

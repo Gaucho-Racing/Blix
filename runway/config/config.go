@@ -17,6 +17,7 @@ type Config struct {
 	DatabaseUser            string
 	DatabasePassword        string
 	DatabaseName            string
+	DatabaseSSLMode         string
 	MQTTURL                 string
 	MQTTClientID            string
 	MQTTAttemptReadyTopic   string
@@ -66,10 +67,11 @@ func Load() (Config, error) {
 		DatabaseUser:            value("DATABASE_USER", "postgres"),
 		DatabasePassword:        value("DATABASE_PASSWORD", "password"),
 		DatabaseName:            value("DATABASE_NAME", "blix"),
+		DatabaseSSLMode:         value("DATABASE_SSL_MODE", "disable"),
 		MQTTURL:                 value("MQTT_URL", "mqtt://localhost:1883"),
-		MQTTClientID:            value("MQTT_CLIENT_ID", "blix-runway"),
-		MQTTAttemptReadyTopic:   value("MQTT_ATTEMPT_READY_TOPIC", "blix/v1/attempts/ready"),
-		MQTTRunEventTopicPrefix: strings.TrimRight(value("MQTT_RUN_EVENT_TOPIC_PREFIX", "blix/v1/runs"), "/"),
+		MQTTClientID:            "blix-runway",
+		MQTTAttemptReadyTopic:   "blix/v1/attempts/ready",
+		MQTTRunEventTopicPrefix: "blix/v1/runs",
 		OutboxPollInterval:      pollInterval,
 		ExecutionLeaseDuration:  leaseDuration,
 		LeaseSweepInterval:      leaseSweepInterval,
@@ -81,11 +83,13 @@ func Load() (Config, error) {
 		SentinelScopes:          value("SENTINEL_SCOPES", "user:read groups:read"),
 		SentinelServiceToken:    value("SENTINEL_SERVICE_ACCOUNT_TOKEN", ""),
 	}
+	switch configuration.DatabaseSSLMode {
+	case "disable", "require", "verify-ca", "verify-full":
+	default:
+		return Config{}, fmt.Errorf("DATABASE_SSL_MODE must be disable, require, verify-ca, or verify-full")
+	}
 	if !strings.HasPrefix(configuration.MQTTURL, "mqtt://") && !strings.HasPrefix(configuration.MQTTURL, "mqtts://") {
 		return Config{}, fmt.Errorf("MQTT_URL must use mqtt or mqtts")
-	}
-	if configuration.MQTTRunEventTopicPrefix == "" || strings.ContainsAny(configuration.MQTTRunEventTopicPrefix, "+#") {
-		return Config{}, fmt.Errorf("MQTT_RUN_EVENT_TOPIC_PREFIX must be a concrete MQTT topic prefix")
 	}
 	if err := validateHTTPURL(configuration.SentinelURL); err != nil {
 		return Config{}, fmt.Errorf("SENTINEL_URL %w", err)

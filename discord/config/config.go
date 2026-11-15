@@ -19,7 +19,7 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	c := Config{Environment: value("ENV", "PROD"), Port: value("PORT", "9966"), BotToken: os.Getenv("DISCORD_BOT_TOKEN"), GuildID: os.Getenv("DISCORD_GUILD_ID"), RunwayURL: os.Getenv("RUNWAY_URL"), PublicURL: os.Getenv("BLIX_PUBLIC_URL"), InternalToken: os.Getenv("BLIX_INTERNAL_TOKEN"), SentinelURL: os.Getenv("SENTINEL_URL"), SentinelClientID: os.Getenv("SENTINEL_CLIENT_ID"), SentinelServiceToken: os.Getenv("SENTINEL_SERVICE_ACCOUNT_TOKEN"), DatabaseHost: os.Getenv("DATABASE_HOST"), DatabasePort: os.Getenv("DATABASE_PORT"), DatabaseUser: os.Getenv("DATABASE_USER"), DatabasePassword: os.Getenv("DATABASE_PASSWORD"), DatabaseName: os.Getenv("DATABASE_NAME"), DatabaseSSLMode: value("DATABASE_SSL_MODE", "disable")}
+	c := Config{Environment: value("ENV", "PROD"), Port: value("PORT", "9966"), BotToken: os.Getenv("DISCORD_BOT_TOKEN"), GuildID: os.Getenv("DISCORD_GUILD_ID"), RunwayURL: os.Getenv("RUNWAY_URL"), PublicURL: os.Getenv("BLIX_PUBLIC_URL"), InternalToken: os.Getenv("BLIX_INTERNAL_TOKEN"), SentinelURL: value("SENTINEL_URL", "https://sso.gauchoracing.com"), SentinelClientID: os.Getenv("SENTINEL_CLIENT_ID"), SentinelServiceToken: os.Getenv("SENTINEL_SERVICE_ACCOUNT_TOKEN"), DatabaseHost: os.Getenv("DATABASE_HOST"), DatabasePort: os.Getenv("DATABASE_PORT"), DatabaseUser: os.Getenv("DATABASE_USER"), DatabasePassword: os.Getenv("DATABASE_PASSWORD"), DatabaseName: os.Getenv("DATABASE_NAME"), DatabaseSSLMode: value("DATABASE_SSL_MODE", "disable")}
 	port, err := strconv.ParseUint(c.Port, 10, 16)
 	if err != nil || port == 0 {
 		return c, fmt.Errorf("PORT must be a valid nonzero TCP port")

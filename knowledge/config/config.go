@@ -26,6 +26,7 @@ type Config struct {
 	DatabaseUser                string
 	DatabasePassword            string
 	DatabaseName                string
+	DatabaseSSLMode             string
 	WikiRepositoryURL           string
 	WikiRepositoryBranch        string
 	WikiRepositoryPath          string
@@ -72,6 +73,7 @@ func Load() (Config, error) {
 		DatabaseUser:                value("DATABASE_USER", "postgres"),
 		DatabasePassword:            value("DATABASE_PASSWORD", "password"),
 		DatabaseName:                value("DATABASE_NAME", "blix"),
+		DatabaseSSLMode:             value("DATABASE_SSL_MODE", "disable"),
 		WikiRepositoryURL:           value("WIKI_REPOSITORY_URL", "https://github.com/gaucho-racing/blixwiki.git"),
 		WikiRepositoryBranch:        value("WIKI_REPOSITORY_BRANCH", "main"),
 		WikiRepositoryPath:          value("WIKI_REPOSITORY_PATH", ".data/wiki"),
@@ -100,6 +102,11 @@ func Load() (Config, error) {
 	}
 	if configuration.WikiRepositoryPath == "" {
 		return Config{}, fmt.Errorf("WIKI_REPOSITORY_PATH cannot be empty")
+	}
+	switch configuration.DatabaseSSLMode {
+	case "disable", "require", "verify-ca", "verify-full":
+	default:
+		return Config{}, fmt.Errorf("DATABASE_SSL_MODE must be disable, require, verify-ca, or verify-full")
 	}
 	sentinelURL, err := url.ParseRequestURI(configuration.SentinelURL)
 	if err != nil || sentinelURL.Host == "" || (sentinelURL.Scheme != "http" && sentinelURL.Scheme != "https") ||
