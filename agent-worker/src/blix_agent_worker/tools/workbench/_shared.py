@@ -14,6 +14,9 @@ _HTTP_URL_VALIDATOR = TypeAdapter(HttpUrl)
 
 _INTEGER_TYPE_OIDS = frozenset({20, 21, 23, 26})
 _FLOAT_TYPE_OIDS = frozenset({700, 701, 1700})
+_CLICKHOUSE_WRAPPERS = ("Nullable(", "LowCardinality(")
+_CLICKHOUSE_INTEGER_TYPES = frozenset({f"{sign}Int{bits}" for sign in ("", "U") for bits in (8, 16, 32, 64, 128, 256)})
+_CLICKHOUSE_FLOAT_TYPES = frozenset({"Float32", "Float64", "BFloat16"})
 
 
 class WorkbenchToolError(Exception):
@@ -41,7 +44,8 @@ class WorkbenchColumn(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     name: str
-    data_type_oid: int
+    data_type_oid: int = 0
+    data_type: str = ""
 
 
 class WorkbenchQueryResult(BaseModel):
@@ -57,19 +61,36 @@ class WorkbenchQueryResult(BaseModel):
     truncated: bool = False
 
     def typed_rows(self) -> list[list[JsonValue]]:
-        oids = [column.data_type_oid for column in self.columns]
-        return [[_coerce(value, oid) for value, oid in zip(row, oids, strict=False)] for row in self.rows]
+        kinds = [_numeric_kind(column) for column in self.columns]
+        return [[_coerce(value, kind) for value, kind in zip(row, kinds, strict=False)] for row in self.rows]
 
 
-def _coerce(value: JsonValue, oid: int) -> JsonValue:
+def _numeric_kind(column: WorkbenchColumn) -> str:
+    if column.data_type:
+        data_type = column.data_type
+        while data_type.startswith(_CLICKHOUSE_WRAPPERS) and data_type.endswith(")"):
+            data_type = data_type[data_type.index("(") + 1 : -1]
+        if data_type in _CLICKHOUSE_INTEGER_TYPES:
+            return "integer"
+        if data_type in _CLICKHOUSE_FLOAT_TYPES or data_type.startswith("Decimal"):
+            return "float"
+        return ""
+    if column.data_type_oid in _INTEGER_TYPE_OIDS:
+        return "integer"
+    if column.data_type_oid in _FLOAT_TYPE_OIDS:
+        return "float"
+    return ""
+
+
+def _coerce(value: JsonValue, kind: str) -> JsonValue:
     if not isinstance(value, str):
         return value
-    if oid in _INTEGER_TYPE_OIDS:
+    if kind == "integer":
         try:
             return int(value)
         except ValueError:
             return value
-    if oid in _FLOAT_TYPE_OIDS:
+    if kind == "float":
         try:
             number = Decimal(value)
         except InvalidOperation:

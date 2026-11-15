@@ -92,6 +92,7 @@ class _Target(BaseModel):
 
     id: str
     name: str
+    engine: str = "postgres"
     environment: str = ""
     database_name: str = ""
 
@@ -102,7 +103,8 @@ class WorkbenchCatalogV1Tool:
         description=(
             "Discover what can be queried in Workbench, Gaucho Racing's database tool, acting as the current user. "
             "Start with list_targets, then describe a target with search or schema_name to find relevant tables "
-            "and columns before writing SQL for workbench_query_v1."
+            "and columns before writing SQL for workbench_query_v1. Each target reports its engine (postgres or "
+            "clickhouse), which decides the SQL dialect; for ClickHouse targets, schema_name is the database name."
         ),
         input_schema=WorkbenchCatalogV1Input.model_json_schema(mode="validation"),
         idempotent=True,
