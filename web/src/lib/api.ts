@@ -2,7 +2,6 @@ import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios"
 
 import { clearSession, loadSession, saveSession, type TokenResponse } from "@/lib/session"
 import type {
-  ExecutionDetails,
   IdentitySummary,
   WorkerSummary,
 } from "@/lib/types"
@@ -77,11 +76,6 @@ export async function listWorkers(): Promise<WorkerSummary[]> {
     params: { limit: 100 },
   })
   return data.workers
-}
-
-export async function getExecution(executionID: string): Promise<ExecutionDetails> {
-  const { data } = await api.get<ExecutionDetails>(`/v1/executions/${executionID}`)
-  return data
 }
 
 export async function resolveIdentities(entityIDs: string[]): Promise<IdentitySummary[]> {

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 
 import { api } from "@/lib/api"
 import { loadSession } from "@/lib/session"
-import type { ExecutionEvent, WorkerSummary } from "@/lib/types"
+import type { WorkerSummary } from "@/lib/types"
 
 type StreamStatus = "connecting" | "live" | "reconnecting"
 
@@ -55,76 +55,6 @@ function openEventStream<T>(
     source?.close()
     if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
   }
-}
-
-interface RunListEventStreamProps {
-  initialCursor: number
-}
-
-export function RunListEventStream({ initialCursor }: RunListEventStreamProps) {
-  const queryClient = useQueryClient()
-  const [cursor] = useState(initialCursor)
-  const [status, setStatus] = useState<StreamStatus>("connecting")
-
-  useEffect(() => {
-    let refreshTimer: number | undefined
-    const close = openEventStream<ExecutionEvent>(`/api/v1/events/stream?after=${cursor}`, () => {
-      if (refreshTimer !== undefined) return
-      refreshTimer = window.setTimeout(() => {
-        refreshTimer = undefined
-        void queryClient.invalidateQueries({ queryKey: ["runs"] })
-      }, 1_000)
-    }, setStatus)
-    return () => {
-      close()
-      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
-    }
-  }, [cursor, queryClient])
-
-  return <StreamIndicator status={status} />
-}
-
-interface RunEventStreamProps {
-  runID: string
-  initialCursor: number
-}
-
-export function RunEventStream({ runID, initialCursor }: RunEventStreamProps) {
-  const queryClient = useQueryClient()
-  const [stream] = useState({ runID, cursor: initialCursor })
-  const [status, setStatus] = useState<StreamStatus>("connecting")
-
-  useEffect(() => {
-    let refreshTimer: number | undefined
-    const pendingExecutionIDs = new Set<string>()
-    const close = openEventStream<ExecutionEvent>(
-      `/api/v1/runs/${stream.runID}/events/stream?after=${stream.cursor}`,
-      (event) => {
-        pendingExecutionIDs.add(event.execution_id)
-        queryClient.setQueryData<ExecutionEvent[]>(["run-events", stream.runID], (current = []) => {
-          if (current.some((existing) => existing.position === event.position)) return current
-          return [...current, event]
-        })
-        if (refreshTimer !== undefined) return
-        refreshTimer = window.setTimeout(() => {
-          refreshTimer = undefined
-          void queryClient.invalidateQueries({ queryKey: ["run", stream.runID] })
-          void queryClient.invalidateQueries({ queryKey: ["my-runs"] })
-          for (const executionID of pendingExecutionIDs) {
-            void queryClient.invalidateQueries({ queryKey: ["execution", executionID] })
-          }
-          pendingExecutionIDs.clear()
-        }, 500)
-      },
-      setStatus,
-    )
-    return () => {
-      close()
-      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
-    }
-  }, [queryClient, stream])
-
-  return <StreamIndicator status={status} />
 }
 
 export function WorkerListEventStream() {
